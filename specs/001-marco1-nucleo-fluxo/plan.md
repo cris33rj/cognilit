@@ -49,6 +49,14 @@ para varredura; mobile-first como baseline responsivo.
 por Revisão (SC-012); decisão de triagem com latência percebida ~zero (updates
 otimistas com rollback).
 
+**Capacidades de fila e acessibilidade do workbench** (FR-039/040/041, SC-013): a
+fila suporta **seleção múltipla + ações em lote** (decisões humanas, mesmas regras
+das individuais — motivo obrigatório no Texto completo, reversíveis por item,
+auditadas); **densidade configurável** (compacto/confortável) preservando o
+teclado; e **acessibilidade** (ARIA em listas/grids e popovers, foco visível,
+operação 100% por teclado) verificada como portão de qualidade. Componentes em
+`src/components/workbench/` e `src/components/ai/`.
+
 **Constraints**: RLS obrigatória desde a origem; nenhuma Edge Function executa
 trabalho pesado (enfileira → worker processa); IA só via `LLMProvider`
 (sem SDK direto, sem raw write); saída de IA em pt-BR com proveniência; "não

@@ -369,6 +369,20 @@ e consistência número-a-número.
 - **FR-029**: O sistema SHOULD oferecer ordenação opcional da fila (incluindo por
   pontuação de prioridade da IA) e filtros por estado/fonte/termo, sem que a
   ordenação substitua a decisão humana.
+- **FR-039**: O sistema MUST permitir **seleção múltipla** de registros na fila e
+  **ações em lote** sobre a seleção (no mínimo: incluir, excluir e marcar dúvida em
+  lote na triagem; e as decisões de dedup aplicáveis). Ações em lote são decisões
+  **humanas** e seguem as mesmas regras das decisões individuais (motivo de
+  exclusão obrigatório no Texto completo, reversibilidade por item, trilha de
+  auditoria). Origem de design: DESIGN-DECISIONS §4.
+- **FR-040**: O sistema SHOULD oferecer **densidade de exibição configurável** das
+  filas (ao menos os modos "compacto" e "confortável"), preservando a navegação por
+  teclado em qualquer densidade. Origem de design: DESIGN-DECISIONS §P3/§7.5.
+- **FR-041**: As superfícies interativas do workbench (filas, detalhe e popovers de
+  IA) MUST ser acessíveis por leitor de tela e teclado: papéis/atributos **ARIA**
+  apropriados em listas/grids e popovers, **foco visível** em todos os controles
+  interativos, e a legenda de atalhos disponível na própria interface. Origem de
+  design: DESIGN-DECISIONS §7.6.
 
 **IA-no-laço: proveniência, grounding e custo (transversal)**
 
@@ -466,6 +480,9 @@ e consistência número-a-número.
 - **SC-012**: A fila de triagem permanece responsiva à navegação por teclado com
   um corpus de ~5.000 registros numa Revisão, sem degradação perceptível de
   fluidez.
+- **SC-013**: As telas do workbench passam numa verificação de acessibilidade
+  (ARIA em listas/grids e popovers, foco visível e operação 100% por teclado), sem
+  violações críticas.
 
 ## Assumptions
 
