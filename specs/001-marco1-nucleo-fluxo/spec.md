@@ -21,6 +21,16 @@ estado da Revisão é auditável.
 Marco 1 **não** inclui ingestão/extração de PDF por IA (Marco 2) nem
 síntese/relatório/exportações (Marco 3).
 
+## Clarifications
+
+### Session 2026-05-29
+
+- Q: Qual o destino de um registro marcado como "dúvida" na triagem de Título/Resumo? → A: É um estado **pendente**; precisa ser resolvido (incluir/excluir) antes de avançar para Texto completo e não conta como decisão final no PRISMA.
+- Q: Como a pré-classificação de IA na triagem é disparada? → A: Como **job assíncrono em lote** sobre o corpus, com estimativa de custo prévia, progresso visível e resiliência por-item; as sugestões ficam anexadas aos registros.
+- Q: Qual o alvo de escala da fila do workbench (responsividade no teclado)? → A: **Milhares (~5.000 registros por Revisão)**; a virtualização da fila é obrigatória.
+- Q: Qual o alcance do "desfazer" de decisões de dedup e triagem? → A: Reversível **por item, a qualquer momento** (qualquer decisão passada), com cada reversão registrada como nova entrada na trilha append-only.
+- Q: Qual evento concreto dispara o travamento do protocolo? → A: A **primeira decisão de triagem** registrada em qualquer registro (incluir/excluir/dúvida em Título/Resumo).
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Criar e acessar uma Revisão isolada (Priority: P1)
@@ -249,6 +259,9 @@ e consistência número-a-número.
 - **DOI ausente**: a deduplicação de exatas recai sobre título normalizado + ano.
 - **Tentativa de excluir no Texto completo sem motivo**: a ação é bloqueada até que
   um motivo seja escolhido.
+- **Registro em "dúvida" tentando avançar para Texto completo**: o avanço é
+  bloqueado até que a dúvida seja resolvida como incluir ou excluir; registros em
+  dúvida permanecem visíveis como pendentes.
 - **Tentativa de editar protocolo travado**: permitida apenas como emenda
   versionada, nunca como sobrescrita silenciosa.
 - **Sugestão de IA indisponível** (falha do provedor ou chave BYOK ausente): a
@@ -292,7 +305,9 @@ e consistência número-a-número.
 - **FR-009**: O sistema MUST permitir que a IA rascunhe um protocolo PRISMA-P
   editável pelo humano.
 - **FR-010**: O sistema MUST travar o protocolo ao iniciar a triagem e exibir esse
-  estado.
+  estado. O travamento é disparado automaticamente pela **primeira decisão de
+  triagem** registrada em qualquer registro (incluir/excluir/dúvida em
+  Título/Resumo).
 - **FR-011**: O sistema MUST registrar qualquer mudança a um protocolo travado como
   emenda versionada e datada, sem sobrescrever a versão travada.
 - **FR-012**: O sistema MUST permitir exportar o protocolo para submissão manual
@@ -325,13 +340,22 @@ e consistência número-a-número.
 - **FR-022**: O sistema MUST oferecer triagem em dois modos: Título/Resumo e Texto
   completo.
 - **FR-023**: O sistema MUST permitir decidir incluir, excluir ou dúvida por
-  teclado, sem exigir o mouse na triagem.
+  teclado, sem exigir o mouse na triagem. "Dúvida" é um estado **pendente**: o
+  registro permanece na etapa atual e MUST ser resolvido (incluir/excluir) antes
+  de avançar para Texto completo; uma "dúvida" não conta como decisão final nos
+  contadores PRISMA (não é "triado" terminal).
 - **FR-024**: A IA MUST pré-classificar registros com razão curta, sem nunca
-  alterar o estado de um registro sozinha.
+  alterar o estado de um registro sozinha. A pré-classificação MUST rodar como
+  **job assíncrono em lote** sobre o corpus (estimativa de custo prévia conforme
+  FR-033, progresso visível e resiliência por-item), com as sugestões anexadas a
+  cada registro para consumo pelo revisor.
 - **FR-025**: O sistema MUST exigir motivo de exclusão **apenas** no Texto
   completo, a partir de uma lista configurável por projeto.
-- **FR-026**: O sistema MUST permitir desfazer decisões de triagem, registrando a
-  reversão.
+- **FR-026**: O sistema MUST permitir desfazer decisões de triagem **por item, a
+  qualquer momento** (qualquer decisão passada, não apenas a última ação),
+  registrando cada reversão como uma nova entrada na trilha append-only. A mesma
+  granularidade de reversão por item se aplica às decisões de dedup (FR-019,
+  FR-021).
 
 **Workbench unificado (D32 / Princípio V) — restrição transversal**
 
@@ -339,7 +363,9 @@ e consistência número-a-número.
   (Título/Resumo e Texto completo) como **modos de uma única superfície de
   trabalho**, nunca como telas de navegação separadas.
 - **FR-028**: As filas MUST ser densas e orientadas a teclado, com atalhos para
-  todas as ações de decisão e legenda de atalhos visível.
+  todas as ações de decisão e legenda de atalhos visível. A fila MUST permanecer
+  fluida no teclado para corpora da ordem de **milhares de registros (~5.000 por
+  Revisão)**, o que torna a **virtualização da fila obrigatória**.
 - **FR-029**: O sistema SHOULD oferecer ordenação opcional da fila (incluindo por
   pontuação de prioridade da IA) e filtros por estado/fonte/termo, sem que a
   ordenação substitua a decisão humana.
@@ -437,6 +463,9 @@ e consistência número-a-número.
   mudanças pós-travamento ficam como emendas versionadas e datadas.
 - **SC-011**: A interface e as saídas de IA aparecem em pt-BR, com o trecho-fonte
   citado no idioma original.
+- **SC-012**: A fila de triagem permanece responsiva à navegação por teclado com
+  um corpus de ~5.000 registros numa Revisão, sem degradação perceptível de
+  fluidez.
 
 ## Assumptions
 
