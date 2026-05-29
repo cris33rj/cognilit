@@ -70,9 +70,13 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - `role` enum `owner | reviewer | viewer` (D21)
 - `created_at`
 - **Unicidade**: `(review_id, user_id)` único.
-- **Regra v1**: ao criar uma `review`, cria-se automaticamente um `member`
-  `(creator, owner)` **e** o creator atua como reviewer único (FR-002). Convites e
-  múltiplos membros: latentes, sem UI (Princípio IV).
+- **Regra v1**: ao criar uma `review`, cria-se automaticamente um **único** `member`
+  com `role=owner`; esse papel **confere também a capacidade de reviewer** (não há
+  linha `member` separada com `role=reviewer` na v1). O valor `reviewer` do enum fica
+  **latente** para o cenário multi-revisor futuro, quando o mesmo usuário/Revisão
+  poderá ter múltiplas linhas `member`. Assim, "Owner+Reviewer único" da FR-002 é
+  modelado como uma só linha `owner`, não como dupla associação. Convites e múltiplos
+  membros: latentes, sem UI (Princípio IV).
 - **RLS**: membro vê os membros da própria Revisão; escrita de membros restrita ao
   `owner` (latente na v1).
 

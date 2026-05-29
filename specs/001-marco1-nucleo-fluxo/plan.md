@@ -64,11 +64,17 @@ encontrado" como 1ª classe; trilha append-only; sem `any`.
 
 **Scale/Scope**: pesquisador solo (v1); multiusuário modelado no schema, não
 operacional. ~5.000 registros/Revisão como alvo de fila. 7 user stories (P1–P3),
-38 FR, 12 SC.
+41 FR, 13 SC.
 
 **Decisões deixadas ao /plan e agora resolvidas** (ver research.md): auth =
 Supabase Auth e-mail/senha (R1); limiar fuzzy = `pg_trgm` ≥0.92 + mesmo ano, fila
 humana (R2); jobs assíncronos = `job`/`job_item` + worker `pg_cron` + polling (R3).
+
+**Export do protocolo (FR-012)**: no Marco 1, exportar o protocolo PRISMA-P é uma
+serialização do `protocol.content` (Markdown e/ou PDF) para submissão manual
+externa — capacidade **distinta e independente** do pipeline de exportação de
+relatório (DOCX/PDF/MD e referências) e do fluxograma PRISMA renderizado, ambos
+adiados ao Marco 3 (spec §Out of Scope).
 
 ## Constitution Check
 
