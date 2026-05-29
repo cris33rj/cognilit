@@ -153,6 +153,30 @@ Segue as três decisões de `PROTOCOLS.md` §"As três decisões desta arquitetu
 (3) commit em branch isolado por fatia, **parada obrigatória ao fim de cada fatia**,
 merge manual pelo desenvolvedor.
 
+## Skills de implementação a invocar (Sessão B)
+
+Além das skills do Superpowers (sequência no `CLAUDE.md` §7), a Sessão B **DEVE**
+invocar as skills de boas práticas ao escrever o código correspondente — não confiar
+apenas no auto-disparo por intenção, sobretudo dentro de subagentes do
+`subagent-driven-development` (que começam frios). Origem do mapa: DESIGN-DECISIONS
+§10 (não-canônico; promovido aqui por estar fora da lista de leitura da Sessão B).
+
+- **`frontend-design`** — ao construir o **workbench** (filas densas, mestre-detalhe,
+  barra de modos) e o vocabulário visual de IA (suggestion chip, provenance popover,
+  grounding, accept/edit/reject). Central no Marco 1.
+- **`react-best-practices`** — ao escrever componentes React e o data fetching;
+  crítico para a **fila virtualizada de ~5.000 registros** (FR-028, SC-012, A2) e os
+  updates otimistas (R7).
+- **`nextjs-best-practices`** — ao definir fronteiras Server/Client, App Router e
+  roteamento (RSC por padrão; `'use client'` só nas superfícies interativas — plan.md
+  §Structure Decision; R6 estado de fila na URL).
+
+Operacionalização: ao rodar `writing-plans` de cada fatia que toque UI/componentes,
+as tarefas devem **referenciar explicitamente** qual destas skills consultar, para que
+o subagente executor as carregue. As skills `senior-architect` e as de `database-*`
+eram da **Sessão A** (`/plan`/`data-model`, já concluído) — **não** se aplicam à
+execução da Sessão B.
+
 ## DO NOT
 
 - Re-rodar grill-me ou alterar `docs/CONTEXT.md` (canônico).
