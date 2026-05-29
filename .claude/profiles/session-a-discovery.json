@@ -1,0 +1,8 @@
+{
+  "enabledPlugins": {
+    "grill-me@<seu-marketplace>": true,
+    "spec-kit@<seu-marketplace>": true,
+    "gsd-cc@gsd-marketplace": false,
+    "superpowers@claude-plugins-official": false
+  }
+}

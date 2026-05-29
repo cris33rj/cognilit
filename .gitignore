@@ -1,0 +1,42 @@
+# Air-Gap workflow: perfil ativo é gerado, não versionado
+.claude/settings.local.json
+
+# Worktrees isolados para fatias (build/NNN-<slug>/<n>-<slug>)
+.worktrees/
+
+# Crash dumps
+*.stackdump
+
+# Node
+node_modules/
+dist/
+build/
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Next.js
+.next/
+
+# Env files
+.env*.local
+
+# Test output
+coverage/
+playwright-report/
+test-results/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Supabase
+supabase/.branches
+supabase/.temp
