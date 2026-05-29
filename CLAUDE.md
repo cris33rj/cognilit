@@ -16,6 +16,13 @@ derivar dele. Hierarquia de autoridade em caso de conflito:
 `docs/CONTEXT.md` > `.specify/memory/constitution.md` > este arquivo >
 `specs/NNN-<slug>/plan.md`.
 
+**Insumo de design (não-canônico):** `docs/DESIGN-DECISIONS.md` reúne decisões
+de UX/frontend destiladas das ferramentas de RSL de mercado. É **consumido na
+Sessão A** (spec-kit) e promovido a `constitution.md`/`spec.md`/`plan.md`. NÃO é
+fonte de verdade, NÃO entra na lista de leitura da Sessão B (que lê os artefatos
+canônicos que o absorvem), e suas emendas (§9) só têm força após ratificação na
+Sessão A.
+
 ---
 
 ## CONTRATO DE ENTRADA DA SESSÃO B (ler antes de qualquer skill)
