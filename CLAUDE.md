@@ -251,15 +251,6 @@ cifrada. Não confundir os dois eixos.
 - CI (GitHub Actions): lint, type-check e testes obrigatórios antes do deploy
 
 <!-- SPECKIT START -->
-
-Feature ativa: `001-marco1-nucleo-fluxo` (Marco 1 — núcleo do fluxo).
-
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan:
-`specs/001-marco1-nucleo-fluxo/plan.md`.
-
-O contrato de entrada da Sessão B (ver seção acima) deriva deste
-ponteiro: handoff, spec, plan e contratos vivem em
-`specs/001-marco1-nucleo-fluxo/`.
-
+shell commands, and other important information, read the current plan
 <!-- SPECKIT END -->
