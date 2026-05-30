@@ -58,17 +58,18 @@ visual distinto de dado confirmado por humano (cor/ícone/borda); os dois NUNCA 
 confundem. A triagem por IA pré-classifica mas **nunca exclui um registro
 sozinha**.
 
-*Rationale:* o build anterior fracassou porque a IA tomou decisões de produto e
+_Rationale:_ o build anterior fracassou porque a IA tomou decisões de produto e
 de tela. O gradiente de autonomia é a salvaguarda de domínio que torna a
 automação confiável para o pesquisador.
 
 ### II. Grounding e proveniência — contrato anti-alucinação (D13, D22, D31)
 
 Toda saída **factual** da IA referencia um trecho-fonte verificável: `source_span`
-+ página. O contrato de saída factual é `{value, source_span, page}` **ou**
-`{value: null, reason: "not_found"}` — **"não encontrado" é resposta de primeira
-classe**, renderizada explicitamente, nunca como erro ou campo vazio ambíguo. É
-proibido preencher por inferência sem âncora.
+
+- página. O contrato de saída factual é `{value, source_span, page}` **ou**
+  `{value: null, reason: "not_found"}` — **"não encontrado" é resposta de primeira
+  classe**, renderizada explicitamente, nunca como erro ou campo vazio ambíguo. É
+  proibido preencher por inferência sem âncora.
 
 Campos **inferidos** (ex.: classificar o desenho do estudo) são permitidos, mas
 marcados com estado de proveniência `inferido` (≠ `ancorado`) e **exigem
@@ -78,7 +79,7 @@ carrega sua origem (`nativo` | `ocr_ia`) e o grounding referencia a camada
 efetivamente usada. O relatório final **declara automaticamente** onde a IA foi
 usada e em que estado.
 
-*Rationale:* RSL exige rastreabilidade científica. Sem grounding obrigatório a
+_Rationale:_ RSL exige rastreabilidade científica. Sem grounding obrigatório a
 saída da IA é inverificável e o produto perde valor metodológico.
 
 ### III. Auditabilidade e reprodutibilidade de primeira classe (D26, D6)
@@ -93,7 +94,7 @@ reversíveis**, com log.
 O estado de navegação que afeta resultado (filtros, ordenação, seleção das filas)
 é **reprodutível via URL** (EP-4): uma fila triada é reabrível no mesmo estado.
 
-*Rationale:* reprodutibilidade é o que separa uma RSL de uma busca informal; a
+_Rationale:_ reprodutibilidade é o que separa uma RSL de uma busca informal; a
 ferramenta deve produzir o rastro que o método científico exige.
 
 ### IV. Isolamento por Revisão com RLS desde a origem (D2, D21)
@@ -106,7 +107,7 @@ retrofit. O acesso é mediado pela associação `usuário ↔ Revisão ↔ papel
 kappa e fila de conflitos ficam latentes no schema, **não operacionais na v1**, e
 a UI não exibe afordâncias de conflito/kappa enquanto houver um único revisor.
 
-*Rationale:* segurança de dados de pesquisa e o caminho multiusuário não podem ser
+_Rationale:_ segurança de dados de pesquisa e o caminho multiusuário não podem ser
 adicionados depois sem reescrever o núcleo.
 
 ### V. Triagem unificada num único workbench (EP-1 → D32; D6, D7)
@@ -121,7 +122,7 @@ O motivo de exclusão é **obrigatório apenas no texto completo** (lista
 configurável por projeto) e alimenta a contagem PRISMA. Nenhuma fatiação de
 implementação pode **refragmentar** a triagem em telas separadas.
 
-*Rationale:* a fragmentação da triagem foi o erro emblemático do build anterior.
+_Rationale:_ a fragmentação da triagem foi o erro emblemático do build anterior.
 Esta é a correção central do produto e um invariante de forma, não só de função.
 
 ### VI. PRISMA como espinha viva (D4, D20)
@@ -133,7 +134,7 @@ entregável obrigatório** e é o **espelho** desses contadores — não um arte
 gerado do zero no fim. A consistência número-a-número entre o que o usuário vê e o
 entregável é garantida por construção (EP-2).
 
-*Rationale:* o fluxograma PRISMA é o coração do relato de uma RSL; divergência
+_Rationale:_ o fluxograma PRISMA é o coração do relato de uma RSL; divergência
 entre a UI e o entregável é um defeito de domínio comum que o produto deve evitar.
 
 ### VII. IA atrás de abstrações trocáveis com BYOK transparente (D14, D28)
@@ -156,7 +157,7 @@ própria chave. O vocabulário visual de IA (suggestion chip, provenance popover
 grounding highlight, accept/edit/reject, badge "inferido") é **um único sistema
 reusado em todas as fases** (EP-3), nunca reinventado por fase.
 
-*Rationale:* trocabilidade protege contra lock-in; BYOK transparente respeita o
+_Rationale:_ trocabilidade protege contra lock-in; BYOK transparente respeita o
 custo do usuário; um vocabulário visual único dá coerência ao produto.
 
 ### VIII. Trabalho pesado é job assíncrono resiliente (D25, D31)
@@ -169,7 +170,7 @@ persiste no Storage e **enfileira**; o **worker processa**. O parsing de PDF é
 híbrido: camada de texto nativa → extração determinística; PDF escaneado → LLM
 multimodal como OCR — sempre com origem de proveniência registrada.
 
-*Rationale:* trabalho longo dentro de um request síncrono quebra sob corpora
+_Rationale:_ trabalho longo dentro de um request síncrono quebra sob corpora
 reais; a separação enfileira/processa é o que torna o produto operável em escala.
 
 ## Restrições adicionais

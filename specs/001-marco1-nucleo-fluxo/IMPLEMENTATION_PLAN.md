@@ -45,36 +45,38 @@ Workbench e qualquer modo (Importar/Duplicatas/T-R/Texto completo); importação
 
 ## File Structure (criada nesta fatia)
 
-| Arquivo | Responsabilidade |
-|---------|------------------|
-| `package.json`, `tsconfig.json`, `next.config.mjs`, `.eslintrc.json`, `.prettierrc.json`, `.prettierignore` | Toolchain e configuração do projeto |
-| `postcss.config.mjs`, `app/globals.css` | Tailwind 4 (PostCSS + tema/dark mode `class`) |
-| `vitest.config.ts`, `vitest.setup.ts` | Runner de testes unit/integration + matchers do Testing Library |
-| `playwright.config.ts`, `tests/e2e/*.spec.ts` | E2E dos fluxos da fatia |
-| `app/layout.tsx`, `app/page.tsx` | Shell raiz + redirecionamento inicial |
-| `middleware.ts` | Refresh de sessão Supabase + proteção de rotas |
-| `src/lib/supabase/server.ts`, `client.ts`, `middleware.ts` | Clients `@supabase/ssr` (Server Component / Client / middleware) |
-| `src/types/database.ts` | Tipos gerados do schema Supabase (sem `any`) |
-| `supabase/config.toml` (gerado), `supabase/migrations/0001_foundation_rls.sql` | Schema + RLS + funções (`profile`, `review`, `member`, `audit_entry`) |
-| `app/(auth)/login/page.tsx`, `app/(auth)/signup/page.tsx`, `app/(auth)/actions.ts` | Auth e-mail/senha (Server Actions) |
-| `app/auth/signout/route.ts` | Logout |
-| `app/reviews/page.tsx`, `app/reviews/actions.ts` | Lista de Revisões (US1) + action `createReview` (RPC) |
-| `app/reviews/new/page.tsx`, `src/components/reviews/CreateReviewForm.tsx` | Criação de Revisão (RHF + Zod) |
-| `app/reviews/[reviewId]/layout.tsx`, `page.tsx` | Shell mínimo da Revisão ativa + seletor |
-| `src/components/reviews/ReviewSwitcher.tsx` | Troca de Revisão ativa (FR-004) |
-| `src/lib/reviews/queries.ts` | Leituras tipadas de `review`/`member` |
-| `tests/integration/rls.review.test.ts` | Isolamento RLS entre 2 usuários (SC-009) |
+| Arquivo                                                                                                     | Responsabilidade                                                      |
+| ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `package.json`, `tsconfig.json`, `next.config.mjs`, `.eslintrc.json`, `.prettierrc.json`, `.prettierignore` | Toolchain e configuração do projeto                                   |
+| `postcss.config.mjs`, `app/globals.css`                                                                     | Tailwind 4 (PostCSS + tema/dark mode `class`)                         |
+| `vitest.config.ts`, `vitest.setup.ts`                                                                       | Runner de testes unit/integration + matchers do Testing Library       |
+| `playwright.config.ts`, `tests/e2e/*.spec.ts`                                                               | E2E dos fluxos da fatia                                               |
+| `app/layout.tsx`, `app/page.tsx`                                                                            | Shell raiz + redirecionamento inicial                                 |
+| `middleware.ts`                                                                                             | Refresh de sessão Supabase + proteção de rotas                        |
+| `src/lib/supabase/server.ts`, `client.ts`, `middleware.ts`                                                  | Clients `@supabase/ssr` (Server Component / Client / middleware)      |
+| `src/types/database.ts`                                                                                     | Tipos gerados do schema Supabase (sem `any`)                          |
+| `supabase/config.toml` (gerado), `supabase/migrations/0001_foundation_rls.sql`                              | Schema + RLS + funções (`profile`, `review`, `member`, `audit_entry`) |
+| `app/(auth)/login/page.tsx`, `app/(auth)/signup/page.tsx`, `app/(auth)/actions.ts`                          | Auth e-mail/senha (Server Actions)                                    |
+| `app/auth/signout/route.ts`                                                                                 | Logout                                                                |
+| `app/reviews/page.tsx`, `app/reviews/actions.ts`                                                            | Lista de Revisões (US1) + action `createReview` (RPC)                 |
+| `app/reviews/new/page.tsx`, `src/components/reviews/CreateReviewForm.tsx`                                   | Criação de Revisão (RHF + Zod)                                        |
+| `app/reviews/[reviewId]/layout.tsx`, `page.tsx`                                                             | Shell mínimo da Revisão ativa + seletor                               |
+| `src/components/reviews/ReviewSwitcher.tsx`                                                                 | Troca de Revisão ativa (FR-004)                                       |
+| `src/lib/reviews/queries.ts`                                                                                | Leituras tipadas de `review`/`member`                                 |
+| `tests/integration/rls.review.test.ts`                                                                      | Isolamento RLS entre 2 usuários (SC-009)                              |
 
 ---
 
 ## Task 1: Inicializar projeto Node + Next.js 14 + TypeScript strict
 
 **Files:**
+
 - Create: `package.json`, `tsconfig.json`, `next.config.mjs`, `next-env.d.ts` (gerado), `app/layout.tsx`, `app/page.tsx`, `.gitignore` (já existe — não sobrescrever)
 
 - [ ] **Step 1: Inicializar `package.json` e instalar Next/React/TS (dependências explícitas)**
 
 Run:
+
 ```bash
 npm init -y
 npm install next@^14.2.0 react@^18.3.0 react-dom@^18.3.0
@@ -84,6 +86,7 @@ npm install -D typescript@^5.4.0 @types/node@^20 @types/react@^18 @types/react-d
 - [ ] **Step 2: Definir scripts e campos no `package.json`**
 
 Substituir o `package.json` gerado por (mantendo as versões resolvidas no Step 1):
+
 ```json
 {
   "name": "cognilit",
@@ -101,6 +104,7 @@ Substituir o `package.json` gerado por (mantendo as versões resolvidas no Step 
   }
 }
 ```
+
 > Preservar as chaves `dependencies`/`devDependencies` que o npm escreveu nos Steps anteriores.
 
 - [ ] **Step 3: Criar `tsconfig.json` (strict, alias `@/*` → `src/*`)**
@@ -197,12 +201,14 @@ git commit -m "chore: scaffold Next.js 14 + TypeScript strict"
 ## Task 2: Configurar Tailwind CSS 4 (PostCSS + dark mode `class`)
 
 **Files:**
+
 - Create: `postcss.config.mjs`
 - Modify: `app/globals.css`, `app/page.tsx`
 
 - [ ] **Step 1: Instalar Tailwind 4 (dependências explícitas)**
 
 Run:
+
 ```bash
 npm install -D tailwindcss@^4.0.0 @tailwindcss/postcss@^4.0.0 postcss@^8.4.0
 ```
@@ -262,11 +268,13 @@ git commit -m "chore: configure Tailwind CSS 4 with class-based dark mode"
 ## Task 3: Configurar Vitest + Testing Library
 
 **Files:**
+
 - Create: `vitest.config.ts`, `vitest.setup.ts`, `tests/unit/smoke.test.ts`
 
 - [ ] **Step 1: Instalar Vitest e Testing Library (dependências explícitas)**
 
 Run:
+
 ```bash
 npm install -D vitest@^2.0.0 @vitejs/plugin-react@^4.3.0 jsdom@^24.0.0 \
   @testing-library/react@^16.0.0 @testing-library/jest-dom@^6.4.0 \
@@ -291,7 +299,10 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
-    include: ["tests/unit/**/*.test.ts?(x)", "tests/integration/**/*.test.ts?(x)"],
+    include: [
+      "tests/unit/**/*.test.ts?(x)",
+      "tests/integration/**/*.test.ts?(x)",
+    ],
     exclude: ["tests/e2e/**", "node_modules/**"],
   },
 });
@@ -306,6 +317,7 @@ import "@testing-library/jest-dom/vitest";
 - [ ] **Step 4: Escrever um teste de smoke que falha primeiro**
 
 `tests/unit/smoke.test.ts`:
+
 ```ts
 import { describe, it, expect } from "vitest";
 
@@ -333,12 +345,14 @@ git commit -m "chore: configure Vitest with Testing Library"
 ## Task 4: Configurar Playwright (e2e)
 
 **Files:**
+
 - Create: `playwright.config.ts`, `tests/e2e/smoke.spec.ts`
 - Modify: `.gitignore` (apenas se faltar `playwright/.cache` — já cobre `playwright-report/`, `test-results/`)
 
 - [ ] **Step 1: Instalar Playwright e os browsers**
 
 Run:
+
 ```bash
 npm install -D @playwright/test@^1.45.0
 npx playwright install chromium
@@ -373,6 +387,7 @@ export default defineConfig({
 - [ ] **Step 3: Escrever o smoke e2e**
 
 `tests/e2e/smoke.spec.ts`:
+
 ```ts
 import { test, expect } from "@playwright/test";
 
@@ -399,11 +414,13 @@ git commit -m "chore: configure Playwright e2e harness"
 ## Task 5: Configurar ESLint + Prettier
 
 **Files:**
+
 - Create: `.eslintrc.json`, `.prettierrc.json`, `.prettierignore`
 
 - [ ] **Step 1: Instalar ESLint/Prettier (dependências explícitas)**
 
 Run:
+
 ```bash
 npm install -D eslint@^8.57.0 eslint-config-next@^14.2.0 \
   prettier@^3.3.0 eslint-config-prettier@^9.1.0
@@ -462,12 +479,14 @@ git commit -m "chore: configure ESLint + Prettier"
 ## Task 6: Configurar Husky + lint-staged (pre-commit)
 
 **Files:**
+
 - Create: `.husky/pre-commit`
 - Modify: `package.json` (campo `lint-staged` + script `prepare`)
 
 - [ ] **Step 1: Instalar e inicializar Husky + lint-staged**
 
 Run:
+
 ```bash
 npm install -D husky@^9.0.0 lint-staged@^15.0.0
 npx husky init
@@ -476,6 +495,7 @@ npx husky init
 - [ ] **Step 2: Adicionar `prepare` e bloco `lint-staged` ao `package.json`**
 
 Adicionar ao `package.json`:
+
 ```json
 {
   "scripts": {
@@ -491,6 +511,7 @@ Adicionar ao `package.json`:
 - [ ] **Step 3: Definir o hook `.husky/pre-commit`**
 
 Substituir o conteúdo de `.husky/pre-commit` por:
+
 ```sh
 npx lint-staged
 ```
@@ -498,9 +519,11 @@ npx lint-staged
 - [ ] **Step 4: Verificar que o hook roda**
 
 Run (cria e desfaz um arquivo de teste):
+
 ```bash
 echo "export const x = 1" > tmp_lintcheck.ts && git add tmp_lintcheck.ts && git commit -m "test: husky" ; git reset --soft HEAD~1 2>/dev/null ; git restore --staged tmp_lintcheck.ts ; rm tmp_lintcheck.ts
 ```
+
 Expected: o commit dispara `lint-staged` sem erros. (O `reset`/`rm` limpa o arquivo de teste.)
 
 - [ ] **Step 5: Commit**
@@ -515,12 +538,14 @@ git commit -m "chore: add Husky pre-commit running lint-staged"
 ## Task 7: Inicializar Supabase local + clients `@supabase/ssr`
 
 **Files:**
+
 - Create: `supabase/config.toml` (gerado por `supabase init`), `src/lib/supabase/server.ts`, `src/lib/supabase/client.ts`, `src/lib/supabase/middleware.ts`, `.env.local` (não versionado)
 - Modify: nenhum
 
 - [ ] **Step 1: Instalar libs Supabase + CLI (dependências explícitas)**
 
 Run:
+
 ```bash
 npm install @supabase/supabase-js@^2.43.0 @supabase/ssr@^0.3.0
 npm install -D supabase@^1.180.0
@@ -543,6 +568,7 @@ NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key do step 3>
 SUPABASE_SERVICE_ROLE_KEY=<service_role key do step 3>
 ```
+
 > NÃO tocar `.env.example` nesta fatia — sua reconciliação (resíduo BYOK) é tarefa explícita da Fatia 2 (codebase-map §4).
 
 - [ ] **Step 5: Criar `src/lib/supabase/server.ts` (client de Server Components / Actions)**
@@ -660,6 +686,7 @@ git commit -m "chore: init Supabase local and @supabase/ssr clients"
 ## Task 8: 1ª migration — schema + RLS (`profile`, `review`, `member`, `audit_entry`)
 
 **Files:**
+
 - Create: `supabase/migrations/0001_foundation_rls.sql`
 
 **Notas de design (data-model.md):** RLS em TODAS as tabelas; `audit_entry` insert-only; isolamento via helper `is_review_member()` `SECURITY DEFINER` (evita recursão de RLS na própria `member`); criação de Revisão por RPC atômica `create_review()`; `profile` criado por trigger em `auth.users`.
@@ -667,6 +694,7 @@ git commit -m "chore: init Supabase local and @supabase/ssr clients"
 - [ ] **Step 1: Criar a migration com extensões, tabelas, funções e políticas**
 
 `supabase/migrations/0001_foundation_rls.sql`:
+
 ```sql
 -- ============================================================
 -- Marco 1 / Fatia 1 — Fundação: profile, review, member, audit_entry
@@ -861,12 +889,14 @@ git commit -m "feat: foundation schema with RLS (profile, review, member, audit_
 ## Task 9: Auth e-mail/senha — rotas `(auth)`, Server Actions e middleware
 
 **Files:**
+
 - Create: `app/(auth)/login/page.tsx`, `app/(auth)/signup/page.tsx`, `app/(auth)/actions.ts`, `app/auth/signout/route.ts`, `middleware.ts`
 - Modify: `app/page.tsx`
 
 - [ ] **Step 1: Escrever o e2e que falha primeiro (cadastro → redireciona a /reviews)**
 
 `tests/e2e/auth.spec.ts`:
+
 ```ts
 import { test, expect } from "@playwright/test";
 
@@ -900,6 +930,7 @@ Expected: FAIL — rotas `/signup`, `/login`, `/reviews` ainda não existem.
 - [ ] **Step 3: Criar o middleware raiz**
 
 `middleware.ts`:
+
 ```ts
 import { type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
@@ -918,6 +949,7 @@ export const config = {
 - [ ] **Step 4: Criar as Server Actions de auth**
 
 `app/(auth)/actions.ts`:
+
 ```ts
 "use server";
 
@@ -943,16 +975,20 @@ export async function signUp(formData: FormData) {
 
   const { error } = await supabase.auth.signUp({ email, password });
   if (error) {
-    redirect(`/signup?error=${encodeURIComponent("Não foi possível criar a conta")}`);
+    redirect(
+      `/signup?error=${encodeURIComponent("Não foi possível criar a conta")}`,
+    );
   }
   redirect("/reviews");
 }
 ```
+
 > Pré-requisito de ambiente de teste: em `supabase/config.toml`, `[auth.email] enable_confirmations = false` (default local) para que `signUp` já crie a sessão. Confirmar que está desabilitado.
 
 - [ ] **Step 5: Criar a página de login**
 
 `app/(auth)/login/page.tsx`:
+
 ```tsx
 import { signIn } from "../actions";
 
@@ -973,7 +1009,12 @@ export default async function LoginPage({
         </label>
         <label className="flex flex-col gap-1">
           Senha
-          <input name="password" type="password" required className="border p-2" />
+          <input
+            name="password"
+            type="password"
+            required
+            className="border p-2"
+          />
         </label>
         <button type="submit" className="bg-black p-2 text-white">
           Entrar
@@ -990,6 +1031,7 @@ export default async function LoginPage({
 - [ ] **Step 6: Criar a página de cadastro**
 
 `app/(auth)/signup/page.tsx`:
+
 ```tsx
 import { signUp } from "../actions";
 
@@ -1010,7 +1052,12 @@ export default async function SignupPage({
         </label>
         <label className="flex flex-col gap-1">
           Senha
-          <input name="password" type="password" required className="border p-2" />
+          <input
+            name="password"
+            type="password"
+            required
+            className="border p-2"
+          />
         </label>
         <button type="submit" className="bg-black p-2 text-white">
           Criar conta
@@ -1027,6 +1074,7 @@ export default async function SignupPage({
 - [ ] **Step 7: Criar a rota de logout**
 
 `app/auth/signout/route.ts`:
+
 ```ts
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
@@ -1043,6 +1091,7 @@ export async function POST(request: Request) {
 - [ ] **Step 8: Fazer a home redirecionar conforme a sessão**
 
 `app/page.tsx`:
+
 ```tsx
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -1066,6 +1115,7 @@ Expected: PASS.
 - [ ] **Step 10: Verificar lint/typecheck e commit**
 
 Run: `npm run lint && npm run typecheck`
+
 ```bash
 git add middleware.ts "app/(auth)" app/auth app/page.tsx tests/e2e/auth.spec.ts
 git commit -m "feat: email/password auth with route protection"
@@ -1076,12 +1126,14 @@ git commit -m "feat: email/password auth with route protection"
 ## Task 10: Lista de Revisões + criação (RPC) — US1 / FR-002
 
 **Files:**
+
 - Create: `app/reviews/page.tsx`, `app/reviews/actions.ts`, `app/reviews/new/page.tsx`, `src/components/reviews/CreateReviewForm.tsx`, `src/lib/reviews/queries.ts`
 - Modify: nenhum
 
 - [ ] **Step 1: Instalar RHF + Zod (dependências explícitas)**
 
 Run:
+
 ```bash
 npm install react-hook-form@^7.52.0 zod@^3.23.0 @hookform/resolvers@^3.7.0
 ```
@@ -1089,6 +1141,7 @@ npm install react-hook-form@^7.52.0 zod@^3.23.0 @hookform/resolvers@^3.7.0
 - [ ] **Step 2: Escrever o unit test do schema Zod (falha primeiro)**
 
 `tests/unit/reviews/create-review-schema.test.ts`:
+
 ```ts
 import { describe, it, expect } from "vitest";
 import { createReviewSchema } from "@/lib/reviews/schema";
@@ -1117,6 +1170,7 @@ Expected: FAIL — `@/lib/reviews/schema` não existe.
 - [ ] **Step 4: Criar o schema Zod**
 
 `src/lib/reviews/schema.ts`:
+
 ```ts
 import { z } from "zod";
 
@@ -1138,6 +1192,7 @@ Expected: PASS.
 - [ ] **Step 6: Criar as leituras tipadas de Revisões**
 
 `src/lib/reviews/queries.ts`:
+
 ```ts
 import { createClient } from "@/lib/supabase/server";
 
@@ -1165,6 +1220,7 @@ export async function listMyReviews(): Promise<ReviewListItem[]> {
 - [ ] **Step 7: Criar a action `createReview` (chama a RPC)**
 
 `app/reviews/actions.ts`:
+
 ```ts
 "use server";
 
@@ -1184,7 +1240,9 @@ export async function createReview(formData: FormData) {
   });
 
   if (error || !data) {
-    redirect(`/reviews/new?error=${encodeURIComponent("Falha ao criar a Revisão")}`);
+    redirect(
+      `/reviews/new?error=${encodeURIComponent("Falha ao criar a Revisão")}`,
+    );
   }
 
   redirect(`/reviews/${data.id}`);
@@ -1194,6 +1252,7 @@ export async function createReview(formData: FormData) {
 - [ ] **Step 8: Criar a página da lista de Revisões**
 
 `app/reviews/page.tsx`:
+
 ```tsx
 import Link from "next/link";
 import { listMyReviews } from "@/lib/reviews/queries";
@@ -1234,6 +1293,7 @@ export default async function ReviewsPage() {
 - [ ] **Step 9: Criar o formulário de criação (client) e a página `new`**
 
 `src/components/reviews/CreateReviewForm.tsx`:
+
 ```tsx
 "use client";
 
@@ -1256,6 +1316,7 @@ export function CreateReviewForm({ error }: { error?: string }) {
 ```
 
 `app/reviews/new/page.tsx`:
+
 ```tsx
 import { CreateReviewForm } from "@/components/reviews/CreateReviewForm";
 
@@ -1282,6 +1343,7 @@ Expected: PASS — ambos os testes (cadastro chega em `/reviews` com o heading "
 - [ ] **Step 11: Lint/typecheck e commit**
 
 Run: `npm run lint && npm run typecheck && npm test`
+
 ```bash
 git add app/reviews src/components/reviews src/lib/reviews tests/unit/reviews package.json package-lock.json
 git commit -m "feat: list and create reviews via create_review RPC (US1, FR-002)"
@@ -1292,11 +1354,13 @@ git commit -m "feat: list and create reviews via create_review RPC (US1, FR-002)
 ## Task 11: Isolamento RLS entre usuários — teste de integração (SC-009)
 
 **Files:**
+
 - Create: `tests/integration/rls.review.test.ts`, `tests/integration/helpers/supabase.ts`
 
 - [ ] **Step 1: Criar o helper de clients de teste (anon por usuário + service role)**
 
 `tests/integration/helpers/supabase.ts`:
+
 ```ts
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
@@ -1327,6 +1391,7 @@ export async function signUpUser(email: string, password: string) {
 - [ ] **Step 2: Escrever o teste de isolamento (falha primeiro se a RLS estiver frouxa)**
 
 `tests/integration/rls.review.test.ts`:
+
 ```ts
 import { describe, it, expect, beforeAll } from "vitest";
 import { signUpUser } from "./helpers/supabase";
@@ -1418,12 +1483,14 @@ git commit -m "test: RLS isolation between users (SC-009) and audit trail on rev
 ## Task 12: Shell mínimo da Revisão ativa + troca de Revisão — FR-004
 
 **Files:**
+
 - Create: `app/reviews/[reviewId]/layout.tsx`, `app/reviews/[reviewId]/page.tsx`, `src/components/reviews/ReviewSwitcher.tsx`
 - Modify: `src/lib/reviews/queries.ts` (adicionar `getReviewById`)
 
 - [ ] **Step 1: Escrever o e2e de troca de Revisão ativa (falha primeiro)**
 
 `tests/e2e/review-switch.spec.ts`:
+
 ```ts
 import { test, expect } from "@playwright/test";
 
@@ -1442,12 +1509,16 @@ test("cria duas Revisões e troca a ativa pelo seletor", async ({ page }) => {
   }
 
   // No contexto de uma Revisão, o seletor mostra a ativa e permite trocar.
-  await expect(page.getByRole("heading", { name: "Revisão Beta" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Revisão Beta" }),
+  ).toBeVisible();
   await page.getByRole("combobox", { name: "Revisão ativa" }).selectOption({
     label: "Revisão Alpha",
   });
   await expect(page).toHaveURL(/\/reviews\/[0-9a-f-]+$/);
-  await expect(page.getByRole("heading", { name: "Revisão Alpha" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Revisão Alpha" }),
+  ).toBeVisible();
 });
 ```
 
@@ -1459,6 +1530,7 @@ Expected: FAIL — `[reviewId]/layout.tsx`, `page.tsx` e o seletor não existem.
 - [ ] **Step 3: Adicionar `getReviewById` às queries**
 
 Acrescentar a `src/lib/reviews/queries.ts`:
+
 ```ts
 export async function getReviewById(
   reviewId: string,
@@ -1481,6 +1553,7 @@ export async function getReviewById(
 - [ ] **Step 4: Criar o seletor de Revisão ativa (client)**
 
 `src/components/reviews/ReviewSwitcher.tsx`:
+
 ```tsx
 "use client";
 
@@ -1515,6 +1588,7 @@ export function ReviewSwitcher({
 - [ ] **Step 5: Criar o layout mínimo da Revisão (seletor + contexto ativo)**
 
 `app/reviews/[reviewId]/layout.tsx`:
+
 ```tsx
 import { notFound } from "next/navigation";
 import { getReviewById, listMyReviews } from "@/lib/reviews/queries";
@@ -1556,6 +1630,7 @@ export default async function ReviewLayout({
 - [ ] **Step 6: Criar a página da Revisão ativa (placeholder de contexto)**
 
 `app/reviews/[reviewId]/page.tsx`:
+
 ```tsx
 import { notFound } from "next/navigation";
 import { getReviewById } from "@/lib/reviews/queries";
@@ -1604,6 +1679,7 @@ git commit -m "feat: active review shell and switcher (FR-004)"
 ## CHECKPOINT 3 — Fim da Fatia 1 (parada obrigatória)
 
 Concluída a Task 12, **PARAR** (CLAUDE.md §5). Apresentar ao desenvolvedor:
+
 - o branch `build/001-marco1-nucleo-fluxo/1-fundacao-revisao` e o diff completo;
 - a saída de `npm test`, `npm run test:e2e`, `npm run lint` e `npm run typecheck`.
 
@@ -1619,7 +1695,7 @@ Concluída a Task 12, **PARAR** (CLAUDE.md §5). Apresentar ao desenvolvedor:
 - **FR-003** (isolamento por usuário/Revisão): Task 8 (RLS) + Task 11 (teste SC-009). ✓
 - **FR-004** (trocar Revisão ativa refletindo o contexto): Task 12. ✓
 - **FR-005** (modelar papéis Owner/Reviewer/Viewer sem afordância de colaboração): Task 8 (`member_role` enum; UI só usa `owner`). ✓
-- **FR-035** (base — trilha append-only; registrar criação): Task 8 (`audit_entry` insert-only + RPC grava criação) + Task 11 (teste). ✓ *(export da trilha → Fatia 6, A1.)*
+- **FR-035** (base — trilha append-only; registrar criação): Task 8 (`audit_entry` insert-only + RPC grava criação) + Task 11 (teste). ✓ _(export da trilha → Fatia 6, A1.)_
 - **SC-009** (0 vazamentos entre Revisões/usuários): Task 11. ✓
 - **Migration + RLS primeiro** (Princípio IV): Task 8 precede o código que consome o schema (Tasks 10–12). ✓
 - **Scaffold greenfield** (codebase-map §1): Tasks 1–7. ✓

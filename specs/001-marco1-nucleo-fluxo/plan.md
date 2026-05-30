@@ -78,18 +78,18 @@ adiados ao Marco 3 (spec §Out of Scope).
 
 ## Constitution Check
 
-*GATE: avaliado antes da Fase 0 e re-avaliado após a Fase 1 (Design).*
+_GATE: avaliado antes da Fase 0 e re-avaliado após a Fase 1 (Design)._
 
-| # | Princípio | Como o plano cumpre | Status |
-|---|-----------|---------------------|--------|
-| I | Humano-no-laço + gradiente | IA só sugere; `ai_suggestion.state` (pending…); `screening_decision.actor=human`; FR-024 a IA nunca decide. | ✅ |
-| II | Grounding + proveniência | `LLMProvider` força `provenance` e contrato factual `{value,source_span,page}`/`not_found`; Marco 1 ancora em metadado/resumo. | ✅ |
-| III | Auditabilidade/reprodutibilidade | `audit_entry` insert-only; dedup/triagem reversíveis por item (Q4); estado de fila na URL (R6/EP-4). | ✅ |
-| IV | Isolamento + RLS desde a origem | RLS em todas as tabelas na 1ª migration; `member` modela papéis; solo na v1. | ✅ |
-| V | Triagem unificada (workbench) | Importar/Duplicatas/T-R/Texto completo como **modos de uma superfície** (FR-027); fatiação não pode refragmentar (ver Perímetro). | ✅ |
-| VI | PRISMA vivo | `prisma_counter` como **view derivada** — fonte única; sem contador guardado divergível (SC-004). | ✅ |
-| VII | IA atrás de abstração + BYOK | `LLMProvider` único ponto de chamada; BYOK via Vault (R5); estimativa de custo pré-lote (FR-033); vocabulário visual de IA único. | ✅ |
-| VIII | Trabalho pesado = job assíncrono | `import_parse` e `ai_screening_batch` como jobs; Edge enfileira, worker `pg_cron` processa por-item, retomável. | ✅ |
+| #    | Princípio                        | Como o plano cumpre                                                                                                               | Status |
+| ---- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| I    | Humano-no-laço + gradiente       | IA só sugere; `ai_suggestion.state` (pending…); `screening_decision.actor=human`; FR-024 a IA nunca decide.                       | ✅     |
+| II   | Grounding + proveniência         | `LLMProvider` força `provenance` e contrato factual `{value,source_span,page}`/`not_found`; Marco 1 ancora em metadado/resumo.    | ✅     |
+| III  | Auditabilidade/reprodutibilidade | `audit_entry` insert-only; dedup/triagem reversíveis por item (Q4); estado de fila na URL (R6/EP-4).                              | ✅     |
+| IV   | Isolamento + RLS desde a origem  | RLS em todas as tabelas na 1ª migration; `member` modela papéis; solo na v1.                                                      | ✅     |
+| V    | Triagem unificada (workbench)    | Importar/Duplicatas/T-R/Texto completo como **modos de uma superfície** (FR-027); fatiação não pode refragmentar (ver Perímetro). | ✅     |
+| VI   | PRISMA vivo                      | `prisma_counter` como **view derivada** — fonte única; sem contador guardado divergível (SC-004).                                 | ✅     |
+| VII  | IA atrás de abstração + BYOK     | `LLMProvider` único ponto de chamada; BYOK via Vault (R5); estimativa de custo pré-lote (FR-033); vocabulário visual de IA único. | ✅     |
+| VIII | Trabalho pesado = job assíncrono | `import_parse` e `ai_screening_batch` como jobs; Edge enfileira, worker `pg_cron` processa por-item, retomável.                   | ✅     |
 
 **Restrições adicionais**: stack respeitada (sem dependência fora do ratificado;
 novas libs só por tarefa explícita). Idioma pt-BR/UI + original no trecho-fonte;
@@ -177,12 +177,13 @@ quatro modos (Importar/Duplicatas/T-R/Texto completo) como exigência do Princí
 > justificar.**
 
 | Violation | Why Needed | Simpler Alternative Rejected Because |
-|-----------|------------|-------------------------------------|
-| (nenhuma) | — | — |
+| --------- | ---------- | ------------------------------------ |
+| (nenhuma) | —          | —                                    |
 
 ## Perímetro de fatiação (insumo para o HANDOFF.md → Sessão B)
 
 A fatiação é decidida pelo `brainstorming` da Sessão B, mas respeita:
+
 - **Migration + RLS primeiro** (Princípio IV; migrations precedem o código).
 - **Workbench não-refragmentável** (Princípio V): Importar/Duplicatas/Triagem
   numa só superfície — nenhuma fatia pode separá-los em telas.
@@ -194,6 +195,7 @@ A fatiação é decidida pelo `brainstorming` da Sessão B, mas respeita:
 ## Phase 2 (planejamento) — próximos passos
 
 Este comando termina aqui (não gera `tasks.md`). Conforme `PROTOCOLS.md`:
+
 1. Resolver qualquer pendência do `/speckit.analyze` (próximo comando).
 2. Escrever `HANDOFF.md` e atualizar o ponteiro `<!-- SPECKIT -->` (já apontando).
 3. Sessão B: mapear base de código → `brainstorming` (fatiação) → por fatia

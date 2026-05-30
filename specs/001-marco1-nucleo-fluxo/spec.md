@@ -31,7 +31,7 @@ síntese/relatório/exportações (Marco 3).
 - Q: Qual o alcance do "desfazer" de decisões de dedup e triagem? → A: Reversível **por item, a qualquer momento** (qualquer decisão passada), com cada reversão registrada como nova entrada na trilha append-only.
 - Q: Qual evento concreto dispara o travamento do protocolo? → A: A **primeira decisão de triagem** registrada em qualquer registro (incluir/excluir/dúvida em Título/Resumo).
 
-## User Scenarios & Testing *(mandatory)*
+## User Scenarios & Testing _(mandatory)_
 
 ### User Story 1 - Criar e acessar uma Revisão isolada (Priority: P1)
 
@@ -272,7 +272,7 @@ e consistência número-a-número.
 - **Troca de Revisão ativa no meio de uma fila**: o estado da fila da Revisão
   anterior é preservado e reabrível.
 
-## Requirements *(mandatory)*
+## Requirements _(mandatory)_
 
 ### Functional Requirements
 
@@ -416,7 +416,7 @@ e consistência número-a-número.
   de entrada MUST ser aceito em múltiplos idiomas e o trecho-fonte MUST ser exibido
   no idioma original.
 
-### Key Entities *(include if feature involves data)*
+### Key Entities _(include if feature involves data)_
 
 - **Revisão**: agregado-raiz; um projeto de revisão sistemática. Possui título,
   framework de pergunta, critérios de elegibilidade, protocolo, configuração de
@@ -446,7 +446,7 @@ e consistência número-a-número.
 - **Chave BYOK / consumo**: a chave de provedor de IA cifrada e a contabilidade de
   tokens/custo por Revisão/fase.
 
-## Success Criteria *(mandatory)*
+## Success Criteria _(mandatory)_
 
 ### Measurable Outcomes
 
