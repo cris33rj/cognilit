@@ -1,1 +1,9 @@
-/* Tailwind será adicionado na Task 2 */
+@import "tailwindcss";
+
+/* Estratégia de dark mode por classe (CLAUDE.md §Estilo) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --color-bg: #ffffff;
+  --color-fg: #0a0a0a;
+}
