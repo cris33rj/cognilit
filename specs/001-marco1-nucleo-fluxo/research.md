@@ -23,10 +23,10 @@
   dependência externa. `@supabase/ssr` é o caminho oficial para sessões em Server
   Components / Server Actions / Route Handlers do Next.js 14.
 - **Alternatives considered**:
-  - _Magic link / OTP_: bom UX, mas adiciona fluxo de e-mail transacional sem ganho
+  - *Magic link / OTP*: bom UX, mas adiciona fluxo de e-mail transacional sem ganho
     para a v1 solo; pode ser ligado depois (mesmo provider).
-  - _OAuth (Google/GitHub)_: fora de escopo v1; nenhum requisito o pede.
-  - _Auth próprio (NextAuth/Lucia)_: duplicaria o que o Supabase Auth já entrega e
+  - *OAuth (Google/GitHub)*: fora de escopo v1; nenhum requisito o pede.
+  - *Auth próprio (NextAuth/Lucia)*: duplicaria o que o Supabase Auth já entrega e
     desalinharia do `auth.uid()` usado pela RLS — rejeitado.
 
 ---
@@ -44,18 +44,18 @@
        de confirmação (nunca remove sozinho).
      - `0.85 ≤ similarity < 0.92` ⇒ entra na fila com marcação "baixa confiança".
      - `< 0.85` ⇒ não é par.
-       Limiares ficam em **constantes de configuração** (`DEDUP_FUZZY_*`), ajustáveis
-       sem mudança de schema.
+     Limiares ficam em **constantes de configuração** (`DEDUP_FUZZY_*`), ajustáveis
+     sem mudança de schema.
 - **Rationale**: `pg_trgm` é nativo do Postgres/Supabase — zero dependência nova
   (constitution §Restrições). Manter o limiar em constante (não hard-coded em
   query) permite calibrar contra corpus real sem migration. O patamar 0.92 é
   conservador para evitar falso-merge automático; tudo fuzzy passa por humano (D6).
 - **Alternatives considered**:
-  - _Levenshtein puro (`fuzzystrmatch`)_: sensível a comprimento; pior para títulos
+  - *Levenshtein puro (`fuzzystrmatch`)*: sensível a comprimento; pior para títulos
     longos que diferem em pontuação — preterido em favor de trigram.
-  - _Embeddings para dedup_: o `EmbeddingProvider` é Marco 2 (D27/D28); usá-lo aqui
+  - *Embeddings para dedup*: o `EmbeddingProvider` é Marco 2 (D27/D28); usá-lo aqui
     violaria o escopo e adicionaria custo BYOK desnecessário — rejeitado.
-  - _Auto-merge de fuzzy acima de um limiar_: contraria D6 (fuzzy é sempre humano) —
+  - *Auto-merge de fuzzy acima de um limiar*: contraria D6 (fuzzy é sempre humano) —
     rejeitado.
 
 ---
@@ -85,13 +85,13 @@
   VIII (retomável, resiliente por-item, edge não faz trabalho pesado). Polling
   evita complexidade de canais Realtime na primeira fatia.
 - **Alternatives considered**:
-  - _Parsing 100% client-side_: viável para arquivos pequenos, mas não é retomável
+  - *Parsing 100% client-side*: viável para arquivos pequenos, mas não é retomável
     nem resiliente e não satisfaz o princípio para importações grandes — usado
     apenas para a **pré-visualização** (parse parcial leve no cliente), não para a
     persistência final.
-  - _Trigger.dev / Inngest / fila externa_: dependência e superfície novas, fora da
+  - *Trigger.dev / Inngest / fila externa*: dependência e superfície novas, fora da
     stack ratificada — rejeitado para a v1.
-  - _Supabase Queues (pgmq)_: alternativa válida; preterida só para minimizar
+  - *Supabase Queues (pgmq)*: alternativa válida; preterida só para minimizar
     superfície na 1ª fatia — `job`/`job_item` em tabelas comuns é mais transparente
     para a trilha de auditoria e para o polling. Pode migrar para pgmq depois sem
     mudar o contrato externo.
@@ -131,9 +131,9 @@
   "cifrada em repouso" sem gerência de chave-mestra própria. Alinha ao Princípio
   VII (BYOK cifrada) e mantém a decifragem fora do browser.
 - **Alternatives considered**:
-  - _Cifrar na aplicação com chave em env var_: exige gestão de chave-mestra e
+  - *Cifrar na aplicação com chave em env var*: exige gestão de chave-mestra e
     rotação manual; Vault entrega isso — preterido.
-  - _Guardar em texto puro com RLS_: viola "cifrada em repouso" — rejeitado.
+  - *Guardar em texto puro com RLS*: viola "cifrada em repouso" — rejeitado.
 
 ---
 
@@ -166,15 +166,15 @@
 
 ## Resumo das decisões
 
-| #   | Tema             | Decisão                                                                    | Dependência nova?                        |
-| --- | ---------------- | -------------------------------------------------------------------------- | ---------------------------------------- |
-| R1  | Auth             | Supabase Auth e-mail/senha + `@supabase/ssr`                               | Não (stack)                              |
-| R2  | Dedup            | Exatas por DOI/título+ano; fuzzy por `pg_trgm` ≥0.92, fila humana          | Não (`pg_trgm` nativo)                   |
-| R3  | Jobs assíncronos | `job`/`job_item` no Postgres + worker Edge Function via `pg_cron`; polling | Não (Supabase)                           |
-| R4  | Parsers          | RIS/BibTeX/CSV isolados em módulos no worker                               | Sim — por fatia, tarefa explícita        |
-| R5  | BYOK em repouso  | Supabase Vault (pgsodium)                                                  | Não (Supabase)                           |
-| R6  | Estado de fila   | Search params da URL                                                       | Não (Next.js)                            |
-| R7  | Performance      | TanStack Virtual + updates otimistas                                       | Sim — TanStack Virtual, tarefa explícita |
+| # | Tema | Decisão | Dependência nova? |
+|---|------|---------|-------------------|
+| R1 | Auth | Supabase Auth e-mail/senha + `@supabase/ssr` | Não (stack) |
+| R2 | Dedup | Exatas por DOI/título+ano; fuzzy por `pg_trgm` ≥0.92, fila humana | Não (`pg_trgm` nativo) |
+| R3 | Jobs assíncronos | `job`/`job_item` no Postgres + worker Edge Function via `pg_cron`; polling | Não (Supabase) |
+| R4 | Parsers | RIS/BibTeX/CSV isolados em módulos no worker | Sim — por fatia, tarefa explícita |
+| R5 | BYOK em repouso | Supabase Vault (pgsodium) | Não (Supabase) |
+| R6 | Estado de fila | Search params da URL | Não (Next.js) |
+| R7 | Performance | TanStack Virtual + updates otimistas | Sim — TanStack Virtual, tarefa explícita |
 
 Nenhuma decisão reabre `docs/CONTEXT.md` nem contraria a constitution. Todas as
 dependências novas (R4, R7) ficam condicionadas a **tarefa explícita** na fatia

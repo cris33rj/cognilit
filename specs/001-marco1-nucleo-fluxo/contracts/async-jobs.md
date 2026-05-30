@@ -47,7 +47,6 @@ UI usa TanStack Query com `refetchInterval` enquanto `status ∈ {queued, runnin
 para ao chegar em `completed | completed_with_errors | failed`.
 
 ## Worker (interno — via `pg_cron`)
-
 - Seleciona lote de `job_item.status='pending'`, processa **um a um**, commit por
   item; `job.progress` recalculado; item que falha vira `failed` (com `error`,
   `attempts++`) sem derrubar o job.
@@ -55,7 +54,6 @@ para ao chegar em `completed | completed_with_errors | failed`.
 - **Retomável**: reinício do worker continua dos `pending`/`failed` elegíveis.
 
 ## Status state machine
-
 ```
 queued → running → completed
                  → completed_with_errors
@@ -63,7 +61,6 @@ queued → running → completed
 ```
 
 ## Testes mínimos (TDD)
-
 - Enqueue de arquivo malformado ⇒ 400 e **zero** records persistidos (FR-016).
 - Falha forçada em 1 item ⇒ job `completed_with_errors`, demais itens `done`.
 - `ai_screening_batch` sem confirmação de custo ⇒ worker não processa.

@@ -103,15 +103,15 @@ completo). Nenhuma fatia pode quebrar isso em rotas separadas.
 O `.env.example` descreve um esquema de BYOK que **não corresponde** ao
 design canônico desta feature:
 
-| `.env.example` (resíduo)                    | Canônico (R5 / data-model `byok_key`)                |
-| ------------------------------------------- | ---------------------------------------------------- |
-| `BYOK_MASTER_KEY` + cifragem por master-key | **Supabase Vault** (cifra em repouso)                |
-| tabela `byok_keys`, `private.app_secrets`   | tabela `byok_key` + `vault_secret_id`                |
-| `resolveLLMKey()`, `ANTHROPIC_BYOK_DEV`     | abstração `LLMProvider`, chave decifrada server-side |
-| anotações "A4", "A7", "migration 0009"      | nenhuma migration existe (greenfield)                |
+| `.env.example` (resíduo) | Canônico (R5 / data-model `byok_key`) |
+|---|---|
+| `BYOK_MASTER_KEY` + cifragem por master-key | **Supabase Vault** (cifra em repouso) |
+| tabela `byok_keys`, `private.app_secrets` | tabela `byok_key` + `vault_secret_id` |
+| `resolveLLMKey()`, `ANTHROPIC_BYOK_DEV` | abstração `LLMProvider`, chave decifrada server-side |
+| anotações "A4", "A7", "migration 0009" | nenhuma migration existe (greenfield) |
 
 **Hipótese:** o `.env.example` é resíduo do **"build anterior" descartado**
-(o mesmo citado na constitution §I _Rationale_ e em D32 — o build que
+(o mesmo citado na constitution §I *Rationale* e em D32 — o build que
 fragmentou a triagem). As migrations 0001–0009 que ele pressupõe **não
 existem** no repositório.
 
@@ -137,4 +137,4 @@ introduz BYOK for planejada (`writing-plans`), uma tarefa explícita deve
   não-regressão de marcos ≥ 2 não se aplica.
 - **Itens A\* do HANDOFF** a alocar: A1 (formato export da trilha),
   A2 (orçamento de perf da fila ~5.000), A3 (libs de parsing RIS/BibTeX/CSV
-  - TanStack Virtual, por tarefa explícita).
+  + TanStack Virtual, por tarefa explícita).

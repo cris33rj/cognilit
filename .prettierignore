@@ -6,3 +6,14 @@ test-results
 supabase/.branches
 supabase/.temp
 src/types/database.ts
+
+# Canonical / planning artifacts — NEVER auto-format.
+# These are sign-off documents; HANDOFF.md cites exact line-count anchors
+# (e.g. CONTEXT.md "179 linhas") that reflowing would break. Changes to
+# spec.md/constitution.md require an explicit amendment, not a formatter.
+docs/
+specs/
+.specify/
+.claude/
+CLAUDE.md
+README.md

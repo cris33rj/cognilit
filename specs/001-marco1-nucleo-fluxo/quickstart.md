@@ -7,7 +7,6 @@
 > Stack conforme constitution §Restrições.
 
 ## Pré-requisitos
-
 - Node 18+ e npm
 - Docker (para Supabase local) + Supabase CLI
 - Uma chave de API do provedor de LLM (Anthropic/Claude) para as funções de IA
@@ -24,7 +23,6 @@ npm run dev                    # Next.js (App Router) em http://localhost:3000
 ```
 
 Variáveis de ambiente esperadas (`.env.local`):
-
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY` (worker/Edge Functions)
 - BYOK: a chave do LLM é cadastrada **pela UI** e cifrada no **Supabase Vault**
@@ -69,7 +67,6 @@ npm run test:e2e      # Playwright — fluxos críticos: importar, triar T/R e T
 ```
 
 ## Notas
-
 - Marco 1 **não** ingere PDF nem extrai dados por IA (Marco 2): o grounding das
   sugestões de triagem ancora em metadado/resumo importado (spec §Assumptions).
 - O fluxograma PRISMA **renderizado** é Marco 3; aqui mantêm-se apenas os

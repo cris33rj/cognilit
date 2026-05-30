@@ -46,16 +46,13 @@ próprio usuário. `audit_entry` é **insert-only** (sem update/delete por polí
 ## Entidades
 
 ### profile
-
 Espelha `auth.users`; dados de aplicação do usuário.
-
 - `id` (PK = `auth.users.id`)
 - `display_name`
 - `created_at`
 - **RLS**: `id = auth.uid()`.
 
-### review _(agregado-raiz — Revisão)_
-
+### review  *(agregado-raiz — Revisão)*
 - `id` (PK)
 - `title` (obrigatório, FR-002)
 - `pipeline_config` (jsonb) — fases opcionais ligadas/desligadas (D19); na v1
@@ -67,8 +64,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - **RLS**: existe `member` com `auth.uid()` para este `review_id`.
 - **Validação**: `title` não-vazio.
 
-### member _(usuário ↔ Revisão ↔ papel)_
-
+### member  *(usuário ↔ Revisão ↔ papel)*
 - `id` (PK)
 - `review_id` (FK), `user_id` (FK profile)
 - `role` enum `owner | reviewer | viewer` (D21)
@@ -84,8 +80,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - **RLS**: membro vê os membros da própria Revisão; escrita de membros restrita ao
   `owner` (latente na v1).
 
-### question _(Pergunta + framework — US5)_
-
+### question  *(Pergunta + framework — US5)*
 - `id` (PK), `review_id` (FK, 1:1)
 - `framework` enum `spider | pico | peo | pcc | free` (default `spider`, FR-006)
 - `fields` (jsonb) — campos adaptados ao framework escolhido
@@ -93,8 +88,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - `created_at`, `updated_at`
 - **Validação**: `framework` default `spider`; `fields` coerente com o framework.
 
-### eligibility*criterion *(critérios/termos derivados — US5)\_
-
+### eligibility_criterion  *(critérios/termos derivados — US5)*
 - `id` (PK), `review_id` (FK), `question_id` (FK)
 - `kind` enum `inclusion | exclusion | search_term`
 - `text`
@@ -106,8 +100,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - **Validação**: `origin=ai` ⇒ há `ai_suggestion_id`; só vale como critério ativo
   se `ratification_state ∈ {accepted, edited}`.
 
-### protocol _(PRISMA-P — US6)_
-
+### protocol  *(PRISMA-P — US6)*
 - `id` (PK), `review_id` (FK, 1:1)
 - `content` (jsonb/markdown) — rascunho editável
 - `state` enum `draft | locked` (FR-010)
@@ -118,8 +111,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
   da Revisão (FR-010, clarificação Q5). Após `locked`, `content` é **imutável**;
   mudanças só via `protocol_amendment` (FR-011).
 
-### protocol*amendment *(emenda versionada — US6)\_
-
+### protocol_amendment  *(emenda versionada — US6)*
 - `id` (PK), `review_id` (FK), `protocol_id` (FK)
 - `version` (int, sequencial por protocolo)
 - `change` (jsonb/markdown) — o que mudou
@@ -128,8 +120,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - **Validação**: só existe se `protocol.state = locked`; não sobrescreve `content`
   travado (FR-011, SC-010).
 
-### search _(Busca registrada — US2)_
-
+### search  *(Busca registrada — US2)*
 - `id` (PK), `review_id` (FK)
 - `query_string`, `database` (base consultada), `searched_on` (DATE),
   `hits` (int)
@@ -137,8 +128,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - **Relação**: cada `record` referencia a `search` que o originou.
 - **Validação**: `hits ≥ 0`; `searched_on` válida.
 
-### record _(Registro bibliográfico — US2/US3/US4)_
-
+### record  *(Registro bibliográfico — US2/US3/US4)*
 - `id` (PK), `review_id` (FK), `search_id` (FK nullable)
 - `source_format` enum `ris | bibtex | csv`
 - `raw` (jsonb) — campos originais preservados (idioma original, FR-038)
@@ -156,8 +146,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
     `ts_decision=maybe` **bloqueia** avanço até virar `included|excluded`.
 - **Índices**: `pg_trgm` em `title_norm` (dedup fuzzy, R2); `doi_normalized`.
 
-### dedup*decision *(Decisão de dedup — US3)\_
-
+### dedup_decision  *(Decisão de dedup — US3)*
 - `id` (PK), `review_id` (FK)
 - `kind` enum `exact_auto | fuzzy_human`
 - `record_a_id` (FK), `record_b_id` (FK nullable p/ exact contra chave)
@@ -170,8 +159,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
   criação/reversão ⇒ `audit_entry`. Reversão é **por item, a qualquer momento**
   (clarificação Q4) e cria nova `audit_entry` (não apaga a anterior).
 
-### screening*decision *(Decisão de triagem — US4)\_
-
+### screening_decision  *(Decisão de triagem — US4)*
 - `id` (PK), `review_id` (FK), `record_id` (FK)
 - `stage` enum `title_abstract | full_text`
 - `decision` enum `include | exclude | maybe` (`maybe` só em `title_abstract`)
@@ -184,15 +172,13 @@ Espelha `auth.users`; dados de aplicação do usuário.
   `protocol.state → locked` (FR-010). Reversão por item a qualquer momento
   (Q4) ⇒ nova `audit_entry`.
 
-### exclusion*reason *(lista configurável por projeto — US4)\_
-
+### exclusion_reason  *(lista configurável por projeto — US4)*
 - `id` (PK), `review_id` (FK)
 - `label`, `is_active` (bool), `order` (int)
 - **Seed**: conjunto padrão configurável (spec §Assumptions); curadoria fina é
   implementação.
 
-### ai*suggestion *(Sugestão de IA — transversal)\_
-
+### ai_suggestion  *(Sugestão de IA — transversal)*
 - `id` (PK), `review_id` (FK)
 - `target_kind` enum `eligibility | protocol_draft | screening` (Marco 1)
 - `target_id` (id do alvo: criterion/protocol/record)
@@ -206,8 +192,7 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - `created_at`
 - **Validação**: `provenance` não-nulo; `state` default `pending`.
 
-### audit*entry *(trilha append-only — transversal)\_
-
+### audit_entry  *(trilha append-only — transversal)*
 - `id` (PK), `review_id` (FK)
 - `actor_type` enum `human | ai | system`, `actor_id` (nullable)
 - `action` (texto), `entity` + `entity_id`
@@ -216,10 +201,8 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - **RLS/Política**: **insert-only** — sem `UPDATE`/`DELETE` (Princípio III, FR-035).
   Exportável.
 
-### job + job*item *(jobs assíncronos — R3, Princípio VIII)\_
-
+### job + job_item  *(jobs assíncronos — R3, Princípio VIII)*
 **job**
-
 - `id` (PK), `review_id` (FK)
 - `type` enum `import_parse | ai_screening_batch`
 - `status` enum `queued | running | completed | completed_with_errors | failed`
@@ -228,7 +211,6 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - `created_at`, `started_at`, `finished_at`
 
 **job_item**
-
 - `id` (PK), `job_id` (FK), `review_id` (FK)
 - `status` enum `pending | done | failed`
 - `payload` (jsonb) — unidade de trabalho (uma referência a parsear, um record a
@@ -237,25 +219,22 @@ Espelha `auth.users`; dados de aplicação do usuário.
 - **Regra**: worker processa item-a-item com commit por item (resiliência por-item,
   Princípio VIII). Falha de um item ⇒ `failed`, não derruba o `job`.
 
-### byok*key *(chave BYOK — R5, FR-032)\_
-
-- `id` (PK), `review_id` (FK) _(ou escopo por usuário — decisão de migration; o
-  contrato é "uma chave de LLM por escopo de uso")_
+### byok_key  *(chave BYOK — R5, FR-032)*
+- `id` (PK), `review_id` (FK)  *(ou escopo por usuário — decisão de migration; o
+  contrato é "uma chave de LLM por escopo de uso")*
 - `provider` enum `anthropic | …` (default `anthropic`, D14)
 - `vault_secret_id` — referência ao **Supabase Vault** (chave cifrada; nunca em
   texto puro no schema, R5)
 - `created_at`
 - **RLS**: somente membros da Revisão; o segredo só é decifrado server-side.
 
-### ai*usage *(contabilidade de custo — FR-033, P5)\_
-
+### ai_usage  *(contabilidade de custo — FR-033, P5)*
 - `id` (PK), `review_id` (FK), `phase` (texto: question/protocol/screening)
 - `tokens_in`, `tokens_out`, `cost` (jsonb)
 - `job_id` (FK nullable), `created_at`
 - **Uso**: alimenta consumo acumulado por Revisão/fase (SC-008).
 
-### prisma*counter *(derivado — VIEW, não tabela)\_
-
+### prisma_counter  *(derivado — VIEW, não tabela)*
 - Contadores vivos (VI/EP-2): `identified`, `duplicates` (exatas + fuzzy
   confirmadas), `screened`, `included`, `excluded_by_reason` (agrupado).
 - **Implementação**: **view/consulta agregada** sobre `record`/`dedup_decision`/
@@ -284,7 +263,6 @@ imported
 ```
 
 Regras de transição:
-
 - `maybe_ts` é **terminal-pendente**: precisa virar `excluded_ts` ou `included_ts`
   antes de qualquer avanço (clarificação Q1). Não conta como "triado" final no
   PRISMA (VI).
@@ -294,16 +272,15 @@ Regras de transição:
 
 ## Contagem PRISMA (mapeamento — SC-004)
 
-| Contador            | Fonte                                                                                      |
-| ------------------- | ------------------------------------------------------------------------------------------ |
-| identificados       | `count(record)` importados (= soma de hits/registros)                                      |
-| duplicados          | `dedup_decision.outcome=removed` (exata) + `merged` (fuzzy confirmada) não revertidas      |
-| triados             | records com `ts_decision ∈ {included,excluded}` (exclui `maybe` pendente)                  |
-| incluídos           | `corpus_state = included_ft` (ou `included_ts` se TC não aplicável)                        |
+| Contador | Fonte |
+|----------|-------|
+| identificados | `count(record)` importados (= soma de hits/registros) |
+| duplicados | `dedup_decision.outcome=removed` (exata) + `merged` (fuzzy confirmada) não revertidas |
+| triados | records com `ts_decision ∈ {included,excluded}` (exclui `maybe` pendente) |
+| incluídos | `corpus_state = included_ft` (ou `included_ts` se TC não aplicável) |
 | excluídos por razão | `screening_decision(stage=full_text, decision=exclude)` agrupado por `exclusion_reason_id` |
 
 ## Notas de RLS (resumo — detalhe na migration)
-
 - Padrão: `USING (exists member where review_id = row.review_id and user_id = auth.uid())`.
 - `audit_entry`: `INSERT` permitido a membros; **sem** `UPDATE`/`DELETE`.
 - `byok_key`: leitura do `vault_secret_id` por membro; decifragem só server-side.

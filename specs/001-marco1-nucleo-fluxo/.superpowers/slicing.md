@@ -26,7 +26,7 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   - scroll mantém **~60 fps** com 5.000 linhas virtualizadas;
   - navegação por tecla (próximo/anterior) **< 50 ms**;
   - render inicial da fila **< 1 s** para 5.000 registros.
-    _(Não altera `spec.md`; o limiar vive no `IMPLEMENTATION_PLAN.md` da fatia.)_
+  *(Não altera `spec.md`; o limiar vive no `IMPLEMENTATION_PLAN.md` da fatia.)*
 - **A3 — libs de parsing (FR-013): papaparse + lib BibTeX + RIS próprio.**
   CSV = `papaparse`; BibTeX = lib madura (formato complexo, não reinventar);
   RIS = parser próprio simples (formato tagged, line-oriented). Os **nomes
@@ -39,7 +39,6 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 ## Fatias (ordem de execução)
 
 ### Fatia 1 — Fundação & Revisão isolada
-
 - **Branch:** `build/001-marco1-nucleo-fluxo/1-fundacao-revisao`
 - **US:** US1 (P1). **FR:** 001–005, base de 035 (tabela append-only).
 - **Entra:**
@@ -62,7 +61,6 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   integração); auth; criação/troca de Revisão.
 
 ### Fatia 2 — Pergunta + Protocolo (+ plumbing de IA/BYOK)
-
 - **Branch:** `build/001-marco1-nucleo-fluxo/2-pergunta-protocolo`
 - **US:** US5, US6 (P2). **FR:** 006–012, 030–034 (vocabulário de estado/
   proveniência e BYOK introduzidos aqui).
@@ -95,7 +93,6 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   sobrescreve versão travada (SC-010).
 
 ### Fatia 3 — Workbench shell + Importação & registro de busca
-
 - **Branch:** `build/001-marco1-nucleo-fluxo/3-workbench-importacao`
 - **US:** US2 (P1). **FR:** 013–017, 027 (superfície única estabelecida).
   **A3.**
@@ -125,7 +122,6 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   e2e "importar".
 
 ### Fatia 4 — Deduplicação no workbench
-
 - **Branch:** `build/001-marco1-nucleo-fluxo/4-deduplicacao`
 - **US:** US3 (P1). **FR:** 018–021, 026 (granularidade de reversão).
 - **Entra:**
@@ -144,7 +140,6 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   contadores; estado órfão impedido (edge case).
 
 ### Fatia 5 — Triagem em duas etapas + IA-no-laço
-
 - **Branch:** `build/001-marco1-nucleo-fluxo/5-triagem`
 - **US:** US4 (P1). **FR:** 022–026, 028, 029, 039, 040, 041, 024/033 (lote+
   custo). **A2.**
@@ -176,7 +171,6 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   disparado na 1ª decisão.
 
 ### Fatia 6 — Shell, trilho & PRISMA vivo + export de auditoria
-
 - **Branch:** `build/001-marco1-nucleo-fluxo/6-shell-prisma-auditoria`
 - **US:** US7 (P3). **FR:** 035 (export), 036, 037. **A1.**
 - **Entra:**
