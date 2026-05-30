@@ -1,7 +1,10 @@
-export default function HomePage() {
-  return (
-    <main className="flex min-h-screen items-center justify-center text-2xl font-semibold">
-      Cognilit
-    </main>
-  );
+import { redirect } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+
+export default async function HomePage() {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  redirect(user ? "/reviews" : "/login");
 }
