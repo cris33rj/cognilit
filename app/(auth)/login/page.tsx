@@ -8,6 +8,7 @@ export default async function LoginPage({
   const { error } = await searchParams;
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-4 p-6">
+      <h2 className="text-2xl font-bold">Cognilit</h2>
       <h1 className="text-xl font-semibold">Entrar</h1>
       {error && <p className="text-sm text-red-600">{error}</p>}
       <form action={signIn} className="flex flex-col gap-3">
