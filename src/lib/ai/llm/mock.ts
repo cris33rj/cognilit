@@ -70,9 +70,11 @@ export class MockLLMProvider implements LLMProvider {
     );
   }
 
-  async preclassifyScreening(): Promise<
-    LlmSuggestion<ScreeningPreclassification>
-  > {
+  async preclassifyScreening(_: {
+    title: string;
+    abstract: string | null;
+    criteria: string[];
+  }): Promise<LlmSuggestion<ScreeningPreclassification>> {
     return suggestion<ScreeningPreclassification>(
       {
         recommendation: "include",

@@ -6,7 +6,7 @@ describe("estimateScreeningCost", () => {
     const a = estimateScreeningCost(100);
     const b = estimateScreeningCost(200);
     expect(b.tokensEstimated).toBe(a.tokensEstimated * 2);
-    expect(b.cost.usd).toBeGreaterThan(a.cost.usd);
+    expect(b.cost.usd!).toBeGreaterThan(a.cost.usd!);
   });
 
   it("0 itens ⇒ custo zero", () => {
