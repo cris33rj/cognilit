@@ -28,6 +28,7 @@ export default defineConfig(({ mode }) => {
         NEXT_PUBLIC_SUPABASE_URL: env.NEXT_PUBLIC_SUPABASE_URL ?? "",
         NEXT_PUBLIC_SUPABASE_ANON_KEY: env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
         SUPABASE_SERVICE_ROLE_KEY: env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+        ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY ?? "",
       },
     },
   };
