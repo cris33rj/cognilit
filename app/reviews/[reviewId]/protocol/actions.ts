@@ -29,6 +29,15 @@ export async function draftProtocol(reviewId: string) {
     .maybeSingle();
   if (!q) return { ok: false, error: "Formule a pergunta primeiro." };
 
+  const { data: existing } = await supabase
+    .from("protocol")
+    .select("state")
+    .eq("review_id", reviewId)
+    .maybeSingle();
+  if (existing?.state === "locked") {
+    return { ok: false, error: "Protocolo travado; use emendas." };
+  }
+
   const { data: crit } = await supabase
     .from("eligibility_criterion")
     .select("text")
@@ -49,7 +58,7 @@ export async function draftProtocol(reviewId: string) {
     criteria: (crit ?? []).map((c) => c.text),
   });
 
-  const { data: sug } = await supabase
+  const { data: sug, error: sugError } = await supabase
     .from("ai_suggestion")
     .insert({
       review_id: reviewId,
@@ -61,6 +70,9 @@ export async function draftProtocol(reviewId: string) {
     })
     .select("id")
     .single();
+  if (sugError || !sug) {
+    return { ok: false, error: "Falha ao registrar sugestão de IA." };
+  }
 
   const { data: proto, error } = await supabase
     .from("protocol")
@@ -69,16 +81,14 @@ export async function draftProtocol(reviewId: string) {
         review_id: reviewId,
         content: { contentMarkdown: s.output.contentMarkdown },
         origin: "ai_draft",
-        ai_suggestion_id: sug?.id ?? null,
+        ai_suggestion_id: sug.id,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "review_id" },
     )
-    .select("id, state")
+    .select("id")
     .single();
   if (error || !proto) return { ok: false, error: "Falha ao gravar rascunho." };
-  if (proto.state === "locked")
-    return { ok: false, error: "Protocolo travado; use emendas." };
 
   await writeAudit(supabase, {
     reviewId,
