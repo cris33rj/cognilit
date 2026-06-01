@@ -1,1665 +1,1919 @@
-# Fatia 2 — Pergunta + Protocolo (+ plumbing de IA/BYOK) — Implementation Plan
+# Fatia 3 — Workbench shell + Importação & registro de busca — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Escopo:** esta é a **Fatia 2 de 6** do Marco 1 (`001-marco1-nucleo-fluxo`).
+> **Escopo:** esta é a **Fatia 3 de 6** do Marco 1 (`001-marco1-nucleo-fluxo`).
 > Fronteiras, dependências e gate de cobertura em
 > [.superpowers/slicing.md](./.superpowers/slicing.md). NÃO planejar/implementar
-> capacidades de outras fatias (workbench, importação, dedup, triagem, jobs em lote).
-> *(O plano detalhado da Fatia 1 permanece no histórico git — commit `2a2a82f`.)*
+> capacidades de outras fatias (dedup = Fatia 4; triagem/IA-em-lote = Fatia 5;
+> trilho/PRISMA view/export de auditoria = Fatia 6).
+> *(Os planos das Fatias 1 e 2 permanecem no histórico git — commit `6df6f8d` e anteriores.)*
 >
-> **Branch de trabalho:** `build/001-marco1-nucleo-fluxo/2-pergunta-protocolo`
-> (criado via `superpowers:using-git-worktrees`). A sessão **NUNCA** faz `git merge`
+> **Branch de trabalho:** `build/001-marco1-nucleo-fluxo/3-workbench-importacao`
+> (criar via `superpowers:using-git-worktrees`). A sessão **NUNCA** faz `git merge`
 > nem `git push` para a feature branch ou `main` — o merge é manual do desenvolvedor
 > ao fim da fatia (CHECKPOINT 3).
->
-> **Skills de implementação obrigatórias (HANDOFF §"Skills de implementação"):** subagentes começam **frios**. Toda tarefa de UI/componente abaixo nomeia explicitamente qual skill carregar: `frontend-design:frontend-design` (vocabulário de IA, formulários), `react-best-practices:react-best-practices` (componentes/data fetching), `nextjs-best-practices:nextjs-best-practices` (fronteiras RSC/Client, server actions). Carregue-as antes de escrever o código correspondente.
 
-**Goal:** Entregar US5 (formular a Pergunta com framework + derivação de critérios/termos por IA, ratificável) e US6 (rascunhar/editar/travar o Protocolo PRISMA-P com emendas versionadas e export), fundadas sobre a **abstração `LLMProvider`** (adapter Anthropic default) e **BYOK via Supabase Vault** — tudo isolado por Revisão com RLS, auditado, e com saída de IA em pt-BR carregando proveniência e estado.
+**Goal:** Estabelecer a superfície única do workbench (Princípio V) com o modo **Importar** funcional — registro de busca + importação RIS/BibTeX/CSV com preview, sobre a infra de **jobs assíncronos** (enqueue valida → worker persiste, resiliente por-item).
 
-**Architecture:** Migration `0002` cria `question`, `eligibility_criterion`, `protocol`, `protocol_amendment`, `ai_suggestion`, `byok_key`, `ai_usage` com RLS por `is_review_member` (helper da Fatia 1) e RPCs `SECURITY DEFINER` para as operações atômicas/sensíveis (gravar BYOK no Vault, travar protocolo, criar emenda). A IA é chamada **exclusivamente** pela abstração `LLMProvider` (`src/lib/ai/llm/`); nenhum código de feature instancia um SDK direto. No Marco 1 as gerações (derivar critérios, rascunhar protocolo) são **single-shot síncronas** em **Server Actions** server-side (jobs em lote são Fatia 3/5). A chave BYOK é decifrada **somente server-side** via cliente service-role + RPC restrita a `service_role`; nunca chega ao browser. O vocabulário visual de IA (`src/components/ai/`) nasce aqui e é reusado nas fases seguintes (EP-3).
+**Architecture:** Núcleo de parsing e de jobs em **TypeScript portátil** (`supabase/functions/_shared/`), consumido por três frentes: (a) preview client-side no Next; (b) testes Vitest em Node; (c) Edge Functions Deno (`jobs-enqueue`/`jobs-worker`) como cascas HTTP finas. `jobs-enqueue` **parseia para validar** (malformado ⇒ 400, zero persistência — FR-016) e cria `job` + um `job_item` por registro via RPC atômica; o **worker** normaliza (`doi_normalized`/`title_norm`) e **insere os `record`s por item** (§VIII). A UI observa por **polling (TanStack Query)**. Em produção o worker é agendado por `pg_cron`→`pg_net`; nos testes/e2e o worker é disparado por um gatilho server-side guardado (sem depender de timing de cron nem de Deno no host).
 
-**Tech Stack:** Next.js 14 App Router (RSC default; `'use client'` só nas superfícies interativas), TypeScript strict, Supabase (Postgres + RLS + Vault), `@supabase/ssr` (cliente por sessão) + `@supabase/supabase-js` (cliente service-role server-only), React Hook Form + Zod, Tailwind 4, Vitest (unit/integration), Playwright (e2e). **Nova dependência (tarefa explícita, constitution §Portões):** `@anthropic-ai/sdk`.
+**Tech Stack:** Next.js 14 (App Router, RSC default), TypeScript strict, Supabase (Postgres + RLS + RPC `SECURITY DEFINER` + Edge Functions Deno + `pg_trgm`/`pg_cron`/`pg_net`), TanStack Query, `papaparse` (CSV), `@retorquere/bibtex-parser` (BibTeX), parser RIS próprio. Vitest (unit+integração), Playwright (e2e).
 
 ---
 
-## Decisões de implementação desta fatia (resolvidas no plano)
+## Decisões de implementação desta fatia (D-F3.\*)
 
-Registradas aqui porque afetam o aceite; nenhuma reabre `spec.md`/`CONTEXT.md`.
+Registradas aqui (espelham o estilo das D-F2.\* da Fatia 2). As marcadas **[DESVIO]** alteram o caminho literal do contrato/plan por restrição de ambiente e devem ser confirmadas no CHECKPOINT 2.
 
-- **D-F2.1 — Export do protocolo (FR-012) = Markdown.** O `plan.md` define export como "serialização de `protocol.content` (Markdown **e/ou** PDF)". Fatia 2 entrega **download Markdown** (`.md`). PDF exigiria uma dependência pesada nova **não prevista** no `plan.md`/`research.md`; fica adiado ao pipeline de relatório do Marco 3 (spec §Out of Scope). Aceite de FR-012 = obter um `.md` submissível.
-- **D-F2.2 — Escopo da chave BYOK = por Revisão (`review_id`).** O `data-model.md` deixa a decisão à migration ("uma chave de LLM por escopo de uso"). Escolhido `review_id` por casar com o padrão RLS `is_review_member` e com as fases consumidoras (Pergunta/Protocolo são review-scoped).
-- **D-F2.3 — Geração de IA é Server Action síncrona single-shot.** Jobs assíncronos (`job`/`job_item` + worker) são Fatia 3; a **pré-classificação em lote** é Fatia 5. As gerações desta fatia (`deriveEligibility`, `draftProtocol`) são chamadas únicas e curtas — rodam em Server Action server-side, onde a BYOK é decifrada. Não há Edge Function nesta fatia (não se viola §VIII: não há trabalho pesado/em lote).
-- **D-F2.4 — Decifragem da BYOK estritamente server-side.** A RPC `get_byok_secret` é `SECURITY DEFINER` e **só** concedida a `service_role`. A Server Action verifica a sessão do usuário (membro da Revisão) com o cliente por-sessão e, só então, usa o cliente **service-role** para decifrar. O segredo nunca é retornado a um cliente `authenticated`/browser.
-- **D-F2.5 — `preclassifyScreening` e `estimateCost` implementados já na abstração.** O adapter Anthropic implementa a **interface completa** do contrato `llm-provider.md` (5 métodos) para a abstração nascer fechada; o **consumo** de `preclassifyScreening` (job em lote + UI da fila) é Fatia 5. `estimateCost` usa heurística simples agora (refinada na Fatia 5).
-- **D-F2.6 — Gatilho de travamento.** Esta fatia entrega a **operação** de lock (`lock_protocol` RPC) e o **teste direto** de travamento/imutabilidade/emenda. O **gatilho automático** pela 1ª `screening_decision` é fiado na Fatia 5 (slicing).
+- **D-F3.1 — Núcleo portátil + Edge Functions reais (casca).** A lógica de parse/validação/enqueue/processamento-por-item vive em módulos TS portáveis em `supabase/functions/_shared/`. As Edge Functions `jobs-enqueue`/`jobs-worker` são cascas HTTP Deno sobre o núcleo. Os portões (Vitest contra o Postgres local; Playwright) exercitam o **núcleo** diretamente / via gatilho de teste guardado — sem Deno no host nem timing de `pg_cron`. (Decisão do desenvolvedor no CHECKPOINT 2.)
+- **D-F3.2 — [DESVIO] Localização do núcleo de import/jobs.** O contrato `import-parsers.md` cita `src/lib/import/`. Como o deploy Deno **não alcança `src/`**, o núcleo vive em `supabase/functions/_shared/import/` e `supabase/functions/_shared/jobs/`. O app importa via alias `@shared/*`. Interface pública idêntica ao contrato (`ParsedRecord`, `ParseResult`, `BibliographicParser`).
+- **D-F3.3 — [DESVIO] `tsconfig` exclui `supabase/functions`.** Os `index.ts` das Edge Functions usam globais Deno (`Deno.serve`) e specifiers `npm:`; seriam erro sob o `tsc` do host. O `tsconfig` raiz passa a `exclude` `supabase/functions`; o núcleo `_shared` (TS puro, sem globais Deno) é checado **transitivamente** pelo `tsc` ao ser importado por `src/`/`app/`, e os shells Deno são checados pelo Deno (no deploy), fora do host.
+- **D-F3.4 — Parse valida no enqueue; persistência no worker.** `jobs-enqueue` roda o parser para validar (0 registros válidos ⇒ 400, zero persistência — FR-016) e cria `job`+`job_item`s (1 por `ParsedRecord`) via RPC atômica `create_import_job`. O **worker** normaliza e **insere os `record`s** por item, com commit por item (resiliência §VIII; persistência final no worker, fiel a `import-parsers.md`). (Decisão do desenvolvedor no CHECKPOINT 2.)
+- **D-F3.5 — Gatilho do worker.** Produção: `pg_cron`→`pg_net` `POST` na Edge Function `jobs-worker` (migration `0004`, bloco guardado e resiliente a extensão ausente localmente). Marco 1/local/e2e: Server Action guardada `runImportWorker(reviewId)` (cliente service-role, escopada à Revisão do membro) chama o **mesmo** núcleo do worker. Documentada como stand-in síncrono do cron.
+- **D-F3.6 — A3 (dependências de parsing) pinadas.** CSV = `papaparse`; BibTeX = `@retorquere/bibtex-parser` (maduro; ecossistema Zotero/BBT); RIS = parser próprio (formato tagged, line-oriented). `@tanstack/react-query` para polling. Todas entram por **tarefa explícita** (Task 1, constitution §Portões). Adapters isolam a lib atrás de `BibliographicParser` — troca de lib toca só `bibtex.ts`.
+- **D-F3.7 — Wiring do app sobre o núcleo.** O modo Importar (client) parseia para preview e, no confirmar, chama a Server Action `enqueueImport` (núcleo de enqueue, cliente RLS do usuário, via RPC `create_import_job`). A Edge Function `jobs-enqueue` é o endpoint HTTP equivalente sobre o mesmo núcleo (contrato `async-jobs.md`), sem duplicar lógica.
+- **D-F3.8 — PRISMA "identificados" mínimo.** A view `prisma_counter` completa é da Fatia 6. Aqui exibimos apenas `count(record)` da Revisão ("identificados") no cabeçalho do workbench. Sem view derivada nesta fatia.
+
+---
+
+## Escopo coberto (rastreio à spec/slicing)
+
+| Item | Onde nesta fatia |
+|------|------------------|
+| US2 (importar + registrar busca no workbench) | Tasks 13–14 (workbench + Importar + busca) |
+| FR-013 (importar RIS/BibTeX/CSV) | Tasks 5–8 (parsers) |
+| FR-014 (preview com mapeamento de campos antes de confirmar) | Tasks 8, 14 (preview client) |
+| FR-015 (registrar string/base/data/hits) | Tasks 9, 13, 14 (`search`) |
+| FR-016 (malformado ⇒ erro claro, zero persistência parcial) | Tasks 9, 14 (validação no enqueue) |
+| FR-017 (parsing de importações grandes sem bloquear; progresso visível) | Tasks 10, 14 (worker + polling) |
+| FR-027 (workbench = superfície única por modos, sem telas separadas) | Task 13 (ModeBar + 1 rota) |
+| A3 (libs de parsing pinadas) | Task 1 |
+| §VIII (enqueue enfileira; worker processa por-item, retomável) | Tasks 9, 10 |
+| SC-009 (isolamento RLS) | Task 11 |
+| Princípio III (auditoria append-only de mudanças de estado) | Tasks 2, 9, 10 (audit em RPCs) |
+
+**Fora desta fatia (não fazer):** modos Duplicatas/T-R/Texto completo funcionais (Fatia 4/5 — aqui ficam **presentes-mas-inertes**); `ai_screening_batch` (Fatia 5); dedup (Fatia 4); view `prisma_counter` completa, trilho de fases e export de auditoria (Fatia 6).
 
 ---
 
 ## File Structure
 
-**Migrations & tipos**
-- Create `supabase/migrations/0002_question_protocol_ai.sql` — schema + RLS + RPCs desta fatia.
-- Modify `src/types/database.ts` — **regenerado** via Supabase CLI após a migration.
-- Modify `package.json` — script `gen:types`; dependência `@anthropic-ai/sdk`.
+**Núcleo portátil (Deno + Node + browser) — `supabase/functions/_shared/`**
+- `import/types.ts` — `SourceFormat`, `ParsedRecord`, `ParseError`, `ParseResult`, `BibliographicParser`.
+- `import/normalize.ts` — `normalizeDoi`, `normalizeTitle` (chaves de dedup — R2, consumidas pelo worker).
+- `import/csv.ts` — parser CSV via `papaparse`.
+- `import/ris.ts` — parser RIS próprio.
+- `import/bibtex.ts` — parser BibTeX (adapter sobre `@retorquere/bibtex-parser`).
+- `import/index.ts` — `parserFor(format)`, `parseContent(format, content, opts)`.
+- `jobs/types.ts` — `JobType`, `JobStatus`, `EnqueueImportInput`, `EnqueueResult`, `WorkerResult`, `EnqueueValidationError`.
+- `jobs/enqueue.ts` — `enqueueImportJob(deps, reviewId, input)`.
+- `jobs/worker.ts` — `processImportJob(deps, jobId)`.
 
-**Camada de IA (`src/lib/ai/llm/`)** — ponto único de chamada de LLM (constitution §VII)
-- Create `src/lib/ai/llm/types.ts` — interfaces do contrato `llm-provider.md`.
-- Create `src/lib/ai/llm/mock.ts` — `MockLLMProvider` (testes/dev sem chave).
-- Create `src/lib/ai/llm/anthropic.ts` — adapter Anthropic (default D14).
-- Create `src/lib/ai/llm/index.ts` — `getLLMProvider(reviewId)` (factory: resolve BYOK → adapter; sem chave → erro tipado `MissingByokError`).
-- Create `src/lib/ai/llm/cost.ts` — heurística de `estimateCost`.
+**Edge Functions (cascas Deno) — `supabase/functions/`**
+- `jobs-enqueue/index.ts` — `Deno.serve` → núcleo de enqueue (cliente RLS do chamador).
+- `jobs-worker/index.ts` — `Deno.serve` → núcleo do worker (cliente service-role).
+- `deno.json` — import map (`papaparse`, `@retorquere/bibtex-parser`, `@supabase/supabase-js`) para o runtime Deno.
 
-**Infra server-side compartilhada**
-- Create `src/lib/supabase/admin.ts` — cliente **service-role** (server-only).
-- Create `src/lib/audit.ts` — helper `writeAudit()` reutilizável (Princípio III).
+**Migrations — `supabase/migrations/`**
+- `0003_search_record_jobs.sql` — enums + `search`, `record`, `job`, `job_item` + índices (`pg_trgm`) + RLS + RPCs `create_import_job`, `insert_import_record`.
+- `0004_jobs_cron.sql` — `pg_cron`/`pg_net` + agendamento do worker (bloco guardado, resiliente a extensão ausente local).
 
-**BYOK**
-- Create `src/lib/byok/queries.ts` — status da chave (existe? provider?) por Revisão.
-- Create `src/lib/byok/actions.ts` — server action `saveByokKey` (grava no Vault via RPC).
-- Create `src/components/ai/ByokKeyForm.tsx` — formulário de cadastro da chave.
+**App (Next) — `src/` e `app/`**
+- `src/components/providers/QueryProvider.tsx` — provider TanStack Query (client).
+- `src/lib/jobs/queries.ts` — `listJobs`, `countRecords`.
+- `src/lib/search/schema.ts` — Zod do registro de busca.
+- `src/components/workbench/ModeBar.tsx` — barra dos 4 modos (Importar ativo; demais inertes).
+- `src/components/workbench/ImportPanel.tsx` — client: arquivo + preview + form de busca + confirmar + progresso.
+- `src/components/workbench/ImportPreview.tsx` — tabela de preview.
+- `src/components/workbench/JobProgress.tsx` — client: polling de status do job.
+- `app/reviews/[reviewId]/workbench/page.tsx` — RSC: lê `?mode=`, monta ModeBar + modo ativo + contador "identificados".
+- `app/reviews/[reviewId]/workbench/actions.ts` — `enqueueImport`, `runImportWorker`.
+- `app/reviews/[reviewId]/layout.tsx` — **modificar**: link de nav "Workbench".
 
-**Vocabulário visual de IA (`src/components/ai/`)** — EP-3, reusado nas fases seguintes
-- Create `src/components/ai/SuggestionChip.tsx` — chip com estado (`pending`/`accepted`/`edited`/`rejected`/`inferred`).
-- Create `src/components/ai/ProvenancePopover.tsx` — popover de proveniência (modelo/versão/trecho/timestamp).
-- Create `src/components/ai/SuggestionActions.tsx` — botões aceitar/editar/rejeitar.
-- Create `src/components/ai/NotFound.tsx` — render explícito de "não encontrado" (FR-034).
-- Create `src/components/ai/state.ts` — labels pt-BR + classes Tailwind por estado (fonte única do tratamento visual).
+**Tooling (modificar)**
+- `tsconfig.json` — `exclude` `supabase/functions`; `paths` `@shared/*`.
+- `vitest.config.ts` — alias `@shared`.
+- `package.json` — deps (Task 1).
+- `.env.example` — `SUPABASE_FUNCTIONS_URL`, `CRON_SECRET` (worker).
 
-**US5 — Pergunta**
-- Create `src/lib/question/schema.ts` — Zod por framework (SPIDER default + PICo/PEO/PCC/livre).
-- Create `src/lib/question/queries.ts` — leitura de `question` + `eligibility_criterion`.
-- Create `app/reviews/[reviewId]/question/actions.ts` — `saveQuestion`, `deriveCriteria`, `ratifyCriterion`.
-- Create `app/reviews/[reviewId]/question/page.tsx` — RSC: carrega estado, monta UI.
-- Create `src/components/question/QuestionForm.tsx` — `'use client'`: seletor de framework + campos adaptáveis.
-- Create `src/components/question/CriteriaPanel.tsx` — `'use client'`: lista de critérios/termos com chip/proveniência/ações.
-
-**US6 — Protocolo**
-- Create `src/lib/protocol/queries.ts` — leitura de `protocol` + `protocol_amendment`.
-- Create `src/lib/protocol/markdown.ts` — serialização `content` → Markdown (export).
-- Create `app/reviews/[reviewId]/protocol/actions.ts` — `draftProtocol`, `saveProtocolDraft`, `lockProtocol`, `addAmendment`.
-- Create `app/reviews/[reviewId]/protocol/page.tsx` — RSC.
-- Create `app/reviews/[reviewId]/protocol/export/route.ts` — Route Handler: download `.md`.
-- Create `src/components/protocol/ProtocolEditor.tsx` — `'use client'`: editor + estado draft/locked visível.
-- Create `src/components/protocol/AmendmentList.tsx` — `'use client'`: emendas versionadas/datadas.
-
-**Navegação**
-- Modify `app/reviews/[reviewId]/layout.tsx` — links para `question/` e `protocol/` no header (trilho completo é Fatia 6).
-
-**Testes**
-- Create `tests/unit/ai/llm-contract.test.ts` — invariantes do `LLMProvider` (provenance 100%, `not_found`, `state=pending`).
-- Create `tests/unit/ai/cost.test.ts` — `estimateCost`.
-- Create `tests/unit/ai/suggestion-chip.test.tsx` — chip do vocabulário de IA.
-- Create `tests/unit/audit.test.ts` — helper de auditoria.
-- Create `tests/unit/question/question-schema.test.ts` — Zod por framework.
-- Create `tests/unit/protocol/markdown.test.ts` — serialização Markdown.
-- Create `tests/integration/question-derivation.test.ts` — persistência de sugestão + critérios pending.
-- Create `tests/integration/rls.question-protocol.test.ts` — RLS nas tabelas novas (SC-009).
-- Create `tests/integration/protocol-lock.test.ts` — travamento/imutabilidade/emenda (SC-010).
-- Create `tests/integration/byok.test.ts` — Vault round-trip + isolamento.
+**Testes — `tests/`**
+- `tests/fixtures/import/{sample.ris,sample.bib,sample.csv,malformed.ris}`.
+- `tests/unit/import/{normalize,csv,ris,bibtex,parse-content}.test.ts`.
+- `tests/unit/workbench/import-preview.test.tsx`.
+- `tests/integration/jobs.import.test.ts` — enqueue+worker contra Postgres local.
+- `tests/integration/rls.record-search-job.test.ts` — SC-009 para tabelas novas.
+- `tests/e2e/import.spec.ts` — fluxo "importar" + invariante de superfície única.
 
 ---
 
-## Task 1 — Migration 0002: schema + RLS + RPCs (Princípio IV — antes de qualquer código)
+## Task 1: Dependências + toolchain (A3, §Portões)
 
 **Files:**
-- Create: `supabase/migrations/0002_question_protocol_ai.sql`
-- Modify: `package.json` (script `gen:types`)
-- Modify: `src/types/database.ts` (regenerado)
+- Modify: `package.json` (deps)
+- Create: `supabase/functions/deno.json`
+- Modify: `tsconfig.json`
+- Modify: `vitest.config.ts`
+- Modify: `.env.example`
 
-- [ ] **Step 1: Escrever a migration completa**
+- [ ] **Step 1: Instalar dependências de runtime e dev (tarefa explícita A3)**
 
-Create `supabase/migrations/0002_question_protocol_ai.sql`:
+Run:
+```bash
+npm install papaparse @tanstack/react-query @retorquere/bibtex-parser
+npm install -D @types/papaparse
+```
+Expected: `package.json` ganha `papaparse`, `@tanstack/react-query`, `@retorquere/bibtex-parser` em `dependencies` e `@types/papaparse` em `devDependencies`. (Versões: deixar o npm pinar a atual; não editar à mão.)
 
+- [ ] **Step 2: Excluir `supabase/functions` do `tsc` do host e adicionar alias `@shared`**
+
+Modify `tsconfig.json` — em `compilerOptions.paths` adicionar `@shared/*`, e trocar `exclude`:
+```jsonc
+    "paths": {
+      "@/*": ["./src/*"],
+      "@shared/*": ["./supabase/functions/_shared/*"]
+    }
+```
+```jsonc
+  "exclude": ["node_modules", "supabase/functions"]
+```
+Rationale (D-F3.3): os shells Deno usam globais que quebrariam o `tsc` do host; o núcleo `_shared` é checado transitivamente via imports de `src`/`app`.
+
+- [ ] **Step 3: Alias `@shared` no Vitest**
+
+Modify `vitest.config.ts` — em `resolve.alias` adicionar a entrada `@shared`:
+```ts
+    resolve: {
+      alias: {
+        "@": fileURLToPath(new URL("./src", import.meta.url)),
+        "@shared": fileURLToPath(
+          new URL("./supabase/functions/_shared", import.meta.url),
+        ),
+      },
+    },
+```
+
+- [ ] **Step 4: Import map do Deno para as Edge Functions**
+
+Create `supabase/functions/deno.json`:
+```json
+{
+  "imports": {
+    "papaparse": "npm:papaparse@5",
+    "@retorquere/bibtex-parser": "npm:@retorquere/bibtex-parser@9",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2"
+  }
+}
+```
+Nota: o núcleo `_shared` usa specifiers nus (`"papaparse"`, etc.); no host resolvem por `node_modules`, no Deno por este import map.
+
+- [ ] **Step 5: Variáveis de ambiente do worker**
+
+Modify `.env.example` — acrescentar ao fim:
+```bash
+
+# Worker de jobs assíncronos (D-F3.5)
+# URL base das Edge Functions (local: igual ao SUPABASE_URL). Usada pelo pg_cron
+# (produção) e pela Server Action de gatilho (local/e2e).
+SUPABASE_FUNCTIONS_URL=http://127.0.0.1:54321
+# Segredo compartilhado que autentica o disparo do worker (header x-cron-secret).
+CRON_SECRET=local-dev-cron-secret
+```
+
+- [ ] **Step 6: Verificar typecheck e lint limpos (nada quebrou)**
+
+Run: `npm run typecheck && npm run lint`
+Expected: `tsc` sem saída; ESLint "No ESLint warnings or errors".
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add package.json package-lock.json tsconfig.json vitest.config.ts supabase/functions/deno.json .env.example
+git commit -m "chore(fatia3): pin parsing/query deps + @shared alias + tsconfig exclude (A3)"
+```
+
+---
+
+## Task 2: Migration 0003 — search, record, job, job_item (+ RLS + RPCs)
+
+**Files:**
+- Create: `supabase/migrations/0003_search_record_jobs.sql`
+- Modify: `src/types/database.ts` (gerado)
+
+- [ ] **Step 1: Escrever a migration**
+
+Create `supabase/migrations/0003_search_record_jobs.sql`:
 ```sql
 -- ============================================================
--- Marco 1 / Fatia 2 — Pergunta, Protocolo, IA/BYOK
--- RLS em TODAS as tabelas (Princípio IV). Auditoria em mudanças (Princípio III).
--- Reusa public.is_review_member(uuid) da migration 0001.
+-- Marco 1 / Fatia 3 — Importação & jobs: search, record, job, job_item
+-- RLS habilitado em TODAS as tabelas (Princípio IV).
+-- Parsing valida no enqueue; persistência (record) no worker (D-F3.4).
 -- ============================================================
 
-create extension if not exists supabase_vault with schema vault;
+create extension if not exists pg_trgm;
 
--- ---------- enums ----------
-create type question_framework as enum ('spider', 'pico', 'peo', 'pcc', 'free');
-create type criterion_kind     as enum ('inclusion', 'exclusion', 'search_term');
-create type criterion_origin   as enum ('human', 'ai');
-create type ratification_state as enum ('pending', 'accepted', 'edited', 'rejected');
-create type protocol_state     as enum ('draft', 'locked');
-create type protocol_origin    as enum ('ai_draft', 'human');
-create type ai_target_kind     as enum ('eligibility', 'protocol_draft', 'screening');
-create type suggestion_state   as enum ('pending', 'accepted', 'edited', 'rejected', 'inferred');
-create type llm_provider       as enum ('anthropic');
+-- enums
+create type source_format    as enum ('ris', 'bibtex', 'csv');
+create type corpus_state      as enum (
+  'imported', 'active',
+  'duplicate_exact', 'duplicate_fuzzy',
+  'excluded_ts', 'maybe_ts', 'included_ts', 'excluded_ft', 'included_ft'
+);
+create type ts_decision_state as enum ('included', 'excluded', 'maybe');
+create type ft_decision_state as enum ('included', 'excluded');
+create type job_type          as enum ('import_parse', 'ai_screening_batch');
+create type job_status        as enum (
+  'queued', 'running', 'completed', 'completed_with_errors', 'failed'
+);
+create type job_item_status   as enum ('pending', 'done', 'failed');
 
--- ---------- ai_suggestion (transversal) ----------
-create table public.ai_suggestion (
+-- ---------- search (busca registrada — US2/FR-015) ----------
+create table public.search (
   id uuid primary key default gen_random_uuid(),
   review_id uuid not null references public.review (id) on delete cascade,
-  target_kind ai_target_kind not null,
-  target_id uuid,
-  output jsonb not null,
-  provenance jsonb not null,                       -- model/version/prompt_or_span/timestamp (FR-031)
-  state suggestion_state not null default 'pending',
-  grounding jsonb,                                 -- Marco 1: metadado/resumo
-  not_found boolean not null default false,        -- FR-034
-  created_at timestamptz not null default now(),
-  constraint ai_suggestion_provenance_keys check (
-    provenance ? 'model' and provenance ? 'version'
-    and provenance ? 'prompt_or_span' and provenance ? 'timestamp'
-  )
+  query_string text not null,
+  database text not null,
+  searched_on date not null,
+  hits integer not null check (hits >= 0),
+  created_at timestamptz not null default now()
 );
+create index search_review_idx on public.search (review_id, created_at);
 
--- ---------- question (US5) ----------
-create table public.question (
+-- ---------- record (registro bibliográfico — US2/US3/US4) ----------
+create table public.record (
   id uuid primary key default gen_random_uuid(),
-  review_id uuid not null unique references public.review (id) on delete cascade,
-  framework question_framework not null default 'spider',
-  fields jsonb not null default '{}'::jsonb,
-  question_text text not null default '',
+  review_id uuid not null references public.review (id) on delete cascade,
+  search_id uuid references public.search (id) on delete set null,
+  source_format source_format not null,
+  raw jsonb not null,
+  metadata jsonb not null,
+  doi_normalized text,
+  title_norm text,
+  corpus_state corpus_state not null default 'imported',
+  ts_decision ts_decision_state,
+  ft_decision ft_decision_state,
+  ft_exclusion_reason_id uuid, -- FK adicionada na Fatia 5 (exclusion_reason)
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+create index record_review_idx on public.record (review_id, created_at);
+create index record_doi_idx on public.record (review_id, doi_normalized);
+create index record_title_trgm_idx on public.record using gin (title_norm gin_trgm_ops);
 
--- ---------- eligibility_criterion (US5) ----------
-create table public.eligibility_criterion (
+-- ---------- job + job_item (jobs assíncronos — §VIII/R3) ----------
+create table public.job (
   id uuid primary key default gen_random_uuid(),
   review_id uuid not null references public.review (id) on delete cascade,
-  question_id uuid not null references public.question (id) on delete cascade,
-  kind criterion_kind not null,
-  text text not null check (length(btrim(text)) > 0),
-  origin criterion_origin not null,
-  ratification_state ratification_state not null default 'pending',
-  ai_suggestion_id uuid references public.ai_suggestion (id) on delete set null,
+  type job_type not null,
+  status job_status not null default 'queued',
+  progress integer not null default 0 check (progress between 0 and 100),
+  estimated_cost jsonb,
+  actual_cost jsonb,
   created_at timestamptz not null default now(),
-  -- origin=ai ⇒ exige ai_suggestion (data-model)
-  constraint criterion_ai_needs_suggestion check (
-    origin <> 'ai' or ai_suggestion_id is not null
-  )
+  started_at timestamptz,
+  finished_at timestamptz
 );
+create index job_review_idx on public.job (review_id, created_at desc);
 
--- ---------- protocol (US6) ----------
-create table public.protocol (
+create table public.job_item (
   id uuid primary key default gen_random_uuid(),
-  review_id uuid not null unique references public.review (id) on delete cascade,
-  content jsonb not null default '{}'::jsonb,
-  state protocol_state not null default 'draft',
-  locked_at timestamptz,
-  origin protocol_origin not null default 'human',
-  ai_suggestion_id uuid references public.ai_suggestion (id) on delete set null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
--- ---------- protocol_amendment (US6) ----------
-create table public.protocol_amendment (
-  id uuid primary key default gen_random_uuid(),
+  job_id uuid not null references public.job (id) on delete cascade,
   review_id uuid not null references public.review (id) on delete cascade,
-  protocol_id uuid not null references public.protocol (id) on delete cascade,
-  version int not null,
-  change jsonb not null,
-  dated_at date not null default current_date,
-  created_at timestamptz not null default now(),
-  unique (protocol_id, version)
-);
-
--- ---------- byok_key (R5/FR-032) ----------
-create table public.byok_key (
-  id uuid primary key default gen_random_uuid(),
-  review_id uuid not null unique references public.review (id) on delete cascade,
-  provider llm_provider not null default 'anthropic',
-  vault_secret_id uuid not null,                   -- ref. ao Supabase Vault (cifrado)
+  status job_item_status not null default 'pending',
+  payload jsonb not null,
+  error text,
+  attempts integer not null default 0,
   created_at timestamptz not null default now()
 );
-
--- ---------- ai_usage (FR-033/P5) ----------
-create table public.ai_usage (
-  id uuid primary key default gen_random_uuid(),
-  review_id uuid not null references public.review (id) on delete cascade,
-  phase text not null,                             -- question | protocol | screening
-  tokens_in int not null default 0,
-  tokens_out int not null default 0,
-  cost jsonb not null default '{}'::jsonb,
-  job_id uuid,                                     -- FK em Fatia 3 (jobs); nullable aqui
-  created_at timestamptz not null default now()
-);
-
-create index ai_suggestion_review_idx on public.ai_suggestion (review_id, created_at);
-create index criterion_review_idx     on public.eligibility_criterion (review_id);
-create index amendment_protocol_idx   on public.protocol_amendment (protocol_id, version);
-create index ai_usage_review_phase_idx on public.ai_usage (review_id, phase);
+create index job_item_job_idx on public.job_item (job_id, status);
 
 -- ============================================================
--- Trigger: protocolo travado é imutável em content (FR-011/SC-010)
+-- RPC: create_import_job — search + job + job_items + audit (atômico)
+-- Chamado pelo enqueue com o JWT do usuário (D-F3.7). FR-016: o chamador TS
+-- só invoca esta RPC se houver >= 1 registro válido (zero persistência se 0).
 -- ============================================================
-create or replace function public.guard_locked_protocol()
-returns trigger
-language plpgsql
-as $$
-begin
-  if old.state = 'locked' then
-    if new.content is distinct from old.content then
-      raise exception 'protocol is locked; changes must be amendments';
-    end if;
-    -- não permite "destravar" silenciosamente
-    if new.state <> 'locked' then
-      raise exception 'protocol cannot be unlocked';
-    end if;
-  end if;
-  new.updated_at := now();
-  return new;
-end;
-$$;
-
-create trigger protocol_guard_locked
-  before update on public.protocol
-  for each row execute function public.guard_locked_protocol();
-
--- ============================================================
--- RPC: lock_protocol — trava + marca review + audita (idempotente)
--- ============================================================
-create or replace function public.lock_protocol(p_review_id uuid)
-returns public.protocol
+create or replace function public.create_import_job(
+  p_review_id uuid,
+  p_format source_format,
+  p_search jsonb,
+  p_items jsonb  -- array de ParsedRecord
+)
+returns public.job
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_protocol public.protocol;
+  v_search public.search;
+  v_job public.job;
+  v_item jsonb;
+  v_count int;
 begin
   if not public.is_review_member(p_review_id) then
     raise exception 'not a member';
   end if;
-
-  select * into v_protocol from public.protocol where review_id = p_review_id;
-  if not found then
-    raise exception 'protocol not found';
-  end if;
-  if v_protocol.state = 'locked' then
-    return v_protocol;  -- idempotente
+  v_count := jsonb_array_length(p_items);
+  if v_count is null or v_count = 0 then
+    raise exception 'no records to import';
   end if;
 
-  update public.protocol
-     set state = 'locked', locked_at = now()
-   where id = v_protocol.id
-   returning * into v_protocol;
+  insert into public.search (review_id, query_string, database, searched_on, hits)
+  values (
+    p_review_id,
+    p_search ->> 'queryString',
+    p_search ->> 'database',
+    (p_search ->> 'searchedOn')::date,
+    (p_search ->> 'hits')::int
+  )
+  returning * into v_search;
 
-  update public.review
-     set active_screening_started_at = coalesce(active_screening_started_at, now())
-   where id = p_review_id;
+  insert into public.job (review_id, type, status)
+  values (p_review_id, 'import_parse', 'queued')
+  returning * into v_job;
 
-  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
-  values (p_review_id, 'human', auth.uid(), 'lock_protocol', 'protocol', v_protocol.id,
-          jsonb_build_object('state', 'draft'), jsonb_build_object('state', 'locked'));
+  for v_item in select * from jsonb_array_elements(p_items)
+  loop
+    insert into public.job_item (job_id, review_id, payload)
+    values (
+      v_job.id, p_review_id,
+      jsonb_build_object('record', v_item, 'search_id', v_search.id, 'format', p_format)
+    );
+  end loop;
 
-  return v_protocol;
-end;
-$$;
-
--- ============================================================
--- RPC: add_protocol_amendment — só se locked; versão sequencial; audita
--- ============================================================
-create or replace function public.add_protocol_amendment(p_review_id uuid, p_change jsonb)
-returns public.protocol_amendment
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_protocol public.protocol;
-  v_amendment public.protocol_amendment;
-  v_version int;
-begin
-  if not public.is_review_member(p_review_id) then
-    raise exception 'not a member';
-  end if;
-  select * into v_protocol from public.protocol where review_id = p_review_id;
-  if not found then raise exception 'protocol not found'; end if;
-  if v_protocol.state <> 'locked' then
-    raise exception 'amendments require a locked protocol';
-  end if;
-
-  select coalesce(max(version), 0) + 1 into v_version
-    from public.protocol_amendment where protocol_id = v_protocol.id;
-
-  insert into public.protocol_amendment (review_id, protocol_id, version, change)
-  values (p_review_id, v_protocol.id, v_version, p_change)
-  returning * into v_amendment;
-
-  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
-  values (p_review_id, 'human', auth.uid(), 'add_protocol_amendment', 'protocol_amendment',
-          v_amendment.id, null, to_jsonb(v_amendment));
-
-  return v_amendment;
-end;
-$$;
-
--- ============================================================
--- BYOK no Vault: gravar (membro) / decifrar (apenas service_role)
--- ============================================================
-create or replace function public.set_byok_key(p_review_id uuid, p_provider llm_provider, p_api_key text)
-returns public.byok_key
-language plpgsql
-security definer
-set search_path = public, vault
-as $$
-declare
-  v_secret_id uuid;
-  v_row public.byok_key;
-begin
-  if not public.is_review_member(p_review_id) then
-    raise exception 'not a member';
-  end if;
-  if coalesce(btrim(p_api_key), '') = '' then
-    raise exception 'api key required';
-  end if;
-
-  -- remove chave anterior (uma por Revisão, D-F2.2)
-  delete from public.byok_key where review_id = p_review_id;
-
-  v_secret_id := vault.create_secret(
-    p_api_key,
-    'byok:' || p_review_id::text || ':' || p_provider::text,
-    'BYOK LLM key for review ' || p_review_id::text
+  insert into public.audit_entry (
+    review_id, actor_type, actor_id, action, entity, entity_id, before, after
+  )
+  values (
+    p_review_id, 'human', auth.uid(), 'enqueue_import', 'job', v_job.id,
+    null, jsonb_build_object('item_count', v_count, 'search_id', v_search.id)
   );
 
-  insert into public.byok_key (review_id, provider, vault_secret_id)
-  values (p_review_id, p_provider, v_secret_id)
-  returning * into v_row;
-
-  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
-  values (p_review_id, 'human', auth.uid(), 'set_byok_key', 'byok_key', v_row.id,
-          null, jsonb_build_object('provider', p_provider));  -- NUNCA loga o segredo
-
-  return v_row;
+  return v_job;
 end;
 $$;
 
--- Decifragem: somente service_role (D-F2.4). NÃO concedida a authenticated.
-create or replace function public.get_byok_secret(p_review_id uuid)
-returns table (provider llm_provider, api_key text)
+-- ============================================================
+-- RPC: insert_import_record — insere record + marca item done + audit (atômico)
+-- Chamado pelo worker (service-role). Normalização vem pronta do TS (D-F3.4).
+-- ============================================================
+create or replace function public.insert_import_record(
+  p_review_id uuid,
+  p_search_id uuid,
+  p_job_item_id uuid,
+  p_source_format source_format,
+  p_raw jsonb,
+  p_metadata jsonb,
+  p_doi_normalized text,
+  p_title_norm text
+)
+returns uuid
 language plpgsql
 security definer
-set search_path = public, vault
+set search_path = public
 as $$
+declare
+  v_record_id uuid;
 begin
-  return query
-  select k.provider, s.decrypted_secret
-    from public.byok_key k
-    join vault.decrypted_secrets s on s.id = k.vault_secret_id
-   where k.review_id = p_review_id;
+  insert into public.record (
+    review_id, search_id, source_format, raw, metadata,
+    doi_normalized, title_norm, corpus_state
+  )
+  values (
+    p_review_id, p_search_id, p_source_format, p_raw, p_metadata,
+    nullif(p_doi_normalized, ''), nullif(p_title_norm, ''), 'imported'
+  )
+  returning id into v_record_id;
+
+  update public.job_item set status = 'done' where id = p_job_item_id;
+
+  insert into public.audit_entry (
+    review_id, actor_type, actor_id, action, entity, entity_id, before, after
+  )
+  values (
+    p_review_id, 'system', null, 'import_record', 'record', v_record_id,
+    null, jsonb_build_object('source_format', p_source_format)
+  );
+
+  return v_record_id;
 end;
 $$;
 
 -- ============================================================
 -- RLS
 -- ============================================================
-alter table public.ai_suggestion         enable row level security;
-alter table public.question              enable row level security;
-alter table public.eligibility_criterion enable row level security;
-alter table public.protocol              enable row level security;
-alter table public.protocol_amendment    enable row level security;
-alter table public.byok_key              enable row level security;
-alter table public.ai_usage              enable row level security;
+alter table public.search   enable row level security;
+alter table public.record   enable row level security;
+alter table public.job      enable row level security;
+alter table public.job_item enable row level security;
 
--- padrão: membros leem/escrevem por review_id
-create policy ai_suggestion_rw on public.ai_suggestion
-  for all using (public.is_review_member(review_id)) with check (public.is_review_member(review_id));
-
-create policy question_rw on public.question
-  for all using (public.is_review_member(review_id)) with check (public.is_review_member(review_id));
-
-create policy criterion_rw on public.eligibility_criterion
-  for all using (public.is_review_member(review_id)) with check (public.is_review_member(review_id));
-
--- protocol: membros leem; INSERT/UPDATE por membros (UPDATE de content travado é
--- barrado pelo trigger). Sem DELETE.
-create policy protocol_select on public.protocol
-  for select using (public.is_review_member(review_id));
-create policy protocol_insert on public.protocol
-  for insert with check (public.is_review_member(review_id));
-create policy protocol_update on public.protocol
-  for update using (public.is_review_member(review_id)) with check (public.is_review_member(review_id));
-
--- protocol_amendment: leitura por membros; escrita só via RPC SECURITY DEFINER
-create policy amendment_select on public.protocol_amendment
-  for select using (public.is_review_member(review_id));
-
--- byok_key: membros leem METADADOS (provider/created_at). Escrita só via RPC.
--- vault_secret_id é visível mas inútil sem service_role (decifragem server-only).
-create policy byok_select on public.byok_key
-  for select using (public.is_review_member(review_id));
-
-create policy ai_usage_select on public.ai_usage
-  for select using (public.is_review_member(review_id));
-create policy ai_usage_insert on public.ai_usage
-  for insert with check (public.is_review_member(review_id));
+-- Leitura por membros (escrita via RPC SECURITY DEFINER / service-role).
+create policy search_select   on public.search   for select using (public.is_review_member(review_id));
+create policy record_select   on public.record   for select using (public.is_review_member(review_id));
+create policy job_select      on public.job      for select using (public.is_review_member(review_id));
+create policy job_item_select on public.job_item for select using (public.is_review_member(review_id));
 
 -- ============================================================
 -- Grants
 -- ============================================================
-grant execute on function public.lock_protocol(uuid)                    to authenticated;
-grant execute on function public.add_protocol_amendment(uuid, jsonb)    to authenticated;
-grant execute on function public.set_byok_key(uuid, llm_provider, text) to authenticated;
--- get_byok_secret: SOMENTE service_role
-grant execute on function public.get_byok_secret(uuid) to service_role;
-revoke execute on function public.get_byok_secret(uuid) from authenticated, anon, public;
+grant execute on function public.create_import_job(uuid, source_format, jsonb, jsonb) to authenticated;
+-- insert_import_record: só o worker (service-role); negado ao authenticated/anon.
+revoke execute on function public.insert_import_record(uuid, uuid, uuid, source_format, jsonb, jsonb, text, text) from authenticated, anon, public;
+grant  execute on function public.insert_import_record(uuid, uuid, uuid, source_format, jsonb, jsonb, text, text) to service_role;
 ```
 
-- [ ] **Step 2: Aplicar a migration localmente**
+- [ ] **Step 2: Resetar o banco local e aplicar migrations**
 
 Run: `npx supabase db reset`
-Expected: aplica `0001` e `0002` sem erro; termina em "Finished supabase db reset".
+Expected: aplica `0001`, `0002`, `0003` sem erro; mensagem final de sucesso do reset.
 
-> Se `supabase start` não estiver rodando: `npx supabase start` antes.
-
-- [ ] **Step 3: Adicionar script `gen:types` e regenerar os tipos**
-
-Modify `package.json` scripts (após `"typecheck"`):
-
-```json
-    "gen:types": "supabase gen types typescript --local > src/types/database.ts",
-```
+- [ ] **Step 3: Regerar os tipos do banco**
 
 Run: `npm run gen:types`
-Expected: `src/types/database.ts` passa a conter `question`, `eligibility_criterion`, `protocol`, `protocol_amendment`, `ai_suggestion`, `byok_key`, `ai_usage`, os novos enums e as funções `lock_protocol`/`add_protocol_amendment`/`set_byok_key`/`get_byok_secret`.
+Expected: `src/types/database.ts` passa a conter `search`, `record`, `job`, `job_item` e as funções `create_import_job`/`insert_import_record`.
 
-- [ ] **Step 4: Type-check limpo**
+- [ ] **Step 4: Verificar typecheck**
 
 Run: `npm run typecheck`
-Expected: PASS (sem erros). Os tipos novos compilam.
+Expected: sem saída (limpo).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add supabase/migrations/0002_question_protocol_ai.sql package.json src/types/database.ts
-git commit -m "feat(db): migration 0002 — question/protocol/ai/byok schema + RLS + RPCs"
+git add supabase/migrations/0003_search_record_jobs.sql src/types/database.ts
+git commit -m "feat(db): migration 0003 search/record/job/job_item + RLS + import RPCs"
 ```
 
 ---
 
-## Task 2 — `LLMProvider` types (contrato `llm-provider.md`)
+## Task 3: Migration 0004 — agendamento do worker (pg_cron/pg_net, guardado)
 
 **Files:**
-- Create: `src/lib/ai/llm/types.ts`
+- Create: `supabase/migrations/0004_jobs_cron.sql`
 
-- [ ] **Step 1: Escrever as interfaces do contrato**
+- [ ] **Step 1: Escrever a migration de agendamento (resiliente a extensão ausente)**
 
-Create `src/lib/ai/llm/types.ts` (cópia fiel do contrato, identificadores em inglês):
+Create `supabase/migrations/0004_jobs_cron.sql`:
+```sql
+-- ============================================================
+-- Marco 1 / Fatia 3 — Agendamento do worker (D-F3.5).
+-- Produção: pg_cron dispara, a cada minuto, um POST (pg_net) na Edge Function
+-- jobs-worker. Bloco guardado: se pg_cron/pg_net não estiverem disponíveis
+-- (ex.: imagem local sem as extensões), apenas emite NOTICE e segue — o reset
+-- local NÃO falha (os testes disparam o worker pelo gatilho server-side).
+-- ============================================================
+do $$
+begin
+  create extension if not exists pg_cron;
+  create extension if not exists pg_net;
 
-```ts
-export interface ProviderIdentity {
-  provider: "anthropic" | string; // default: anthropic (Claude)
-  model: string; // exposto à proveniência (FR-031)
-  version: string;
-}
-
-export interface FactualValue<T> {
-  value: T | null;
-  source_span: string | null; // Marco 1: metadado/resumo
-  page: number | null; // null no Marco 1 (sem PDF)
-  reason?: "not_found"; // quando value === null (FR-034)
-}
-
-export interface Provenance {
-  model: string;
-  version: string;
-  prompt_or_span: string;
-  timestamp: string; // ISO 8601
-}
-
-export type SuggestionState =
-  | "pending"
-  | "accepted"
-  | "edited"
-  | "rejected"
-  | "inferred";
-
-export interface LlmSuggestion<T> {
-  output: T;
-  provenance: Provenance; // OBRIGATÓRIO (FR-031, §II)
-  state: SuggestionState; // nasce 'pending' (§I)
-  not_found: boolean; // §II / FR-034
-}
-
-export interface EligibilityDerivation {
-  inclusion: string[];
-  exclusion: string[];
-  searchTerms: string[];
-}
-
-export interface ProtocolDraft {
-  contentMarkdown: string;
-}
-
-export interface ScreeningPreclassification {
-  recommendation: "include" | "exclude"; // nunca decide (FR-024)
-  confidence: number; // 0..1
-  reason: string; // razão curta, pt-BR
-}
-
-export interface CostEstimate {
-  tokensEstimated: number;
-  cost: Record<string, number>;
-}
-
-export interface LLMProvider {
-  identity(): ProviderIdentity;
-
-  /** Deriva critérios/termos a partir da pergunta (US5/FR-007). Saída pt-BR. */
-  deriveEligibility(input: {
-    framework: string;
-    questionText: string;
-    fields: Record<string, unknown>;
-  }): Promise<LlmSuggestion<EligibilityDerivation>>;
-
-  /** Rascunha protocolo PRISMA-P (US6/FR-009). Saída pt-BR. */
-  draftProtocol(input: {
-    questionText: string;
-    criteria: string[];
-  }): Promise<LlmSuggestion<ProtocolDraft>>;
-
-  /** Pré-classifica um registro na triagem (FR-024). Ancora em metadado/resumo. */
-  preclassifyScreening(input: {
-    title: string;
-    abstract: string | null;
-    criteria: string[];
-  }): Promise<LlmSuggestion<ScreeningPreclassification>>;
-
-  /** Estimativa de custo ANTES de lote (FR-033, §VII/P5). */
-  estimateCost(input: {
-    itemCount: number;
-    kind: "ai_screening_batch";
-  }): Promise<CostEstimate>;
-}
-
-export class MissingByokError extends Error {
-  constructor(reviewId: string) {
-    super(`Nenhuma chave BYOK cadastrada para a Revisão ${reviewId}`);
-    this.name = "MissingByokError";
-  }
-}
+  perform cron.schedule(
+    'jobs-worker-tick',
+    '* * * * *',
+    $cron$
+    select net.http_post(
+      url := current_setting('app.functions_url', true) || '/functions/v1/jobs-worker',
+      headers := jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-cron-secret', current_setting('app.cron_secret', true)
+      ),
+      body := '{}'::jsonb
+    );
+    $cron$
+  );
+exception when others then
+  raise notice 'pg_cron/pg_net indisponível — worker será disparado pelo gatilho server-side (D-F3.5). Detalhe: %', sqlerrm;
+end $$;
 ```
+Nota de execução: os GUCs `app.functions_url`/`app.cron_secret` são configurados no projeto de produção (`alter database ... set app.functions_url = ...`). Localmente o bloco cai no `exception` e não agenda — esperado.
 
-- [ ] **Step 2: Type-check**
+- [ ] **Step 2: Resetar o banco local (confirmar que não quebra)**
 
-Run: `npm run typecheck`
-Expected: PASS.
+Run: `npx supabase db reset`
+Expected: reset conclui com sucesso. É aceitável ver o `NOTICE` "pg_cron/pg_net indisponível ..." se a imagem local não tiver as extensões — **o reset não pode falhar**.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add src/lib/ai/llm/types.ts
-git commit -m "feat(ai): LLMProvider contract types"
+git add supabase/migrations/0004_jobs_cron.sql
+git commit -m "feat(db): migration 0004 guarded pg_cron/pg_net worker schedule"
 ```
 
 ---
 
-## Task 3 — `MockLLMProvider` + testes de contrato (TDD)
+## Task 4: Núcleo de import — tipos + normalização (unit)
 
 **Files:**
-- Create: `src/lib/ai/llm/mock.ts`
-- Test: `tests/unit/ai/llm-contract.test.ts`
+- Create: `supabase/functions/_shared/import/types.ts`
+- Create: `supabase/functions/_shared/import/normalize.ts`
+- Test: `tests/unit/import/normalize.test.ts`
 
-- [ ] **Step 1: Escrever o teste de contrato (falha primeiro)**
+- [ ] **Step 1: Escrever os tipos do contrato**
 
-Create `tests/unit/ai/llm-contract.test.ts`:
+Create `supabase/functions/_shared/import/types.ts`:
+```ts
+export type SourceFormat = "ris" | "bibtex" | "csv";
 
+export interface ParsedRecord {
+  title: string;
+  authors: string[];
+  year: number | null;
+  doi: string | null;
+  abstract: string | null;
+  language: string | null; // original (FR-038)
+  raw: Record<string, unknown>; // campos originais íntegros
+}
+
+export interface ParseError {
+  line: number | null;
+  message: string; // pt-BR, claro (FR-016)
+}
+
+export interface ParseResult {
+  records: ParsedRecord[];
+  errors: ParseError[];
+  format: SourceFormat;
+}
+
+export interface BibliographicParser {
+  format: SourceFormat;
+  parse(
+    content: string,
+    opts?: { fieldMap?: Record<string, string> },
+  ): ParseResult;
+}
+```
+
+- [ ] **Step 2: Escrever o teste de normalização (RED)**
+
+Create `tests/unit/import/normalize.test.ts`:
 ```ts
 import { describe, it, expect } from "vitest";
-import { MockLLMProvider } from "@/lib/ai/llm/mock";
+import { normalizeDoi, normalizeTitle } from "@shared/import/normalize";
 
-const provider = new MockLLMProvider();
-
-describe("LLMProvider — invariantes do contrato (§II/FR-031, §I)", () => {
-  it("deriveEligibility retorna provenance completa e state=pending", async () => {
-    const s = await provider.deriveEligibility({
-      framework: "spider",
-      questionText: "Qual o impacto de X em Y?",
-      fields: {},
-    });
-    expect(s.provenance.model).toBeTruthy();
-    expect(s.provenance.version).toBeTruthy();
-    expect(s.provenance.prompt_or_span).toBeTruthy();
-    expect(s.provenance.timestamp).toMatch(/\d{4}-\d{2}-\d{2}T/);
-    expect(s.state).toBe("pending");
-    expect(Array.isArray(s.output.inclusion)).toBe(true);
+describe("normalizeDoi", () => {
+  it("remove o prefixo de URL e baixa a caixa", () => {
+    expect(normalizeDoi("https://doi.org/10.1000/ABC.123")).toBe(
+      "10.1000/abc.123",
+    );
   });
-
-  it("draftProtocol retorna provenance e markdown em pt-BR", async () => {
-    const s = await provider.draftProtocol({
-      questionText: "Pergunta",
-      criteria: ["incluir A"],
-    });
-    expect(s.provenance.model).toBeTruthy();
-    expect(s.state).toBe("pending");
-    expect(s.output.contentMarkdown.length).toBeGreaterThan(0);
+  it("aceita DOI cru", () => {
+    expect(normalizeDoi("10.1/X")).toBe("10.1/x");
   });
-
-  it("preclassifyScreening nunca omite provenance e nunca decide", async () => {
-    const s = await provider.preclassifyScreening({
-      title: "T",
-      abstract: null,
-      criteria: [],
-    });
-    expect(s.provenance.model).toBeTruthy();
-    expect(["include", "exclude"]).toContain(s.output.recommendation);
-    expect(s.output.confidence).toBeGreaterThanOrEqual(0);
-    expect(s.output.confidence).toBeLessThanOrEqual(1);
+  it("retorna null para vazio/nulo", () => {
+    expect(normalizeDoi("")).toBeNull();
+    expect(normalizeDoi(null)).toBeNull();
   });
+});
 
-  it("not_found é resultado de 1ª classe quando a pergunta é vazia (FR-034)", async () => {
-    const s = await provider.deriveEligibility({
-      framework: "spider",
-      questionText: "",
-      fields: {},
-    });
-    expect(s.not_found).toBe(true);
+describe("normalizeTitle", () => {
+  it("baixa caixa, remove pontuação e colapsa espaços", () => {
+    expect(normalizeTitle("  A  Study, of   Things! ")).toBe(
+      "a study of things",
+    );
+  });
+  it("retorna null para vazio", () => {
+    expect(normalizeTitle("   ")).toBeNull();
   });
 });
 ```
 
-- [ ] **Step 2: Rodar para ver falhar**
+- [ ] **Step 3: Rodar o teste (verificar que falha)**
 
-Run: `npm run test -- tests/unit/ai/llm-contract.test.ts`
-Expected: FAIL — `Cannot find module '@/lib/ai/llm/mock'`.
+Run: `npm test -- tests/unit/import/normalize.test.ts`
+Expected: FAIL — `Cannot find module '@shared/import/normalize'`.
 
-- [ ] **Step 3: Implementar o MockLLMProvider**
+- [ ] **Step 4: Implementar normalização (GREEN)**
 
-Create `src/lib/ai/llm/mock.ts`:
-
+Create `supabase/functions/_shared/import/normalize.ts`:
 ```ts
-import type {
-  CostEstimate,
-  EligibilityDerivation,
-  LLMProvider,
-  LlmSuggestion,
-  ProtocolDraft,
-  ProviderIdentity,
-  ScreeningPreclassification,
-} from "./types";
-
-function provenance(prompt: string) {
-  return {
-    model: "mock-llm",
-    version: "0.0.0",
-    prompt_or_span: prompt,
-    timestamp: new Date().toISOString(),
-  };
+/** Normaliza DOI para chave de dedup exata (R2). */
+export function normalizeDoi(doi: string | null | undefined): string | null {
+  if (!doi) return null;
+  const v = doi
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\/(dx\.)?doi\.org\//, "")
+    .replace(/^doi:/, "")
+    .trim();
+  return v.length > 0 ? v : null;
 }
 
-function suggestion<T>(
-  output: T,
-  prompt: string,
-  notFound = false,
-): LlmSuggestion<T> {
-  return { output, provenance: provenance(prompt), state: "pending", not_found: notFound };
-}
-
-/** Provider determinístico para testes e modo sem-chave em dev. Saída pt-BR. */
-export class MockLLMProvider implements LLMProvider {
-  identity(): ProviderIdentity {
-    return { provider: "anthropic", model: "mock-llm", version: "0.0.0" };
-  }
-
-  async deriveEligibility(input: {
-    framework: string;
-    questionText: string;
-    fields: Record<string, unknown>;
-  }): Promise<LlmSuggestion<EligibilityDerivation>> {
-    if (input.questionText.trim() === "") {
-      return suggestion<EligibilityDerivation>(
-        { inclusion: [], exclusion: [], searchTerms: [] },
-        "derive:empty",
-        true,
-      );
-    }
-    return suggestion<EligibilityDerivation>(
-      {
-        inclusion: ["Estudos sobre o tema da pergunta"],
-        exclusion: ["Estudos fora do escopo"],
-        searchTerms: ["termo1", "termo2"],
-      },
-      `derive:${input.framework}`,
-    );
-  }
-
-  async draftProtocol(input: {
-    questionText: string;
-    criteria: string[];
-  }): Promise<LlmSuggestion<ProtocolDraft>> {
-    return suggestion<ProtocolDraft>(
-      { contentMarkdown: `# Protocolo PRISMA-P\n\n## Pergunta\n${input.questionText}\n` },
-      "draft:protocol",
-    );
-  }
-
-  async preclassifyScreening(): Promise<LlmSuggestion<ScreeningPreclassification>> {
-    return suggestion<ScreeningPreclassification>(
-      { recommendation: "include", confidence: 0.5, reason: "Sugestão simulada" },
-      "preclassify",
-    );
-  }
-
-  async estimateCost(input: {
-    itemCount: number;
-    kind: "ai_screening_batch";
-  }): Promise<CostEstimate> {
-    return { tokensEstimated: input.itemCount * 800, cost: { usd: input.itemCount * 0.002 } };
-  }
+/** Normaliza título para chave de dedup exata/fuzzy (R2). */
+export function normalizeTitle(
+  title: string | null | undefined,
+): string | null {
+  if (!title) return null;
+  const v = title
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{Diacritic}/gu, "") // diacríticos
+    .replace(/[^\p{L}\p{N}\s]/gu, " ") // pontuação → espaço
+    .replace(/\s+/g, " ")
+    .trim();
+  return v.length > 0 ? v : null;
 }
 ```
 
-- [ ] **Step 4: Rodar até passar**
+- [ ] **Step 5: Rodar o teste (verificar que passa)**
 
-Run: `npm run test -- tests/unit/ai/llm-contract.test.ts`
-Expected: PASS (4 testes).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/ai/llm/mock.ts tests/unit/ai/llm-contract.test.ts
-git commit -m "feat(ai): MockLLMProvider + contract invariant tests"
-```
-
----
-
-## Task 4 — `estimateCost` heurístico (TDD)
-
-**Files:**
-- Create: `src/lib/ai/llm/cost.ts`
-- Test: `tests/unit/ai/cost.test.ts`
-
-- [ ] **Step 1: Teste (falha primeiro)**
-
-Create `tests/unit/ai/cost.test.ts`:
-
-```ts
-import { describe, it, expect } from "vitest";
-import { estimateScreeningCost } from "@/lib/ai/llm/cost";
-
-describe("estimateScreeningCost", () => {
-  it("escala linearmente com o número de itens", () => {
-    const a = estimateScreeningCost(100);
-    const b = estimateScreeningCost(200);
-    expect(b.tokensEstimated).toBe(a.tokensEstimated * 2);
-    expect(b.cost.usd).toBeGreaterThan(a.cost.usd);
-  });
-
-  it("0 itens ⇒ custo zero", () => {
-    expect(estimateScreeningCost(0).tokensEstimated).toBe(0);
-  });
-});
-```
-
-- [ ] **Step 2: Rodar para ver falhar**
-
-Run: `npm run test -- tests/unit/ai/cost.test.ts`
-Expected: FAIL — módulo não encontrado.
-
-- [ ] **Step 3: Implementar**
-
-Create `src/lib/ai/llm/cost.ts`:
-
-```ts
-import type { CostEstimate } from "./types";
-
-// Heurística do Marco 1 (refinada na Fatia 5 com métricas reais).
-const TOKENS_PER_ITEM = 800;
-const USD_PER_1K_TOKENS = 0.0025;
-
-export function estimateScreeningCost(itemCount: number): CostEstimate {
-  const tokensEstimated = Math.max(0, Math.trunc(itemCount)) * TOKENS_PER_ITEM;
-  return {
-    tokensEstimated,
-    cost: { usd: (tokensEstimated / 1000) * USD_PER_1K_TOKENS },
-  };
-}
-```
-
-- [ ] **Step 4: Rodar até passar**
-
-Run: `npm run test -- tests/unit/ai/cost.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/ai/llm/cost.ts tests/unit/ai/cost.test.ts
-git commit -m "feat(ai): heuristic estimateScreeningCost"
-```
-
----
-
-## Task 5 — Cliente service-role + adapter Anthropic + factory
-
-**Files:**
-- Create: `src/lib/supabase/admin.ts`
-- Create: `src/lib/ai/llm/anthropic.ts`
-- Create: `src/lib/ai/llm/index.ts`
-- Modify: `package.json` (dependência `@anthropic-ai/sdk`)
-
-- [ ] **Step 1: Adicionar a dependência (tarefa explícita — constitution §Portões)**
-
-Run: `npm install @anthropic-ai/sdk@^0.32.1`
-Expected: `@anthropic-ai/sdk` aparece em `dependencies` do `package.json`.
-
-- [ ] **Step 2: Cliente service-role (server-only)**
-
-Create `src/lib/supabase/admin.ts`:
-
-```ts
-import "server-only";
-import { createClient } from "@supabase/supabase-js";
-import type { Database } from "@/types/database";
-
-// Cliente service-role: usado APENAS server-side para operações que
-// exigem privilégio (ex.: decifrar a BYOK via get_byok_secret — D-F2.4).
-// Nunca importar em código client.
-export function createAdminClient() {
-  return createClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
-}
-```
-
-- [ ] **Step 3: Adapter Anthropic (implementa toda a interface)**
-
-Create `src/lib/ai/llm/anthropic.ts`:
-
-```ts
-import Anthropic from "@anthropic-ai/sdk";
-import type {
-  CostEstimate,
-  EligibilityDerivation,
-  LLMProvider,
-  LlmSuggestion,
-  ProtocolDraft,
-  ProviderIdentity,
-  ScreeningPreclassification,
-} from "./types";
-import { estimateScreeningCost } from "./cost";
-
-const MODEL = "claude-opus-4-8"; // default D14
-const PT_BR = "Responda SEMPRE em português brasileiro (pt-BR).";
-
-function nowIso() {
-  return new Date().toISOString();
-}
-
-/** Extrai o primeiro bloco de texto da resposta. */
-function textOf(msg: Anthropic.Message): string {
-  const block = msg.content.find((b) => b.type === "text");
-  return block && block.type === "text" ? block.text : "";
-}
-
-export class AnthropicProvider implements LLMProvider {
-  private client: Anthropic;
-
-  constructor(apiKey: string) {
-    this.client = new Anthropic({ apiKey });
-  }
-
-  identity(): ProviderIdentity {
-    return { provider: "anthropic", model: MODEL, version: MODEL };
-  }
-
-  private async ask(system: string, user: string): Promise<string> {
-    const msg = await this.client.messages.create({
-      model: MODEL,
-      max_tokens: 1500,
-      system: `${PT_BR}\n${system}`,
-      messages: [{ role: "user", content: user }],
-    });
-    return textOf(msg);
-  }
-
-  async deriveEligibility(input: {
-    framework: string;
-    questionText: string;
-    fields: Record<string, unknown>;
-  }): Promise<LlmSuggestion<EligibilityDerivation>> {
-    const prompt = `Framework: ${input.framework}\nPergunta: ${input.questionText}\nCampos: ${JSON.stringify(input.fields)}\n\nRetorne JSON {"inclusion":[],"exclusion":[],"searchTerms":[]}.`;
-    if (input.questionText.trim() === "") {
-      return {
-        output: { inclusion: [], exclusion: [], searchTerms: [] },
-        provenance: { model: MODEL, version: MODEL, prompt_or_span: prompt, timestamp: nowIso() },
-        state: "pending",
-        not_found: true,
-      };
-    }
-    const raw = await this.ask(
-      "Você é um metodologista de revisões sistemáticas.",
-      prompt,
-    );
-    const parsed = safeParse<EligibilityDerivation>(raw, {
-      inclusion: [],
-      exclusion: [],
-      searchTerms: [],
-    });
-    return {
-      output: parsed,
-      provenance: { model: MODEL, version: MODEL, prompt_or_span: prompt, timestamp: nowIso() },
-      state: "pending",
-      not_found: false,
-    };
-  }
-
-  async draftProtocol(input: {
-    questionText: string;
-    criteria: string[];
-  }): Promise<LlmSuggestion<ProtocolDraft>> {
-    const prompt = `Pergunta: ${input.questionText}\nCritérios: ${input.criteria.join("; ")}\n\nRascunhe um protocolo PRISMA-P em Markdown.`;
-    const md = await this.ask(
-      "Você redige protocolos PRISMA-P de revisões sistemáticas.",
-      prompt,
-    );
-    return {
-      output: { contentMarkdown: md },
-      provenance: { model: MODEL, version: MODEL, prompt_or_span: prompt, timestamp: nowIso() },
-      state: "pending",
-      not_found: md.trim() === "",
-    };
-  }
-
-  async preclassifyScreening(input: {
-    title: string;
-    abstract: string | null;
-    criteria: string[];
-  }): Promise<LlmSuggestion<ScreeningPreclassification>> {
-    const prompt = `Título: ${input.title}\nResumo: ${input.abstract ?? "(sem resumo)"}\nCritérios: ${input.criteria.join("; ")}\n\nRetorne JSON {"recommendation":"include|exclude","confidence":0..1,"reason":"..."}.`;
-    const raw = await this.ask(
-      "Você pré-classifica registros para triagem; NUNCA decide sozinho.",
-      prompt,
-    );
-    const parsed = safeParse<ScreeningPreclassification>(raw, {
-      recommendation: "include",
-      confidence: 0.5,
-      reason: "Não foi possível classificar.",
-    });
-    return {
-      output: parsed,
-      provenance: { model: MODEL, version: MODEL, prompt_or_span: prompt, timestamp: nowIso() },
-      state: "pending",
-      not_found: false,
-    };
-  }
-
-  async estimateCost(input: {
-    itemCount: number;
-    kind: "ai_screening_batch";
-  }): Promise<CostEstimate> {
-    return estimateScreeningCost(input.itemCount);
-  }
-}
-
-function safeParse<T>(raw: string, fallback: T): T {
-  try {
-    const match = raw.match(/\{[\s\S]*\}/);
-    return match ? (JSON.parse(match[0]) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-```
-
-- [ ] **Step 4: Factory `getLLMProvider`**
-
-Create `src/lib/ai/llm/index.ts`:
-
-```ts
-import "server-only";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { AnthropicProvider } from "./anthropic";
-import { MissingByokError, type LLMProvider } from "./types";
-
-export type { LLMProvider } from "./types";
-export { MissingByokError } from "./types";
-
-/**
- * Resolve o provider de LLM para uma Revisão. Decifra a BYOK SOMENTE server-side
- * via cliente service-role (D-F2.4). O chamador DEVE ter verificado que o usuário
- * é membro da Revisão antes de chamar.
- */
-export async function getLLMProvider(reviewId: string): Promise<LLMProvider> {
-  const admin = createAdminClient();
-  const { data, error } = await admin.rpc("get_byok_secret", { p_review_id: reviewId });
-  if (error) throw error;
-  const row = data?.[0];
-  if (!row?.api_key) throw new MissingByokError(reviewId);
-  if (row.provider === "anthropic") return new AnthropicProvider(row.api_key);
-  throw new Error(`Provider não suportado: ${row.provider}`);
-}
-```
-
-- [ ] **Step 5: Type-check (não chama a API — só compila)**
-
-Run: `npm run typecheck`
-Expected: PASS.
+Run: `npm test -- tests/unit/import/normalize.test.ts`
+Expected: PASS (5 testes).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add package.json package-lock.json src/lib/supabase/admin.ts src/lib/ai/llm/anthropic.ts src/lib/ai/llm/index.ts
-git commit -m "feat(ai): Anthropic adapter + service-role client + getLLMProvider factory"
+git add supabase/functions/_shared/import/types.ts supabase/functions/_shared/import/normalize.ts tests/unit/import/normalize.test.ts
+git commit -m "feat(import): ParsedRecord contract + doi/title normalization (R2)"
 ```
 
 ---
 
-## Task 6 — Reconciliar `.env.example` (tarefa explícita — codebase-map §4)
+## Task 5: Parser CSV (papaparse)
 
 **Files:**
-- Modify: `.env.example`
+- Create: `supabase/functions/_shared/import/csv.ts`
+- Create: `tests/fixtures/import/sample.csv`
+- Test: `tests/unit/import/csv.test.ts`
 
-- [ ] **Step 1: Reescrever o `.env.example` removendo o resíduo do build anterior**
+- [ ] **Step 1: Criar a fixture CSV**
 
-Replace o conteúdo inteiro de `.env.example` por:
-
-```bash
-# Supabase local — preenchido por `supabase status` após `supabase start`.
-NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-
-# BYOK (chave do provedor de LLM): NÃO vai em env var.
-# É cadastrada pela UI e cifrada no Supabase Vault (R5/FR-032); a decifragem
-# ocorre apenas server-side. Ver specs/001-marco1-nucleo-fluxo/data-model.md (byok_key).
+Create `tests/fixtures/import/sample.csv`:
+```csv
+title,authors,year,doi,abstract,language
+"Aprendizagem ativa em sala","Silva, A.; Souza, B.",2021,10.1000/abc,"Resumo um.",pt
+"Active learning review","Doe, J.",2019,,"Abstract two.",en
 ```
 
-> Remove `BYOK_MASTER_KEY`, `ANTHROPIC_BYOK_DEV`, e toda menção a `private.app_secrets`/`byok_keys`/`migration 0009`/`resolveLLMKey()` (resíduo do build descartado, codebase-map §4).
+- [ ] **Step 2: Escrever o teste (RED)**
 
-- [ ] **Step 2: Confirmar que o resíduo sumiu**
+Create `tests/unit/import/csv.test.ts`:
+```ts
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { csvParser } from "@shared/import/csv";
 
-Run: `git diff .env.example`
-Expected: linhas com `BYOK_MASTER_KEY` e `ANTHROPIC_BYOK_DEV` aparecem como removidas (`-`).
+const sample = readFileSync("tests/fixtures/import/sample.csv", "utf8");
+
+describe("csvParser", () => {
+  it("parseia linhas válidas com cabeçalho padrão", () => {
+    const res = csvParser.parse(sample);
+    expect(res.errors).toHaveLength(0);
+    expect(res.records).toHaveLength(2);
+    const [a, b] = res.records;
+    expect(a!.title).toBe("Aprendizagem ativa em sala");
+    expect(a!.authors).toEqual(["Silva, A.", "Souza, B."]);
+    expect(a!.year).toBe(2021);
+    expect(a!.doi).toBe("10.1000/abc");
+    expect(a!.language).toBe("pt");
+    expect(b!.doi).toBeNull();
+  });
+
+  it("aceita fieldMap para colunas não-padrão (FR-014)", () => {
+    const custom = 'Título,Ano\n"X",2020\n';
+    const res = csvParser.parse(custom, {
+      fieldMap: { title: "Título", year: "Ano" },
+    });
+    expect(res.records).toHaveLength(1);
+    expect(res.records[0]!.title).toBe("X");
+    expect(res.records[0]!.year).toBe(2020);
+  });
+
+  it("conteúdo sem linhas de dados ⇒ zero records", () => {
+    const res = csvParser.parse("title,year\n");
+    expect(res.records).toHaveLength(0);
+  });
+});
+```
+
+- [ ] **Step 3: Rodar o teste (verificar que falha)**
+
+Run: `npm test -- tests/unit/import/csv.test.ts`
+Expected: FAIL — módulo `@shared/import/csv` inexistente.
+
+- [ ] **Step 4: Implementar o parser CSV (GREEN)**
+
+Create `supabase/functions/_shared/import/csv.ts`:
+```ts
+import Papa from "papaparse";
+import type { BibliographicParser, ParsedRecord, ParseError } from "./types";
+
+const DEFAULT_MAP: Record<string, string> = {
+  title: "title",
+  authors: "authors",
+  year: "year",
+  doi: "doi",
+  abstract: "abstract",
+  language: "language",
+};
+
+function splitAuthors(v: string | undefined): string[] {
+  if (!v) return [];
+  return v
+    .split(/[;]/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+function toYear(v: string | undefined): number | null {
+  if (!v) return null;
+  const n = parseInt(v.trim(), 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+export const csvParser: BibliographicParser = {
+  format: "csv",
+  parse(content, opts) {
+    const map = { ...DEFAULT_MAP, ...(opts?.fieldMap ?? {}) };
+    const errors: ParseError[] = [];
+    const parsed = Papa.parse<Record<string, string>>(content, {
+      header: true,
+      skipEmptyLines: true,
+    });
+    for (const e of parsed.errors) {
+      errors.push({ line: e.row ?? null, message: `Erro de CSV: ${e.message}` });
+    }
+    const records: ParsedRecord[] = (parsed.data ?? [])
+      .filter((row) => (row[map.title] ?? "").trim().length > 0)
+      .map((row) => ({
+        title: (row[map.title] ?? "").trim(),
+        authors: splitAuthors(row[map.authors]),
+        year: toYear(row[map.year]),
+        doi: (row[map.doi] ?? "").trim() || null,
+        abstract: (row[map.abstract] ?? "").trim() || null,
+        language: (row[map.language] ?? "").trim() || null,
+        raw: row,
+      }));
+    return { records, errors, format: "csv" };
+  },
+};
+```
+
+- [ ] **Step 5: Rodar o teste (verificar que passa)**
+
+Run: `npm test -- tests/unit/import/csv.test.ts`
+Expected: PASS (3 testes).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add supabase/functions/_shared/import/csv.ts tests/fixtures/import/sample.csv tests/unit/import/csv.test.ts
+git commit -m "feat(import): CSV parser (papaparse) with fieldMap (FR-013/014)"
+```
+
+---
+
+## Task 6: Parser RIS (próprio)
+
+**Files:**
+- Create: `supabase/functions/_shared/import/ris.ts`
+- Create: `tests/fixtures/import/sample.ris`
+- Create: `tests/fixtures/import/malformed.ris`
+- Test: `tests/unit/import/ris.test.ts`
+
+- [ ] **Step 1: Criar fixtures RIS (válida e malformada)**
+
+Create `tests/fixtures/import/sample.ris`:
+```ris
+TY  - JOUR
+TI  - Aprendizagem ativa em sala
+AU  - Silva, A.
+AU  - Souza, B.
+PY  - 2021
+DO  - 10.1000/abc
+AB  - Resumo um.
+LA  - pt
+ER  -
+TY  - JOUR
+T1  - Active learning review
+A1  - Doe, J.
+Y1  - 2019///
+N2  - Abstract two.
+LA  - en
+ER  -
+```
+
+Create `tests/fixtures/import/malformed.ris`:
+```ris
+isto não é RIS
+apenas texto solto
+sem tags nem ER
+```
+
+- [ ] **Step 2: Escrever o teste (RED)**
+
+Create `tests/unit/import/ris.test.ts`:
+```ts
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { risParser } from "@shared/import/ris";
+
+const sample = readFileSync("tests/fixtures/import/sample.ris", "utf8");
+const malformed = readFileSync("tests/fixtures/import/malformed.ris", "utf8");
+
+describe("risParser", () => {
+  it("parseia dois registros, mapeando tags primárias e alternativas", () => {
+    const res = risParser.parse(sample);
+    expect(res.errors).toHaveLength(0);
+    expect(res.records).toHaveLength(2);
+    const [a, b] = res.records;
+    expect(a!.title).toBe("Aprendizagem ativa em sala");
+    expect(a!.authors).toEqual(["Silva, A.", "Souza, B."]);
+    expect(a!.year).toBe(2021);
+    expect(a!.doi).toBe("10.1000/abc");
+    expect(a!.abstract).toBe("Resumo um.");
+    expect(b!.title).toBe("Active learning review"); // T1
+    expect(b!.authors).toEqual(["Doe, J."]); // A1
+    expect(b!.year).toBe(2019); // Y1 com sufixo ///
+  });
+
+  it("arquivo sem tags/ER ⇒ zero records e erro claro (FR-016)", () => {
+    const res = risParser.parse(malformed);
+    expect(res.records).toHaveLength(0);
+    expect(res.errors.length).toBeGreaterThan(0);
+    expect(res.errors[0]!.message).toMatch(/RIS/i);
+  });
+});
+```
+
+- [ ] **Step 3: Rodar o teste (verificar que falha)**
+
+Run: `npm test -- tests/unit/import/ris.test.ts`
+Expected: FAIL — módulo inexistente.
+
+- [ ] **Step 4: Implementar o parser RIS (GREEN)**
+
+Create `supabase/functions/_shared/import/ris.ts`:
+```ts
+import type { BibliographicParser, ParsedRecord, ParseError } from "./types";
+
+const TAG_RE = /^([A-Z][A-Z0-9])\s{2}-\s?(.*)$/;
+
+const TITLE_TAGS = ["TI", "T1"];
+const AUTHOR_TAGS = ["AU", "A1"];
+const YEAR_TAGS = ["PY", "Y1"];
+const ABSTRACT_TAGS = ["AB", "N2"];
+
+function emptyAccum(): Record<string, string[]> {
+  return {};
+}
+
+function buildRecord(fields: Record<string, string[]>): ParsedRecord {
+  const first = (tags: string[]): string | null => {
+    for (const t of tags) if (fields[t]?.length) return fields[t]![0]!;
+    return null;
+  };
+  const all = (tags: string[]): string[] => {
+    const out: string[] = [];
+    for (const t of tags) if (fields[t]) out.push(...fields[t]!);
+    return out;
+  };
+  const yearRaw = first(YEAR_TAGS);
+  const yearMatch = yearRaw?.match(/\d{4}/);
+  return {
+    title: first(TITLE_TAGS) ?? "",
+    authors: all(AUTHOR_TAGS),
+    year: yearMatch ? parseInt(yearMatch[0], 10) : null,
+    doi: first(["DO"]),
+    abstract: first(ABSTRACT_TAGS),
+    language: first(["LA"]),
+    raw: Object.fromEntries(
+      Object.entries(fields).map(([k, v]) => [k, v.length === 1 ? v[0]! : v]),
+    ),
+  };
+}
+
+export const risParser: BibliographicParser = {
+  format: "ris",
+  parse(content) {
+    const errors: ParseError[] = [];
+    const records: ParsedRecord[] = [];
+    const lines = content.split(/\r\n|\r|\n/);
+
+    let fields = emptyAccum();
+    let lastTag: string | null = null;
+    let sawAnyTag = false;
+    let openRecord = false;
+
+    lines.forEach((line) => {
+      if (line.trim() === "") return;
+      const m = line.match(TAG_RE);
+      if (!m) {
+        // linha de continuação do último campo
+        if (lastTag && fields[lastTag]?.length) {
+          const arr = fields[lastTag]!;
+          arr[arr.length - 1] = `${arr[arr.length - 1]} ${line.trim()}`;
+        }
+        return;
+      }
+      const [, tag, value] = m;
+      sawAnyTag = true;
+      if (tag === "TY") {
+        fields = emptyAccum();
+        openRecord = true;
+        lastTag = null;
+        return;
+      }
+      if (tag === "ER") {
+        if (openRecord) records.push(buildRecord(fields));
+        fields = emptyAccum();
+        openRecord = false;
+        lastTag = null;
+        return;
+      }
+      (fields[tag!] ??= []).push((value ?? "").trim());
+      lastTag = tag!;
+    });
+
+    if (!sawAnyTag) {
+      errors.push({
+        line: 1,
+        message:
+          "Arquivo RIS inválido: nenhuma tag reconhecida (esperado 'TY  - ...').",
+      });
+    } else if (openRecord && records.length === 0) {
+      errors.push({
+        line: lines.length,
+        message: "Arquivo RIS inválido: registro sem marcador de fim 'ER  -'.",
+      });
+    }
+
+    return { records, errors, format: "ris" };
+  },
+};
+```
+
+- [ ] **Step 5: Rodar o teste (verificar que passa)**
+
+Run: `npm test -- tests/unit/import/ris.test.ts`
+Expected: PASS (2 testes).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add supabase/functions/_shared/import/ris.ts tests/fixtures/import/sample.ris tests/fixtures/import/malformed.ris tests/unit/import/ris.test.ts
+git commit -m "feat(import): RIS parser (own, tagged line-oriented) + malformed guard (FR-016)"
+```
+
+---
+
+## Task 7: Parser BibTeX (adapter sobre @retorquere/bibtex-parser)
+
+**Files:**
+- Create: `supabase/functions/_shared/import/bibtex.ts`
+- Create: `tests/fixtures/import/sample.bib`
+- Test: `tests/unit/import/bibtex.test.ts`
+
+- [ ] **Step 1: Criar a fixture BibTeX**
+
+Create `tests/fixtures/import/sample.bib`:
+```bibtex
+@article{silva2021,
+  title = {Aprendizagem ativa em sala},
+  author = {Silva, A. and Souza, B.},
+  year = {2021},
+  doi = {10.1000/abc},
+  abstract = {Resumo um.},
+  language = {pt}
+}
+@article{doe2019,
+  title = {Active learning review},
+  author = {Doe, J.},
+  year = {2019}
+}
+```
+
+- [ ] **Step 2: Escrever o teste (RED) — o teste é o contrato de saída**
+
+Create `tests/unit/import/bibtex.test.ts`:
+```ts
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { bibtexParser } from "@shared/import/bibtex";
+
+const sample = readFileSync("tests/fixtures/import/sample.bib", "utf8");
+
+describe("bibtexParser", () => {
+  it("parseia dois registros e mapeia campos para ParsedRecord", () => {
+    const res = bibtexParser.parse(sample);
+    expect(res.errors).toHaveLength(0);
+    expect(res.records).toHaveLength(2);
+    const [a, b] = res.records;
+    expect(a!.title).toBe("Aprendizagem ativa em sala");
+    expect(a!.authors).toEqual(["Silva, A.", "Souza, B."]);
+    expect(a!.year).toBe(2021);
+    expect(a!.doi).toBe("10.1000/abc");
+    expect(a!.abstract).toBe("Resumo um.");
+    expect(a!.language).toBe("pt");
+    expect(b!.title).toBe("Active learning review");
+    expect(b!.doi).toBeNull();
+    expect(b!.year).toBe(2019);
+  });
+
+  it("conteúdo sem entradas válidas ⇒ zero records (FR-016)", () => {
+    const res = bibtexParser.parse("isto não é bibtex {{{");
+    expect(res.records).toHaveLength(0);
+  });
+});
+```
+
+- [ ] **Step 3: Rodar o teste (verificar que falha)**
+
+Run: `npm test -- tests/unit/import/bibtex.test.ts`
+Expected: FAIL — módulo inexistente.
+
+- [ ] **Step 4: Implementar o adapter BibTeX (GREEN)**
+
+Create `supabase/functions/_shared/import/bibtex.ts`. As acessoras (`asString`, leitura de `fields`/`creators`) são **defensivas** para tolerar variações de shape entre versões da lib; o teste do Step 2 é o contrato — se o mapeamento divergir, ajustar o acesso a campos (inspecionar `JSON.stringify(parse(sample))` num scratch) até o teste passar, **sem alterar o teste**.
+```ts
+import { parse as parseBibtex } from "@retorquere/bibtex-parser";
+import type { BibliographicParser, ParsedRecord, ParseError } from "./types";
+
+function asString(v: unknown): string | null {
+  if (v == null) return null;
+  if (Array.isArray(v)) return v.length ? asString(v[0]) : null;
+  const s = String(v).trim();
+  return s.length ? s : null;
+}
+
+function authorsFrom(entry: Record<string, unknown>): string[] {
+  // @retorquere expõe nomes em `creators.author` (lista de {firstName,lastName})
+  // ou, conforme a versão, em fields.author. Tratamos ambos.
+  const creators = (entry.creators as Record<string, unknown> | undefined)
+    ?.author;
+  if (Array.isArray(creators)) {
+    return creators
+      .map((c) => {
+        const o = c as { lastName?: string; firstName?: string; name?: string };
+        if (o.name) return o.name.trim();
+        const last = (o.lastName ?? "").trim();
+        const first = (o.firstName ?? "").trim();
+        return [last, first].filter(Boolean).join(", ");
+      })
+      .filter((s) => s.length > 0);
+  }
+  const fields = entry.fields as Record<string, unknown> | undefined;
+  const raw = asString(fields?.author);
+  if (!raw) return [];
+  return raw
+    .split(/\s+and\s+/i)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+export const bibtexParser: BibliographicParser = {
+  format: "bibtex",
+  parse(content) {
+    const errors: ParseError[] = [];
+    let entries: Array<Record<string, unknown>> = [];
+    try {
+      const bib = parseBibtex(content) as { entries?: unknown };
+      entries = Array.isArray(bib.entries)
+        ? (bib.entries as Array<Record<string, unknown>>)
+        : [];
+    } catch (e) {
+      errors.push({
+        line: null,
+        message: `Arquivo BibTeX inválido: ${(e as Error).message}`,
+      });
+      return { records: [], errors, format: "bibtex" };
+    }
+
+    const records: ParsedRecord[] = [];
+    for (const entry of entries) {
+      const fields = (entry.fields ?? {}) as Record<string, unknown>;
+      const title = asString(fields.title);
+      if (!title) continue; // entrada sem título não é registro válido
+      const yearStr = asString(fields.year) ?? asString(fields.date);
+      const yearMatch = yearStr?.match(/\d{4}/);
+      records.push({
+        title,
+        authors: authorsFrom(entry),
+        year: yearMatch ? parseInt(yearMatch[0], 10) : null,
+        doi: asString(fields.doi),
+        abstract: asString(fields.abstract),
+        language: asString(fields.language) ?? asString(fields.langid),
+        raw: { type: entry.type, key: entry.key, fields },
+      });
+    }
+    return { records, errors, format: "bibtex" };
+  },
+};
+```
+
+- [ ] **Step 5: Rodar o teste (verificar que passa)**
+
+Run: `npm test -- tests/unit/import/bibtex.test.ts`
+Expected: PASS (2 testes). Se o primeiro teste falhar por shape da lib, inspecionar a saída de `parseBibtex(sample)` e ajustar `authorsFrom`/acesso a `fields` até passar (não alterar o teste).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add supabase/functions/_shared/import/bibtex.ts tests/fixtures/import/sample.bib tests/unit/import/bibtex.test.ts
+git commit -m "feat(import): BibTeX parser adapter (@retorquere/bibtex-parser) (FR-013)"
+```
+
+---
+
+## Task 8: Roteador de parsers + parseContent
+
+**Files:**
+- Create: `supabase/functions/_shared/import/index.ts`
+- Test: `tests/unit/import/parse-content.test.ts`
+
+- [ ] **Step 1: Escrever o teste (RED)**
+
+Create `tests/unit/import/parse-content.test.ts`:
+```ts
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { parseContent, parserFor } from "@shared/import/index";
+
+describe("parseContent", () => {
+  it("roteia por formato", () => {
+    expect(parserFor("ris").format).toBe("ris");
+    expect(parserFor("bibtex").format).toBe("bibtex");
+    expect(parserFor("csv").format).toBe("csv");
+  });
+
+  it("parseia RIS pela fachada única", () => {
+    const ris = readFileSync("tests/fixtures/import/sample.ris", "utf8");
+    const res = parseContent("ris", ris);
+    expect(res.records).toHaveLength(2);
+    expect(res.format).toBe("ris");
+  });
+});
+```
+
+- [ ] **Step 2: Rodar o teste (verificar que falha)**
+
+Run: `npm test -- tests/unit/import/parse-content.test.ts`
+Expected: FAIL — módulo inexistente.
+
+- [ ] **Step 3: Implementar a fachada (GREEN)**
+
+Create `supabase/functions/_shared/import/index.ts`:
+```ts
+import { csvParser } from "./csv";
+import { risParser } from "./ris";
+import { bibtexParser } from "./bibtex";
+import type { BibliographicParser, ParseResult, SourceFormat } from "./types";
+
+const PARSERS: Record<SourceFormat, BibliographicParser> = {
+  csv: csvParser,
+  ris: risParser,
+  bibtex: bibtexParser,
+};
+
+export function parserFor(format: SourceFormat): BibliographicParser {
+  return PARSERS[format];
+}
+
+export function parseContent(
+  format: SourceFormat,
+  content: string,
+  opts?: { fieldMap?: Record<string, string> },
+): ParseResult {
+  return parserFor(format).parse(content, opts);
+}
+
+export type {
+  SourceFormat,
+  ParsedRecord,
+  ParseError,
+  ParseResult,
+  BibliographicParser,
+} from "./types";
+```
+
+- [ ] **Step 4: Rodar o teste + cobertura do diretório import (≥80%, constitution §Testes)**
+
+Run: `npm test -- tests/unit/import/`
+Expected: PASS (todos). Confirmar visualmente que os 4 parsers + normalize estão cobertos pelos casos válidos/malformados/fieldMap.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add supabase/functions/_shared/import/index.ts tests/unit/import/parse-content.test.ts
+git commit -m "feat(import): single parseContent facade + parser router"
+```
+
+---
+
+## Task 9: Núcleo de enqueue (valida + cria job/itens)
+
+**Files:**
+- Create: `supabase/functions/_shared/jobs/types.ts`
+- Create: `supabase/functions/_shared/jobs/enqueue.ts`
+- Test: `tests/integration/jobs.import.test.ts` (parte 1 — enqueue)
+
+- [ ] **Step 1: Escrever os tipos de jobs**
+
+Create `supabase/functions/_shared/jobs/types.ts`:
+```ts
+import type { SourceFormat } from "../import/types";
+
+export interface SearchInput {
+  queryString: string;
+  database: string;
+  searchedOn: string; // ISO date (yyyy-mm-dd)
+  hits: number;
+}
+
+export interface EnqueueImportInput {
+  format: SourceFormat;
+  content: string;
+  fieldMap?: Record<string, string>;
+  search: SearchInput;
+}
+
+export interface EnqueueResult {
+  job_id: string;
+  status: "queued";
+  item_count: number;
+  estimated_cost: null; // import_parse não tem custo de IA
+}
+
+export interface WorkerResult {
+  job_id: string;
+  status: "completed" | "completed_with_errors" | "failed";
+  done: number;
+  failed: number;
+}
+
+/** Erro de validação que o shell HTTP mapeia para 400 (FR-016). */
+export class EnqueueValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EnqueueValidationError";
+  }
+}
+
+/** Dependências injetáveis (mantém o núcleo portátil/testável). */
+export interface JobDeps {
+  // Cliente Supabase tipado (Node nos testes; Deno no shell).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any;
+}
+```
+Nota: `supabase: any` está isolado em deps de baixo nível; o ESLint do projeto proíbe `any`, por isso o `eslint-disable-next-line` pontual (não há `SupabaseClient<Database>` disponível no runtime Deno sem acoplar o gerado). O núcleo de domínio permanece tipado.
+
+- [ ] **Step 2: Escrever o teste de integração do enqueue (RED)**
+
+Create `tests/integration/jobs.import.test.ts`:
+```ts
+import { describe, it, expect, beforeAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+import { enqueueImportJob } from "@shared/jobs/enqueue";
+import { EnqueueValidationError } from "@shared/jobs/types";
+
+const ris = readFileSync("tests/fixtures/import/sample.ris", "utf8");
+const malformed = readFileSync("tests/fixtures/import/malformed.ris", "utf8");
+
+describe("import job — enqueue (§VIII / FR-016)", () => {
+  let userClient: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+
+  beforeAll(async () => {
+    const stamp = Date.now();
+    const u = await signUpUser(`imp_${stamp}@example.com`, "senha-teste-123");
+    userClient = u.client;
+    const { data } = await userClient.rpc("create_review", {
+      p_title: "Importação",
+    });
+    reviewId = data.id;
+  });
+
+  const search = {
+    queryString: "active learning",
+    database: "ERIC",
+    searchedOn: "2026-05-30",
+    hits: 2,
+  };
+
+  it("RIS válido ⇒ cria job + itens, mas NÃO cria records ainda (enqueue não processa)", async () => {
+    const res = await enqueueImportJob({ supabase: userClient }, reviewId, {
+      format: "ris",
+      content: ris,
+      search,
+    });
+    expect(res.status).toBe("queued");
+    expect(res.item_count).toBe(2);
+
+    const { count: itemCount } = await userClient
+      .from("job_item")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId);
+    expect(itemCount).toBe(2);
+
+    const { count: recordCount } = await userClient
+      .from("record")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId);
+    expect(recordCount).toBe(0); // §VIII: worker ainda não rodou
+  });
+
+  it("arquivo malformado ⇒ EnqueueValidationError e zero persistência (FR-016)", async () => {
+    await expect(
+      enqueueImportJob({ supabase: userClient }, reviewId, {
+        format: "ris",
+        content: malformed,
+        search,
+      }),
+    ).rejects.toBeInstanceOf(EnqueueValidationError);
+
+    // Nada novo persistido por causa do malformado: continua só o search válido anterior.
+    const { count: searchCount } = await serviceClient()
+      .from("search")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId);
+    expect(searchCount).toBe(1);
+  });
+});
+```
+
+- [ ] **Step 3: Rodar o teste (verificar que falha)**
+
+Run: `npm test -- tests/integration/jobs.import.test.ts`
+Expected: FAIL — `@shared/jobs/enqueue` inexistente.
+
+- [ ] **Step 4: Implementar o núcleo de enqueue (GREEN)**
+
+Create `supabase/functions/_shared/jobs/enqueue.ts`:
+```ts
+import { parseContent } from "../import/index";
+import {
+  type EnqueueImportInput,
+  type EnqueueResult,
+  type JobDeps,
+  EnqueueValidationError,
+} from "./types";
+
+/**
+ * Valida e enfileira uma importação (D-F3.4). Parseia para validar:
+ * 0 registros válidos ⇒ EnqueueValidationError (FR-016, zero persistência).
+ * Caso contrário, cria search + job + job_items atômicos via RPC create_import_job.
+ * NÃO insere records — isso é trabalho do worker (§VIII).
+ */
+export async function enqueueImportJob(
+  deps: JobDeps,
+  reviewId: string,
+  input: EnqueueImportInput,
+): Promise<EnqueueResult> {
+  const result = parseContent(input.format, input.content, {
+    fieldMap: input.fieldMap,
+  });
+
+  if (result.records.length === 0) {
+    const detail = result.errors[0]?.message ?? "nenhum registro válido.";
+    throw new EnqueueValidationError(
+      `Importação rejeitada: ${detail} Nenhum registro foi salvo.`,
+    );
+  }
+
+  const { data, error } = await deps.supabase.rpc("create_import_job", {
+    p_review_id: reviewId,
+    p_format: input.format,
+    p_search: input.search,
+    p_items: result.records,
+  });
+  if (error) throw new Error(error.message);
+
+  return {
+    job_id: data.id,
+    status: "queued",
+    item_count: result.records.length,
+    estimated_cost: null,
+  };
+}
+```
+
+- [ ] **Step 5: Rodar o teste (verificar que passa)**
+
+Run: `npm test -- tests/integration/jobs.import.test.ts`
+Expected: PASS (2 testes da suíte de enqueue). Requer `supabase start` ativo e `.env.local` preenchido.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add supabase/functions/_shared/jobs/types.ts supabase/functions/_shared/jobs/enqueue.ts tests/integration/jobs.import.test.ts
+git commit -m "feat(jobs): enqueue core — validate parse, create job/items (§VIII/FR-016)"
+```
+
+---
+
+## Task 10: Núcleo do worker (persiste records por item, resiliente)
+
+**Files:**
+- Create: `supabase/functions/_shared/jobs/worker.ts`
+- Modify: `tests/integration/jobs.import.test.ts` (parte 2 — worker)
+
+- [ ] **Step 1: Adicionar o bloco de teste do worker (RED)**
+
+Modify `tests/integration/jobs.import.test.ts` — acrescentar o import e este `describe` ao fim do arquivo:
+```ts
+import { processImportJob } from "@shared/jobs/worker";
+
+describe("import job — worker (§VIII resiliência por-item)", () => {
+  let userClient: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let jobId: string;
+
+  beforeAll(async () => {
+    const stamp = Date.now();
+    const u = await signUpUser(`wrk_${stamp}@example.com`, "senha-teste-123");
+    userClient = u.client;
+    const { data: review } = await userClient.rpc("create_review", {
+      p_title: "Worker",
+    });
+    reviewId = review.id;
+    const res = await enqueueImportJob({ supabase: userClient }, reviewId, {
+      format: "ris",
+      content: ris,
+      search: {
+        queryString: "x",
+        database: "ERIC",
+        searchedOn: "2026-05-30",
+        hits: 2,
+      },
+    });
+    jobId = res.job_id;
+  });
+
+  it("processa todos os itens ⇒ records inseridos + job completed", async () => {
+    const out = await processImportJob({ supabase: serviceClient() }, jobId);
+    expect(out.status).toBe("completed");
+    expect(out.done).toBe(2);
+    expect(out.failed).toBe(0);
+
+    const { count } = await userClient
+      .from("record")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId);
+    expect(count).toBe(2);
+
+    const { data: rec } = await userClient
+      .from("record")
+      .select("doi_normalized, corpus_state")
+      .eq("review_id", reviewId)
+      .not("doi_normalized", "is", null)
+      .limit(1)
+      .maybeSingle();
+    expect(rec!.doi_normalized).toBe("10.1000/abc"); // normalização aplicada
+    expect(rec!.corpus_state).toBe("imported");
+  });
+
+  it("falha forçada num item ⇒ completed_with_errors, demais done", async () => {
+    const u = await signUpUser(
+      `wrk2_${Date.now()}@example.com`,
+      "senha-teste-123",
+    );
+    const { data: review } = await u.client.rpc("create_review", {
+      p_title: "Worker2",
+    });
+    const res = await enqueueImportJob({ supabase: u.client }, review.id, {
+      format: "ris",
+      content: ris,
+      search: {
+        queryString: "x",
+        database: "ERIC",
+        searchedOn: "2026-05-30",
+        hits: 2,
+      },
+    });
+    let n = 0;
+    const out = await processImportJob(
+      {
+        supabase: serviceClient(),
+        // injeta processamento que falha no 1º item (DI — D-F3.1)
+        processItem: async (item, real) => {
+          n += 1;
+          if (n === 1) throw new Error("falha simulada");
+          return real(item);
+        },
+      },
+      res.job_id,
+    );
+    expect(out.status).toBe("completed_with_errors");
+    expect(out.failed).toBe(1);
+    expect(out.done).toBe(1);
+  });
+});
+```
+
+- [ ] **Step 2: Rodar o teste (verificar que falha)**
+
+Run: `npm test -- tests/integration/jobs.import.test.ts`
+Expected: FAIL — `@shared/jobs/worker` inexistente.
+
+- [ ] **Step 3: Implementar o núcleo do worker (GREEN)**
+
+Create `supabase/functions/_shared/jobs/worker.ts`:
+```ts
+import { normalizeDoi, normalizeTitle } from "../import/normalize";
+import type { ParsedRecord, SourceFormat } from "../import/types";
+import type { JobDeps, WorkerResult } from "./types";
+
+interface ImportItemPayload {
+  record: ParsedRecord;
+  search_id: string;
+  format: SourceFormat;
+}
+
+interface WorkItem {
+  id: string;
+  payload: ImportItemPayload;
+  review_id: string;
+}
+
+interface WorkerDeps extends JobDeps {
+  /** Override de processamento por item (testes — D-F3.1). `real` aplica o default. */
+  processItem?: (
+    item: WorkItem,
+    real: (i: WorkItem) => Promise<void>,
+  ) => Promise<void>;
+}
+
+/**
+ * Processa um job de importação item-a-item (§VIII): normaliza (R2) e insere
+ * cada record via RPC atômica insert_import_record. Falha de um item ⇒ item
+ * 'failed' (não derruba o job). Retomável: só pega itens 'pending'.
+ */
+export async function processImportJob(
+  deps: WorkerDeps,
+  jobId: string,
+): Promise<WorkerResult> {
+  const { supabase } = deps;
+
+  await supabase
+    .from("job")
+    .update({ status: "running", started_at: new Date().toISOString() })
+    .eq("id", jobId);
+
+  const { data: items, error } = await supabase
+    .from("job_item")
+    .select("id, payload, review_id")
+    .eq("job_id", jobId)
+    .eq("status", "pending");
+  if (error) throw new Error(error.message);
+
+  const real = async (i: WorkItem) => {
+    const rec = i.payload.record;
+    const { error: rpcErr } = await supabase.rpc("insert_import_record", {
+      p_review_id: i.review_id,
+      p_search_id: i.payload.search_id,
+      p_job_item_id: i.id,
+      p_source_format: i.payload.format,
+      p_raw: rec.raw,
+      p_metadata: {
+        title: rec.title,
+        authors: rec.authors,
+        year: rec.year,
+        doi: rec.doi,
+        abstract: rec.abstract,
+        language: rec.language,
+      },
+      p_doi_normalized: normalizeDoi(rec.doi) ?? "",
+      p_title_norm: normalizeTitle(rec.title) ?? "",
+    });
+    if (rpcErr) throw new Error(rpcErr.message);
+  };
+
+  let done = 0;
+  let failed = 0;
+  for (const item of (items ?? []) as WorkItem[]) {
+    try {
+      if (deps.processItem) await deps.processItem(item, real);
+      else await real(item);
+      done += 1;
+    } catch (e) {
+      failed += 1;
+      await supabase
+        .from("job_item")
+        .update({
+          status: "failed",
+          error: (e as Error).message,
+          attempts: 1,
+        })
+        .eq("id", item.id);
+    }
+  }
+
+  const total = done + failed;
+  const status =
+    failed === 0 ? "completed" : done === 0 ? "failed" : "completed_with_errors";
+  await supabase
+    .from("job")
+    .update({
+      status,
+      progress: total > 0 ? Math.round((done / total) * 100) : 0,
+      finished_at: new Date().toISOString(),
+    })
+    .eq("id", jobId);
+
+  return { job_id: jobId, status, done, failed };
+}
+```
+
+- [ ] **Step 4: Rodar a suíte completa do job (verificar que passa)**
+
+Run: `npm test -- tests/integration/jobs.import.test.ts`
+Expected: PASS (enqueue + worker, 4 testes).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add supabase/functions/_shared/jobs/worker.ts tests/integration/jobs.import.test.ts
+git commit -m "feat(jobs): worker core — per-item record insert, resilient + resumable (§VIII)"
+```
+
+---
+
+## Task 11: RLS das tabelas novas (SC-009)
+
+**Files:**
+- Test: `tests/integration/rls.record-search-job.test.ts`
+
+> A RLS já foi escrita na migration 0003; este teste a verifica (vermelho só se a política estiver errada).
+
+- [ ] **Step 1: Escrever o teste de isolamento**
+
+Create `tests/integration/rls.record-search-job.test.ts`:
+```ts
+import { describe, it, expect, beforeAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+import { enqueueImportJob } from "@shared/jobs/enqueue";
+import { processImportJob } from "@shared/jobs/worker";
+
+const ris = readFileSync("tests/fixtures/import/sample.ris", "utf8");
+
+describe("RLS — record/search/job isolados por Revisão (SC-009)", () => {
+  let aClient: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let bClient: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewIdA: string;
+
+  beforeAll(async () => {
+    const stamp = Date.now();
+    const a = await signUpUser(`rls_a_${stamp}@example.com`, "senha-teste-123");
+    const b = await signUpUser(`rls_b_${stamp}@example.com`, "senha-teste-123");
+    aClient = a.client;
+    bClient = b.client;
+    const { data } = await aClient.rpc("create_review", { p_title: "A" });
+    reviewIdA = data.id;
+    const res = await enqueueImportJob({ supabase: aClient }, reviewIdA, {
+      format: "ris",
+      content: ris,
+      search: {
+        queryString: "x",
+        database: "ERIC",
+        searchedOn: "2026-05-30",
+        hits: 2,
+      },
+    });
+    await processImportJob({ supabase: serviceClient() }, res.job_id);
+  });
+
+  it("A enxerga seus records", async () => {
+    const { data } = await aClient
+      .from("record")
+      .select("id")
+      .eq("review_id", reviewIdA);
+    expect((data ?? []).length).toBe(2);
+  });
+
+  it("B NÃO enxerga record/search/job/job_item de A (0 vazamentos)", async () => {
+    for (const table of ["record", "search", "job", "job_item"] as const) {
+      const { data } = await bClient
+        .from(table)
+        .select("id")
+        .eq("review_id", reviewIdA);
+      expect(data ?? []).toHaveLength(0);
+    }
+  });
+
+  it("B NÃO consegue chamar create_import_job na Revisão de A", async () => {
+    const { error } = await bClient.rpc("create_import_job", {
+      p_review_id: reviewIdA,
+      p_format: "ris",
+      p_search: {
+        queryString: "x",
+        database: "ERIC",
+        searchedOn: "2026-05-30",
+        hits: 1,
+      },
+      p_items: [
+        {
+          title: "intruso",
+          authors: [],
+          year: null,
+          doi: null,
+          abstract: null,
+          language: null,
+          raw: {},
+        },
+      ],
+    });
+    expect(error).not.toBeNull(); // 'not a member'
+  });
+});
+```
+
+- [ ] **Step 2: Rodar o teste (verificar que passa)**
+
+Run: `npm test -- tests/integration/rls.record-search-job.test.ts`
+Expected: PASS (3 testes).
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add .env.example
-git commit -m "chore: reconcile .env.example to Vault BYOK (drop prior-build residue)"
+git add tests/integration/rls.record-search-job.test.ts
+git commit -m "test(rls): record/search/job isolation + non-member enqueue denied (SC-009)"
 ```
 
 ---
 
-## Task 7 — Helper de auditoria reutilizável (TDD leve)
+## Task 12: Edge Functions (cascas Deno) — jobs-enqueue, jobs-worker
 
 **Files:**
-- Create: `src/lib/audit.ts`
-- Test: `tests/unit/audit.test.ts`
+- Create: `supabase/functions/jobs-enqueue/index.ts`
+- Create: `supabase/functions/jobs-worker/index.ts`
 
-- [ ] **Step 1: Teste do shape do payload (falha primeiro)**
+> Estes arquivos NÃO são checados pelo `tsc` do host (D-F3.3, excluídos). São cascas finas sobre o núcleo já testado. Validação real: deploy/Deno (fora desta sessão). Mantê-los mínimos.
 
-Create `tests/unit/audit.test.ts`:
+- [ ] **Step 1: Escrever a Edge Function de enqueue**
 
+Create `supabase/functions/jobs-enqueue/index.ts`:
 ```ts
-import { describe, it, expect } from "vitest";
-import { buildAuditRow } from "@/lib/audit";
+// Edge Function (Deno) — casca HTTP sobre enqueueImportJob (D-F3.1/contrato async-jobs).
+import { createClient } from "@supabase/supabase-js";
+import { enqueueImportJob } from "../_shared/jobs/enqueue.ts";
+import { EnqueueValidationError } from "../_shared/jobs/types.ts";
 
-describe("buildAuditRow", () => {
-  it("monta a linha append-only com actor humano", () => {
-    const row = buildAuditRow({
-      reviewId: "r1",
-      actorId: "u1",
-      action: "save_question",
-      entity: "question",
-      entityId: "q1",
-      before: null,
-      after: { framework: "spider" },
-    });
-    expect(row).toMatchObject({
-      review_id: "r1",
-      actor_type: "human",
-      actor_id: "u1",
-      action: "save_question",
-      entity: "question",
-      entity_id: "q1",
-      after: { framework: "spider" },
-    });
-  });
-});
-```
-
-- [ ] **Step 2: Rodar para ver falhar**
-
-Run: `npm run test -- tests/unit/audit.test.ts`
-Expected: FAIL — módulo não encontrado.
-
-- [ ] **Step 3: Implementar**
-
-Create `src/lib/audit.ts`:
-
-```ts
-import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database, TablesInsert } from "@/types/database";
-
-export interface AuditInput {
-  reviewId: string;
-  actorId: string | null;
-  action: string;
-  entity: string;
-  entityId: string | null;
-  before: unknown;
-  after: unknown;
-}
-
-export function buildAuditRow(
-  input: AuditInput,
-): TablesInsert<"audit_entry"> {
-  return {
-    review_id: input.reviewId,
-    actor_type: "human",
-    actor_id: input.actorId,
-    action: input.action,
-    entity: input.entity,
-    entity_id: input.entityId,
-    before: (input.before ?? null) as TablesInsert<"audit_entry">["before"],
-    after: (input.after ?? null) as TablesInsert<"audit_entry">["after"],
-  };
-}
-
-/** Insere uma entrada de auditoria (append-only). Lança em erro de RLS. */
-export async function writeAudit(
-  supabase: SupabaseClient<Database>,
-  input: AuditInput,
-): Promise<void> {
-  const { error } = await supabase
-    .from("audit_entry")
-    .insert(buildAuditRow(input));
-  if (error) throw new Error(error.message);
-}
-```
-
-- [ ] **Step 4: Rodar até passar**
-
-Run: `npm run test -- tests/unit/audit.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/audit.ts tests/unit/audit.test.ts
-git commit -m "feat: reusable append-only audit helper"
-```
-
----
-
-## Task 8 — Vocabulário visual de IA (`src/components/ai/`)
-
-> **SKILL:** carregue `frontend-design:frontend-design` antes deste task (vocabulário de IA é central no Marco 1 — EP-3) e `react-best-practices:react-best-practices`. Componentes pequenos, um por arquivo, PascalCase, Tailwind utility-first, dark mode via classes. Tratamento visual de IA SEMPRE distinto de dado humano (cor/ícone/borda — Princípio I).
-
-**Files:**
-- Create: `src/components/ai/state.ts`
-- Create: `src/components/ai/SuggestionChip.tsx`
-- Create: `src/components/ai/ProvenancePopover.tsx`
-- Create: `src/components/ai/SuggestionActions.tsx`
-- Create: `src/components/ai/NotFound.tsx`
-- Test: `tests/unit/ai/suggestion-chip.test.tsx`
-
-- [ ] **Step 1: Fonte única de labels/estilo por estado**
-
-Create `src/components/ai/state.ts`:
-
-```ts
-import type { SuggestionState } from "@/lib/ai/llm/types";
-
-export const SUGGESTION_STATE_LABEL: Record<SuggestionState, string> = {
-  pending: "Sugestão de IA · pendente",
-  accepted: "Aceita",
-  edited: "Editada",
-  rejected: "Rejeitada",
-  inferred: "Inferida",
-};
-
-// Borda/cor distinta de dado humano (Princípio I). Suporta dark mode.
-export const SUGGESTION_STATE_CLASS: Record<SuggestionState, string> = {
-  pending: "border-violet-400 bg-violet-50 text-violet-900 dark:bg-violet-950 dark:text-violet-100",
-  accepted: "border-green-500 bg-green-50 text-green-900 dark:bg-green-950 dark:text-green-100",
-  edited: "border-amber-500 bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100",
-  rejected: "border-red-400 bg-red-50 text-red-900 line-through dark:bg-red-950 dark:text-red-100",
-  inferred: "border-sky-400 bg-sky-50 text-sky-900 dark:bg-sky-950 dark:text-sky-100",
-};
-```
-
-- [ ] **Step 2: Teste do chip (falha primeiro)**
-
-Create `tests/unit/ai/suggestion-chip.test.tsx`:
-
-```tsx
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { SuggestionChip } from "@/components/ai/SuggestionChip";
-
-describe("SuggestionChip", () => {
-  it("exibe o rótulo pt-BR do estado e marca como IA", () => {
-    render(<SuggestionChip state="pending" />);
-    expect(screen.getByText(/Sugestão de IA · pendente/)).toBeInTheDocument();
-  });
-
-  it("estado rejeitado usa rótulo 'Rejeitada'", () => {
-    render(<SuggestionChip state="rejected" />);
-    expect(screen.getByText("Rejeitada")).toBeInTheDocument();
-  });
-});
-```
-
-- [ ] **Step 3: Rodar para ver falhar**
-
-Run: `npm run test -- tests/unit/ai/suggestion-chip.test.tsx`
-Expected: FAIL — módulo não encontrado.
-
-- [ ] **Step 4: Implementar `SuggestionChip`**
-
-Create `src/components/ai/SuggestionChip.tsx`:
-
-```tsx
-import type { SuggestionState } from "@/lib/ai/llm/types";
-import { SUGGESTION_STATE_CLASS, SUGGESTION_STATE_LABEL } from "./state";
-
-export function SuggestionChip({ state }: { state: SuggestionState }) {
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${SUGGESTION_STATE_CLASS[state]}`}
-      data-ai-state={state}
-    >
-      <span aria-hidden>✦</span>
-      {SUGGESTION_STATE_LABEL[state]}
-    </span>
-  );
-}
-```
-
-- [ ] **Step 5: Implementar `ProvenancePopover`**
-
-Create `src/components/ai/ProvenancePopover.tsx`:
-
-```tsx
-"use client";
-
-import { useState } from "react";
-import type { Provenance } from "@/lib/ai/llm/types";
-
-export function ProvenancePopover({ provenance }: { provenance: Provenance }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span className="relative inline-block">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        aria-label="Ver proveniência da sugestão de IA"
-        className="rounded border px-1 text-xs underline focus:outline-none focus-visible:ring"
-      >
-        proveniência
-      </button>
-      {open && (
-        <div
-          role="dialog"
-          aria-label="Proveniência"
-          className="absolute z-10 mt-1 w-72 rounded border bg-white p-2 text-xs shadow dark:bg-zinc-900"
-        >
-          <dl className="grid grid-cols-[auto_1fr] gap-x-2">
-            <dt className="font-semibold">Modelo</dt>
-            <dd>{provenance.model}</dd>
-            <dt className="font-semibold">Versão</dt>
-            <dd>{provenance.version}</dd>
-            <dt className="font-semibold">Quando</dt>
-            <dd>{new Date(provenance.timestamp).toLocaleString("pt-BR")}</dd>
-            <dt className="font-semibold">Origem</dt>
-            <dd className="break-words">{provenance.prompt_or_span}</dd>
-          </dl>
-        </div>
-      )}
-    </span>
-  );
-}
-```
-
-- [ ] **Step 6: Implementar `SuggestionActions` e `NotFound`**
-
-Create `src/components/ai/SuggestionActions.tsx`:
-
-```tsx
-"use client";
-
-export function SuggestionActions({
-  onAccept,
-  onEdit,
-  onReject,
-  disabled,
-}: {
-  onAccept: () => void;
-  onEdit: () => void;
-  onReject: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="flex gap-2" role="group" aria-label="Ações da sugestão de IA">
-      <button type="button" onClick={onAccept} disabled={disabled}
-        className="rounded border border-green-600 px-2 py-0.5 text-xs text-green-700 focus-visible:ring">
-        Aceitar
-      </button>
-      <button type="button" onClick={onEdit} disabled={disabled}
-        className="rounded border border-amber-600 px-2 py-0.5 text-xs text-amber-700 focus-visible:ring">
-        Editar
-      </button>
-      <button type="button" onClick={onReject} disabled={disabled}
-        className="rounded border border-red-500 px-2 py-0.5 text-xs text-red-600 focus-visible:ring">
-        Rejeitar
-      </button>
-    </div>
-  );
-}
-```
-
-Create `src/components/ai/NotFound.tsx`:
-
-```tsx
-export function NotFound({ what = "Resultado" }: { what?: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded border border-dashed border-zinc-400 px-2 py-0.5 text-xs italic text-zinc-600 dark:text-zinc-300">
-      {what}: não encontrado
-    </span>
-  );
-}
-```
-
-- [ ] **Step 7: Rodar testes do chip até passar**
-
-Run: `npm run test -- tests/unit/ai/suggestion-chip.test.tsx`
-Expected: PASS.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add src/components/ai tests/unit/ai/suggestion-chip.test.tsx
-git commit -m "feat(ai): AI visual vocabulary (chip, provenance, actions, not-found)"
-```
-
----
-
-## Task 9 — BYOK: queries, server action e formulário
-
-> **SKILL:** `nextjs-best-practices` (server action + RSC), `frontend-design` (form).
-
-**Files:**
-- Create: `src/lib/byok/queries.ts`
-- Create: `src/lib/byok/actions.ts`
-- Create: `src/components/ai/ByokKeyForm.tsx`
-
-- [ ] **Step 1: Query de status da chave (metadados, nunca o segredo)**
-
-Create `src/lib/byok/queries.ts`:
-
-```ts
-import { createClient } from "@/lib/supabase/server";
-
-export interface ByokStatus {
-  present: boolean;
-  provider: string | null;
-}
-
-export async function getByokStatus(reviewId: string): Promise<ByokStatus> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("byok_key")
-    .select("provider")
-    .eq("review_id", reviewId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return { present: !!data, provider: data?.provider ?? null };
-}
-```
-
-- [ ] **Step 2: Server action que grava a chave no Vault via RPC**
-
-Create `src/lib/byok/actions.ts`:
-
-```ts
-"use server";
-
-import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
-
-export async function saveByokKey(reviewId: string, formData: FormData) {
-  const apiKey = String(formData.get("apiKey") ?? "").trim();
-  if (apiKey === "") {
-    return { ok: false, error: "Informe a chave do provedor." };
+Deno.serve(async (req: Request) => {
+  try {
+    const auth = req.headers.get("Authorization") ?? "";
+    const body = await req.json();
+    const { review_id, type, payload } = body;
+    if (type !== "import_parse") {
+      return Response.json({ error: "tipo não suportado" }, { status: 400 });
+    }
+    // Cliente com o JWT do chamador → RLS valida membership.
+    const supabase = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: auth } } },
+    );
+    const result = await enqueueImportJob({ supabase }, review_id, payload);
+    return Response.json(result, { status: 202 });
+  } catch (e) {
+    if (e instanceof EnqueueValidationError) {
+      return Response.json({ error: e.message }, { status: 400 }); // FR-016
+    }
+    return Response.json({ error: (e as Error).message }, { status: 500 });
   }
-  const supabase = await createClient();
-  // RLS na RPC (is_review_member) garante o escopo; o segredo nunca é logado.
-  const { error } = await supabase.rpc("set_byok_key", {
-    p_review_id: reviewId,
-    p_provider: "anthropic",
-    p_api_key: apiKey,
-  });
-  if (error) return { ok: false, error: "Falha ao salvar a chave." };
-  revalidatePath(`/reviews/${reviewId}/question`);
-  return { ok: true as const };
-}
+});
 ```
 
-- [ ] **Step 3: Formulário (client)**
+- [ ] **Step 2: Escrever a Edge Function do worker**
 
-Create `src/components/ai/ByokKeyForm.tsx`:
+Create `supabase/functions/jobs-worker/index.ts`:
+```ts
+// Edge Function (Deno) agendada por pg_cron (D-F3.5). Processa jobs queued.
+import { createClient } from "@supabase/supabase-js";
+import { processImportJob } from "../_shared/jobs/worker.ts";
 
-```tsx
-"use client";
-
-import { useState } from "react";
-import { saveByokKey } from "@/lib/byok/actions";
-
-export function ByokKeyForm({
-  reviewId,
-  present,
-}: {
-  reviewId: string;
-  present: boolean;
-}) {
-  const [msg, setMsg] = useState<string | null>(null);
-  return (
-    <form
-      action={async (fd) => {
-        const r = await saveByokKey(reviewId, fd);
-        setMsg(r.ok ? "Chave salva (cifrada no Vault)." : r.error ?? "Erro");
-      }}
-      className="flex flex-col gap-2 rounded border p-3"
-    >
-      <label className="flex flex-col gap-1 text-sm">
-        Chave do provedor de IA (Anthropic){present ? " — já cadastrada" : ""}
-        <input
-          name="apiKey"
-          type="password"
-          autoComplete="off"
-          placeholder={present ? "•••• (substituir)" : "sk-ant-..."}
-          className="border p-2"
-        />
-      </label>
-      <button type="submit" className="self-start bg-black px-3 py-1 text-sm text-white">
-        Salvar chave
-      </button>
-      {msg && <p className="text-xs text-zinc-600">{msg}</p>}
-    </form>
+Deno.serve(async (req: Request) => {
+  const secret = req.headers.get("x-cron-secret");
+  if (secret !== Deno.env.get("CRON_SECRET")) {
+    return Response.json({ error: "forbidden" }, { status: 403 });
+  }
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false } },
   );
-}
+  const { data: jobs } = await supabase
+    .from("job")
+    .select("id")
+    .eq("type", "import_parse")
+    .in("status", ["queued", "running"]);
+  const results = [];
+  for (const j of (jobs ?? []) as Array<{ id: string }>) {
+    results.push(await processImportJob({ supabase }, j.id));
+  }
+  return Response.json({ processed: results }, { status: 200 });
+});
 ```
 
-- [ ] **Step 4: Type-check**
+- [ ] **Step 3: Confirmar que o host segue limpo (functions excluídas do tsc)**
 
 Run: `npm run typecheck`
-Expected: PASS.
+Expected: sem saída — `supabase/functions/*/index.ts` não são checados (D-F3.3). Se aparecerem erros de `Deno`/`npm:`, confirmar o `exclude` da Task 1.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/lib/byok src/components/ai/ByokKeyForm.tsx
-git commit -m "feat(byok): key status query + Vault-backed save action + form"
+git add supabase/functions/jobs-enqueue/index.ts supabase/functions/jobs-worker/index.ts
+git commit -m "feat(edge): jobs-enqueue + jobs-worker HTTP shells over shared core"
 ```
 
 ---
 
-## Task 10 — US5: schema da Pergunta por framework (TDD)
-
-> **SKILL:** —. Lógica pura + Zod.
+## Task 13: App — QueryProvider, queries de jobs, schema de busca, workbench + ModeBar + actions
 
 **Files:**
-- Create: `src/lib/question/schema.ts`
-- Test: `tests/unit/question/question-schema.test.ts`
+- Create: `src/components/providers/QueryProvider.tsx`
+- Create: `src/lib/jobs/queries.ts`
+- Create: `src/lib/search/schema.ts`
+- Create: `src/components/workbench/ModeBar.tsx`
+- Create: `app/reviews/[reviewId]/workbench/page.tsx`
+- Create: `app/reviews/[reviewId]/workbench/actions.ts`
+- Modify: `app/reviews/[reviewId]/layout.tsx`
 
-- [ ] **Step 1: Teste (falha primeiro)**
+> Os gates (typecheck/lint) desta task só fecham junto com a Task 14 (a página importa `ImportPanel`). Rodar os portões ao fim da Task 14.
 
-Create `tests/unit/question/question-schema.test.ts`:
+- [ ] **Step 1: Provider TanStack Query (client)**
 
-```ts
-import { describe, it, expect } from "vitest";
-import { questionSchema, FRAMEWORK_FIELDS } from "@/lib/question/schema";
+Create `src/components/providers/QueryProvider.tsx`:
+```tsx
+"use client";
 
-describe("questionSchema", () => {
-  it("SPIDER é o default e aceita seus campos", () => {
-    const r = questionSchema.safeParse({
-      framework: "spider",
-      questionText: "Impacto de X?",
-      fields: { sample: "estudantes", phenomenon: "X", design: "qualitativo", evaluation: "Y", researchType: "qual" },
-    });
-    expect(r.success).toBe(true);
-  });
+import { useState } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
-  it("rejeita framework inválido", () => {
-    const r = questionSchema.safeParse({ framework: "xyz", questionText: "q", fields: {} });
-    expect(r.success).toBe(false);
-  });
-
-  it("livre exige apenas questionText", () => {
-    const r = questionSchema.safeParse({ framework: "free", questionText: "Pergunta livre", fields: {} });
-    expect(r.success).toBe(true);
-  });
-
-  it("define os campos de cada framework", () => {
-    expect(FRAMEWORK_FIELDS.spider.length).toBeGreaterThan(0);
-    expect(FRAMEWORK_FIELDS.pico).toEqual(expect.arrayContaining(["population"]));
-  });
-});
+export function QueryProvider({ children }: { children: React.ReactNode }) {
+  const [client] = useState(() => new QueryClient());
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
 ```
 
-- [ ] **Step 2: Rodar para ver falhar**
+- [ ] **Step 2: Queries de jobs + contador de records**
 
-Run: `npm run test -- tests/unit/question/question-schema.test.ts`
-Expected: FAIL — módulo não encontrado.
+Create `src/lib/jobs/queries.ts`:
+```ts
+import { createClient } from "@/lib/supabase/server";
 
-- [ ] **Step 3: Implementar**
+export interface JobRow {
+  id: string;
+  type: string;
+  status: string;
+  progress: number;
+  created_at: string;
+}
 
-Create `src/lib/question/schema.ts`:
+export async function listJobs(reviewId: string): Promise<JobRow[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("job")
+    .select("id, type, status, progress, created_at")
+    .eq("review_id", reviewId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data ?? [];
+}
 
+export async function countRecords(reviewId: string): Promise<number> {
+  const supabase = await createClient();
+  const { count, error } = await supabase
+    .from("record")
+    .select("id", { count: "exact", head: true })
+    .eq("review_id", reviewId);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+```
+
+- [ ] **Step 3: Schema Zod do registro de busca (FR-015)**
+
+Create `src/lib/search/schema.ts`:
 ```ts
 import { z } from "zod";
 
-export const FRAMEWORKS = ["spider", "pico", "peo", "pcc", "free"] as const;
-export type Framework = (typeof FRAMEWORKS)[number];
-
-// Campos exibidos por framework (labels pt-BR vivem na UI; aqui só as chaves).
-export const FRAMEWORK_FIELDS: Record<Framework, string[]> = {
-  spider: ["sample", "phenomenon", "design", "evaluation", "researchType"],
-  pico: ["population", "intervention", "comparison", "outcome"],
-  peo: ["population", "exposure", "outcome"],
-  pcc: ["population", "concept", "context"],
-  free: [],
-};
-
-export const questionSchema = z.object({
-  framework: z.enum(FRAMEWORKS),
-  questionText: z
-    .string()
-    .transform((s) => s.trim())
-    .pipe(z.string().min(1, "Formule a pergunta")),
-  fields: z.record(z.string(), z.string()).default({}),
+export const searchSchema = z.object({
+  queryString: z.string().trim().min(1, "Informe a string de busca."),
+  database: z.string().trim().min(1, "Informe a base consultada."),
+  searchedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida."),
+  hits: z.coerce.number().int().min(0, "Hits não pode ser negativo."),
 });
 
-export type QuestionInput = z.infer<typeof questionSchema>;
+export type SearchInput = z.infer<typeof searchSchema>;
 ```
 
-- [ ] **Step 4: Rodar até passar**
+- [ ] **Step 4: Server Actions — enqueueImport + runImportWorker (D-F3.5/D-F3.7)**
 
-Run: `npm run test -- tests/unit/question/question-schema.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/question/schema.ts tests/unit/question/question-schema.test.ts
-git commit -m "feat(question): framework-aware question Zod schema"
-```
-
----
-
-## Task 11 — US5: queries + server actions (Pergunta, derivação, ratificação)
-
-> **SKILL:** `nextjs-best-practices` (server actions, RSC). Critérios IA nascem `pending` e exigem `ai_suggestion` (Princípio I; data-model). Toda mudança ⇒ `writeAudit`.
-
-**Files:**
-- Create: `src/lib/question/queries.ts`
-- Create: `app/reviews/[reviewId]/question/actions.ts`
-- Test: `tests/integration/question-derivation.test.ts`
-
-- [ ] **Step 1: Queries (leitura de pergunta + critérios)**
-
-Create `src/lib/question/queries.ts`:
-
-```ts
-import { createClient } from "@/lib/supabase/server";
-import type { Framework } from "./schema";
-
-export interface QuestionRow {
-  id: string;
-  framework: Framework;
-  question_text: string;
-  fields: Record<string, string>;
-}
-
-export interface CriterionRow {
-  id: string;
-  kind: "inclusion" | "exclusion" | "search_term";
-  text: string;
-  origin: "human" | "ai";
-  ratification_state: "pending" | "accepted" | "edited" | "rejected";
-  ai_suggestion_id: string | null;
-}
-
-export async function getQuestion(reviewId: string): Promise<QuestionRow | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("question")
-    .select("id, framework, question_text, fields")
-    .eq("review_id", reviewId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return data as QuestionRow | null;
-}
-
-export async function listCriteria(reviewId: string): Promise<CriterionRow[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("eligibility_criterion")
-    .select("id, kind, text, origin, ratification_state, ai_suggestion_id")
-    .eq("review_id", reviewId)
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []) as CriterionRow[];
-}
-```
-
-- [ ] **Step 2: Server actions (save question, derive criteria, ratify)**
-
-Create `app/reviews/[reviewId]/question/actions.ts`:
-
+Create `app/reviews/[reviewId]/workbench/actions.ts`:
 ```ts
 "use server";
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { getLLMProvider, MissingByokError } from "@/lib/ai/llm";
-import { questionSchema } from "@/lib/question/schema";
-import { writeAudit } from "@/lib/audit";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { enqueueImportJob } from "@shared/jobs/enqueue";
+import { processImportJob } from "@shared/jobs/worker";
+import { EnqueueValidationError } from "@shared/jobs/types";
+import { searchSchema } from "@/lib/search/schema";
+import type { SourceFormat } from "@shared/import/types";
 
 async function requireMember(reviewId: string) {
   const supabase = await createClient();
@@ -1669,1327 +1923,592 @@ async function requireMember(reviewId: string) {
     p_review_id: reviewId,
   });
   if (error || !data) throw new Error("not a member");
-  return { supabase, userId: auth.user.id };
+  return { supabase };
 }
 
-export async function saveQuestion(reviewId: string, formData: FormData) {
-  const parsed = questionSchema.safeParse({
-    framework: formData.get("framework"),
-    questionText: formData.get("questionText"),
-    fields: JSON.parse(String(formData.get("fields") ?? "{}")),
-  });
-  if (!parsed.success) return { ok: false, error: "Dados inválidos." };
-
-  const { supabase, userId } = await requireMember(reviewId);
-  const { data, error } = await supabase
-    .from("question")
-    .upsert(
-      {
-        review_id: reviewId,
-        framework: parsed.data.framework,
-        question_text: parsed.data.questionText,
-        fields: parsed.data.fields,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "review_id" },
-    )
-    .select("id")
-    .single();
-  if (error || !data) return { ok: false, error: "Falha ao salvar." };
-
-  await writeAudit(supabase, {
-    reviewId,
-    actorId: userId,
-    action: "save_question",
-    entity: "question",
-    entityId: data.id,
-    before: null,
-    after: { framework: parsed.data.framework },
-  });
-  revalidatePath(`/reviews/${reviewId}/question`);
-  return { ok: true as const };
-}
-
-export async function deriveCriteria(reviewId: string) {
-  const { supabase, userId } = await requireMember(reviewId);
-  const { data: q } = await supabase
-    .from("question")
-    .select("id, framework, question_text, fields")
-    .eq("review_id", reviewId)
-    .maybeSingle();
-  if (!q) return { ok: false, error: "Formule a pergunta primeiro." };
-
-  let provider;
-  try {
-    provider = await getLLMProvider(reviewId);
-  } catch (e) {
-    if (e instanceof MissingByokError)
-      return { ok: false, error: "Cadastre a chave de IA (BYOK) para usar a derivação." };
-    throw e;
-  }
-
-  const s = await provider.deriveEligibility({
-    framework: q.framework,
-    questionText: q.question_text,
-    fields: (q.fields ?? {}) as Record<string, unknown>,
-  });
-
-  // 1) persiste a sugestão (proveniência obrigatória)
-  const { data: sug, error: sugErr } = await supabase
-    .from("ai_suggestion")
-    .insert({
-      review_id: reviewId,
-      target_kind: "eligibility",
-      target_id: q.id,
-      output: s.output,
-      provenance: s.provenance,
-      state: "pending",
-      not_found: s.not_found,
-    })
-    .select("id")
-    .single();
-  if (sugErr || !sug) return { ok: false, error: "Falha ao registrar sugestão." };
-
-  // 2) materializa critérios pendentes (origin=ai)
-  const rows = [
-    ...s.output.inclusion.map((t) => ({ kind: "inclusion" as const, text: t })),
-    ...s.output.exclusion.map((t) => ({ kind: "exclusion" as const, text: t })),
-    ...s.output.searchTerms.map((t) => ({ kind: "search_term" as const, text: t })),
-  ].map((r) => ({
-    review_id: reviewId,
-    question_id: q.id,
-    kind: r.kind,
-    text: r.text,
-    origin: "ai" as const,
-    ratification_state: "pending" as const,
-    ai_suggestion_id: sug.id,
-  }));
-  if (rows.length > 0) {
-    const { error } = await supabase.from("eligibility_criterion").insert(rows);
-    if (error) return { ok: false, error: "Falha ao gravar critérios." };
-  }
-
-  await writeAudit(supabase, {
-    reviewId,
-    actorId: userId,
-    action: "derive_criteria",
-    entity: "ai_suggestion",
-    entityId: sug.id,
-    before: null,
-    after: { count: rows.length },
-  });
-  revalidatePath(`/reviews/${reviewId}/question`);
-  return { ok: true as const, notFound: s.not_found, count: rows.length };
-}
-
-export async function ratifyCriterion(
+export async function enqueueImport(
   reviewId: string,
-  criterionId: string,
-  decision: "accepted" | "edited" | "rejected",
-  newText?: string,
+  input: {
+    format: SourceFormat;
+    content: string;
+    fieldMap?: Record<string, string>;
+    search: unknown;
+  },
 ) {
-  const { supabase, userId } = await requireMember(reviewId);
-  const patch: { ratification_state: typeof decision; text?: string } = {
-    ratification_state: decision,
-  };
-  if (decision === "edited" && newText) patch.text = newText.trim();
-
-  const { error } = await supabase
-    .from("eligibility_criterion")
-    .update(patch)
-    .eq("id", criterionId)
-    .eq("review_id", reviewId);
-  if (error) return { ok: false, error: "Falha ao ratificar." };
-
-  await writeAudit(supabase, {
-    reviewId,
-    actorId: userId,
-    action: "ratify_criterion",
-    entity: "eligibility_criterion",
-    entityId: criterionId,
-    before: null,
-    after: { ratification_state: decision },
-  });
-  revalidatePath(`/reviews/${reviewId}/question`);
-  return { ok: true as const };
-}
-```
-
-- [ ] **Step 2b: Teste de integração da derivação (mock provider, sem chamar API)**
-
-> Este teste valida a **persistência** (sugestão + critérios pendentes) usando o `MockLLMProvider` diretamente — não exercita a factory/Vault (coberto em `byok.test.ts`). Usa o cliente do usuário (RLS) para semear `review`/`question` e ler o resultado.
-
-Create `tests/integration/question-derivation.test.ts`:
-
-```ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { signUpUser } from "./helpers/supabase";
-import { MockLLMProvider } from "@/lib/ai/llm/mock";
-
-describe("derivação de critérios — persistência pending (US5)", () => {
-  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-  let questionId: string;
-
-  beforeAll(async () => {
-    const stamp = Date.now();
-    const u = await signUpUser(`q_${stamp}@example.com`, "senha-teste-123");
-    client = u.client;
-    const { data: r } = await client.rpc("create_review", { p_title: "R Pergunta" });
-    reviewId = r.id;
-    const { data: q } = await client
-      .from("question")
-      .insert({ review_id: reviewId, framework: "spider", question_text: "Q?" })
-      .select("id")
-      .single();
-    questionId = q!.id;
-  });
-
-  it("grava ai_suggestion + critérios pending (origin=ai)", async () => {
-    const provider = new MockLLMProvider();
-    const s = await provider.deriveEligibility({
-      framework: "spider",
-      questionText: "Q?",
-      fields: {},
-    });
-    const { data: sug } = await client
-      .from("ai_suggestion")
-      .insert({
-        review_id: reviewId,
-        target_kind: "eligibility",
-        target_id: questionId,
-        output: s.output,
-        provenance: s.provenance,
-        state: "pending",
-        not_found: s.not_found,
-      })
-      .select("id")
-      .single();
-    expect(sug!.id).toBeTruthy();
-
-    await client.from("eligibility_criterion").insert(
-      s.output.inclusion.map((t) => ({
-        review_id: reviewId,
-        question_id: questionId,
-        kind: "inclusion" as const,
-        text: t,
-        origin: "ai" as const,
-        ratification_state: "pending" as const,
-        ai_suggestion_id: sug!.id,
-      })),
-    );
-
-    const { data: crit } = await client
-      .from("eligibility_criterion")
-      .select("ratification_state, origin")
-      .eq("review_id", reviewId);
-    expect(crit!.length).toBeGreaterThan(0);
-    expect(crit!.every((c) => c.ratification_state === "pending" && c.origin === "ai")).toBe(true);
-  });
-
-  it("constraint barra critério origin=ai sem ai_suggestion_id", async () => {
-    const { error } = await client.from("eligibility_criterion").insert({
-      review_id: reviewId,
-      question_id: questionId,
-      kind: "inclusion",
-      text: "sem sugestão",
-      origin: "ai",
-      ratification_state: "pending",
-      ai_suggestion_id: null,
-    });
-    expect(error).not.toBeNull();
-  });
-});
-```
-
-- [ ] **Step 3: Rodar o teste de integração (requer supabase local)**
-
-Run: `npm run test -- tests/integration/question-derivation.test.ts`
-Expected: PASS (2 testes).
-
-- [ ] **Step 4: Type-check**
-
-Run: `npm run typecheck`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/question/queries.ts "app/reviews/[reviewId]/question/actions.ts" tests/integration/question-derivation.test.ts
-git commit -m "feat(question): queries + save/derive/ratify actions (AI suggestions pending)"
-```
-
----
-
-## Task 12 — US5: UI da Pergunta (page + form + painel de critérios)
-
-> **SKILL:** carregue `frontend-design` (form + painel de critérios com vocabulário de IA), `react-best-practices`, `nextjs-best-practices` (RSC carrega dados; client só onde interage).
-
-**Files:**
-- Create: `app/reviews/[reviewId]/question/page.tsx`
-- Create: `src/components/question/QuestionForm.tsx`
-- Create: `src/components/question/CriteriaPanel.tsx`
-
-- [ ] **Step 1: Page (RSC) — carrega pergunta, critérios e status BYOK**
-
-Create `app/reviews/[reviewId]/question/page.tsx`:
-
-```tsx
-import { getQuestion, listCriteria } from "@/lib/question/queries";
-import { getByokStatus } from "@/lib/byok/queries";
-import { QuestionForm } from "@/components/question/QuestionForm";
-import { CriteriaPanel } from "@/components/question/CriteriaPanel";
-import { ByokKeyForm } from "@/components/ai/ByokKeyForm";
-
-export const dynamic = "force-dynamic";
-
-export default async function QuestionPage({
-  params,
-}: {
-  params: Promise<{ reviewId: string }>;
-}) {
-  const { reviewId } = await params;
-  const [question, criteria, byok] = await Promise.all([
-    getQuestion(reviewId),
-    listCriteria(reviewId),
-    getByokStatus(reviewId),
-  ]);
-
-  return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Pergunta da Revisão</h1>
-      <QuestionForm reviewId={reviewId} initial={question} />
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">Chave de IA (BYOK)</h2>
-        <ByokKeyForm reviewId={reviewId} present={byok.present} />
-      </section>
-      <CriteriaPanel
-        reviewId={reviewId}
-        criteria={criteria}
-        canDerive={!!question && byok.present}
-      />
-    </div>
-  );
-}
-```
-
-- [ ] **Step 2: `QuestionForm` (client) — seletor de framework + campos adaptáveis**
-
-Create `src/components/question/QuestionForm.tsx`:
-
-```tsx
-"use client";
-
-import { useState } from "react";
-import { FRAMEWORK_FIELDS, FRAMEWORKS, type Framework } from "@/lib/question/schema";
-import { saveQuestion } from "../../../app/reviews/[reviewId]/question/actions";
-
-const FRAMEWORK_LABEL: Record<Framework, string> = {
-  spider: "SPIDER", pico: "PICo", peo: "PEO", pcc: "PCC", free: "Livre",
-};
-const FIELD_LABEL: Record<string, string> = {
-  sample: "Amostra", phenomenon: "Fenômeno", design: "Desenho",
-  evaluation: "Avaliação", researchType: "Tipo de pesquisa",
-  population: "População", intervention: "Intervenção", comparison: "Comparação",
-  outcome: "Desfecho", exposure: "Exposição", concept: "Conceito", context: "Contexto",
-};
-
-export function QuestionForm({
-  reviewId,
-  initial,
-}: {
-  reviewId: string;
-  initial: { framework: Framework; question_text: string; fields: Record<string, string> } | null;
-}) {
-  const [framework, setFramework] = useState<Framework>(initial?.framework ?? "spider");
-  const [fields, setFields] = useState<Record<string, string>>(initial?.fields ?? {});
-  const [msg, setMsg] = useState<string | null>(null);
-
-  return (
-    <form
-      action={async (fd) => {
-        fd.set("framework", framework);
-        fd.set("fields", JSON.stringify(fields));
-        const r = await saveQuestion(reviewId, fd);
-        setMsg(r.ok ? "Pergunta salva." : r.error ?? "Erro");
-      }}
-      className="flex flex-col gap-3"
-    >
-      <label className="flex flex-col gap-1 text-sm">
-        Framework
-        <select
-          value={framework}
-          onChange={(e) => setFramework(e.target.value as Framework)}
-          className="border p-2"
-        >
-          {FRAMEWORKS.map((f) => (
-            <option key={f} value={f}>{FRAMEWORK_LABEL[f]}</option>
-          ))}
-        </select>
-      </label>
-
-      {FRAMEWORK_FIELDS[framework].map((key) => (
-        <label key={key} className="flex flex-col gap-1 text-sm">
-          {FIELD_LABEL[key] ?? key}
-          <input
-            value={fields[key] ?? ""}
-            onChange={(e) => setFields((p) => ({ ...p, [key]: e.target.value }))}
-            className="border p-2"
-          />
-        </label>
-      ))}
-
-      <label className="flex flex-col gap-1 text-sm">
-        Pergunta
-        <textarea name="questionText" defaultValue={initial?.question_text ?? ""} required className="border p-2" rows={3} />
-      </label>
-
-      <button type="submit" className="self-start bg-black px-3 py-1 text-sm text-white">
-        Salvar pergunta
-      </button>
-      {msg && <p className="text-xs text-zinc-600">{msg}</p>}
-    </form>
-  );
-}
-```
-
-- [ ] **Step 3: `CriteriaPanel` (client) — derivar + ratificar com vocabulário de IA**
-
-Create `src/components/question/CriteriaPanel.tsx`:
-
-```tsx
-"use client";
-
-import { useState } from "react";
-import { SuggestionChip } from "@/components/ai/SuggestionChip";
-import { SuggestionActions } from "@/components/ai/SuggestionActions";
-import { NotFound } from "@/components/ai/NotFound";
-import type { CriterionRow } from "@/lib/question/queries";
-import {
-  deriveCriteria,
-  ratifyCriterion,
-} from "../../../app/reviews/[reviewId]/question/actions";
-
-const KIND_LABEL = {
-  inclusion: "Inclusão",
-  exclusion: "Exclusão",
-  search_term: "Termo de busca",
-} as const;
-
-export function CriteriaPanel({
-  reviewId,
-  criteria,
-  canDerive,
-}: {
-  reviewId: string;
-  criteria: CriterionRow[];
-  canDerive: boolean;
-}) {
-  const [msg, setMsg] = useState<string | null>(null);
-  const [notFound, setNotFound] = useState(false);
-
-  return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-medium">Critérios e termos (sugeridos pela IA)</h2>
-        <button
-          type="button"
-          disabled={!canDerive}
-          title={canDerive ? "" : "Salve a pergunta e cadastre a chave de IA"}
-          onClick={async () => {
-            const r = await deriveCriteria(reviewId);
-            setNotFound(!!r.ok && !!r.notFound);
-            setMsg(r.ok ? "Sugestões geradas." : r.error ?? "Erro");
-          }}
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
-        >
-          Derivar por IA
-        </button>
-        {msg && <span className="text-xs text-zinc-600">{msg}</span>}
-      </div>
-
-      {notFound && <NotFound what="Sugestões de critérios" />}
-
-      <ul className="flex flex-col gap-2">
-        {criteria.map((c) => (
-          <li key={c.id} className="flex flex-wrap items-center gap-2 rounded border p-2">
-            <span className="text-xs font-semibold">{KIND_LABEL[c.kind]}</span>
-            <span className="flex-1">{c.text}</span>
-            {c.origin === "ai" && <SuggestionChip state={c.ratification_state} />}
-            {c.origin === "ai" && c.ratification_state === "pending" && (
-              <SuggestionActions
-                onAccept={async () => { await ratifyCriterion(reviewId, c.id, "accepted"); }}
-                onEdit={async () => {
-                  const t = window.prompt("Editar critério", c.text);
-                  if (t) await ratifyCriterion(reviewId, c.id, "edited", t);
-                }}
-                onReject={async () => { await ratifyCriterion(reviewId, c.id, "rejected"); }}
-              />
-            )}
-          </li>
-        ))}
-        {criteria.length === 0 && (
-          <li className="text-sm text-zinc-500">Nenhum critério ainda.</li>
-        )}
-      </ul>
-    </section>
-  );
-}
-```
-
-- [ ] **Step 4: Type-check + lint**
-
-Run: `npm run typecheck && npm run lint`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add "app/reviews/[reviewId]/question/page.tsx" src/components/question
-git commit -m "feat(question): question page, framework form, AI criteria panel (US5)"
-```
-
----
-
-## Task 13 — US6: serialização Markdown do protocolo (TDD)
-
-**Files:**
-- Create: `src/lib/protocol/markdown.ts`
-- Test: `tests/unit/protocol/markdown.test.ts`
-
-- [ ] **Step 1: Teste (falha primeiro)**
-
-Create `tests/unit/protocol/markdown.test.ts`:
-
-```ts
-import { describe, it, expect } from "vitest";
-import { protocolToMarkdown } from "@/lib/protocol/markdown";
-
-describe("protocolToMarkdown", () => {
-  it("usa contentMarkdown quando presente", () => {
-    const md = protocolToMarkdown({ contentMarkdown: "# Título\n\ncorpo" });
-    expect(md).toContain("# Título");
-  });
-
-  it("serializa um content estruturado em seções", () => {
-    const md = protocolToMarkdown({ sections: { objetivo: "X", criterios: "Y" } });
-    expect(md).toContain("## objetivo");
-    expect(md).toContain("X");
-  });
-
-  it("content vazio gera um cabeçalho mínimo", () => {
-    const md = protocolToMarkdown({});
-    expect(md).toMatch(/Protocolo/);
-  });
-});
-```
-
-- [ ] **Step 2: Rodar para ver falhar**
-
-Run: `npm run test -- tests/unit/protocol/markdown.test.ts`
-Expected: FAIL — módulo não encontrado.
-
-- [ ] **Step 3: Implementar**
-
-Create `src/lib/protocol/markdown.ts`:
-
-```ts
-export type ProtocolContent =
-  | { contentMarkdown: string }
-  | { sections: Record<string, string> }
-  | Record<string, never>;
-
-export function protocolToMarkdown(content: ProtocolContent): string {
-  if ("contentMarkdown" in content && content.contentMarkdown) {
-    return content.contentMarkdown;
+  const parsedSearch = searchSchema.safeParse(input.search);
+  if (!parsedSearch.success) {
+    return { ok: false as const, error: "Dados da busca inválidos." };
   }
-  if ("sections" in content && content.sections) {
-    const body = Object.entries(content.sections)
-      .map(([k, v]) => `## ${k}\n\n${v}\n`)
-      .join("\n");
-    return `# Protocolo PRISMA-P\n\n${body}`;
-  }
-  return `# Protocolo PRISMA-P\n\n(Sem conteúdo.)\n`;
-}
-```
-
-- [ ] **Step 4: Rodar até passar**
-
-Run: `npm run test -- tests/unit/protocol/markdown.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/protocol/markdown.ts tests/unit/protocol/markdown.test.ts
-git commit -m "feat(protocol): content -> Markdown serialization (FR-012 export)"
-```
-
----
-
-## Task 14 — US6: queries + server actions (rascunhar, salvar, travar, emendar)
-
-> **SKILL:** `nextjs-best-practices`. Travamento via RPC `lock_protocol`; emenda via `add_protocol_amendment`; edição de `content` só enquanto `draft` (trigger barra o resto).
-
-**Files:**
-- Create: `src/lib/protocol/queries.ts`
-- Create: `app/reviews/[reviewId]/protocol/actions.ts`
-
-- [ ] **Step 1: Queries**
-
-Create `src/lib/protocol/queries.ts`:
-
-```ts
-import { createClient } from "@/lib/supabase/server";
-import type { ProtocolContent } from "./markdown";
-
-export interface ProtocolRow {
-  id: string;
-  content: ProtocolContent;
-  state: "draft" | "locked";
-  locked_at: string | null;
-  origin: "ai_draft" | "human";
-}
-
-export interface AmendmentRow {
-  id: string;
-  version: number;
-  change: Record<string, unknown>;
-  dated_at: string;
-}
-
-export async function getProtocol(reviewId: string): Promise<ProtocolRow | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("protocol")
-    .select("id, content, state, locked_at, origin")
-    .eq("review_id", reviewId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return data as ProtocolRow | null;
-}
-
-export async function listAmendments(reviewId: string): Promise<AmendmentRow[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("protocol_amendment")
-    .select("id, version, change, dated_at")
-    .eq("review_id", reviewId)
-    .order("version", { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []) as AmendmentRow[];
-}
-```
-
-- [ ] **Step 2: Server actions**
-
-Create `app/reviews/[reviewId]/protocol/actions.ts`:
-
-```ts
-"use server";
-
-import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
-import { getLLMProvider, MissingByokError } from "@/lib/ai/llm";
-import { writeAudit } from "@/lib/audit";
-
-async function requireMember(reviewId: string) {
-  const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) throw new Error("not authenticated");
-  const { data, error } = await supabase.rpc("is_review_member", { p_review_id: reviewId });
-  if (error || !data) throw new Error("not a member");
-  return { supabase, userId: auth.user.id };
-}
-
-export async function draftProtocol(reviewId: string) {
-  const { supabase, userId } = await requireMember(reviewId);
-  const { data: q } = await supabase
-    .from("question")
-    .select("id, question_text")
-    .eq("review_id", reviewId)
-    .maybeSingle();
-  if (!q) return { ok: false, error: "Formule a pergunta primeiro." };
-
-  const { data: crit } = await supabase
-    .from("eligibility_criterion")
-    .select("text")
-    .eq("review_id", reviewId)
-    .in("ratification_state", ["accepted", "edited"]);
-
-  let provider;
+  const { supabase } = await requireMember(reviewId);
   try {
-    provider = await getLLMProvider(reviewId);
+    const res = await enqueueImportJob({ supabase }, reviewId, {
+      format: input.format,
+      content: input.content,
+      fieldMap: input.fieldMap,
+      search: parsedSearch.data,
+    });
+    revalidatePath(`/reviews/${reviewId}/workbench`);
+    return { ok: true as const, jobId: res.job_id, itemCount: res.item_count };
   } catch (e) {
-    if (e instanceof MissingByokError)
-      return { ok: false, error: "Cadastre a chave de IA (BYOK)." };
+    if (e instanceof EnqueueValidationError) {
+      return { ok: false as const, error: e.message }; // FR-016
+    }
     throw e;
   }
+}
 
-  const s = await provider.draftProtocol({
-    questionText: q.question_text,
-    criteria: (crit ?? []).map((c) => c.text),
-  });
-
-  const { data: sug } = await supabase
-    .from("ai_suggestion")
-    .insert({
-      review_id: reviewId,
-      target_kind: "protocol_draft",
-      output: s.output,
-      provenance: s.provenance,
-      state: "pending",
-      not_found: s.not_found,
-    })
+/**
+ * Gatilho síncrono do worker (Marco 1 / local / e2e — D-F3.5). Em produção o
+ * worker é o jobs-worker agendado por pg_cron. Escopado: só processa jobs da
+ * Revisão da qual o chamador é membro.
+ */
+export async function runImportWorker(reviewId: string) {
+  await requireMember(reviewId);
+  const admin = createAdminClient();
+  const { data: jobs } = await admin
+    .from("job")
     .select("id")
-    .single();
-
-  const { data: proto, error } = await supabase
-    .from("protocol")
-    .upsert(
-      {
-        review_id: reviewId,
-        content: { contentMarkdown: s.output.contentMarkdown },
-        origin: "ai_draft",
-        ai_suggestion_id: sug?.id ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "review_id" },
-    )
-    .select("id, state")
-    .single();
-  if (error || !proto) return { ok: false, error: "Falha ao gravar rascunho." };
-  if (proto.state === "locked")
-    return { ok: false, error: "Protocolo travado; use emendas." };
-
-  await writeAudit(supabase, {
-    reviewId, actorId: userId, action: "draft_protocol",
-    entity: "protocol", entityId: proto.id, before: null, after: { origin: "ai_draft" },
-  });
-  revalidatePath(`/reviews/${reviewId}/protocol`);
-  return { ok: true as const };
-}
-
-export async function saveProtocolDraft(reviewId: string, contentMarkdown: string) {
-  const { supabase, userId } = await requireMember(reviewId);
-  // Trigger guard_locked_protocol barra se já travado.
-  const { data, error } = await supabase
-    .from("protocol")
-    .upsert(
-      { review_id: reviewId, content: { contentMarkdown }, updated_at: new Date().toISOString() },
-      { onConflict: "review_id" },
-    )
-    .select("id")
-    .single();
-  if (error)
-    return { ok: false, error: "Protocolo travado ou inválido — edite via emenda." };
-
-  await writeAudit(supabase, {
-    reviewId, actorId: userId, action: "save_protocol_draft",
-    entity: "protocol", entityId: data!.id, before: null, after: null,
-  });
-  revalidatePath(`/reviews/${reviewId}/protocol`);
-  return { ok: true as const };
-}
-
-export async function lockProtocol(reviewId: string) {
-  const { supabase } = await requireMember(reviewId);
-  const { error } = await supabase.rpc("lock_protocol", { p_review_id: reviewId });
-  if (error) return { ok: false, error: "Falha ao travar." };
-  revalidatePath(`/reviews/${reviewId}/protocol`);
-  return { ok: true as const };
-}
-
-export async function addAmendment(reviewId: string, formData: FormData) {
-  const text = String(formData.get("change") ?? "").trim();
-  if (text === "") return { ok: false, error: "Descreva a mudança." };
-  const { supabase } = await requireMember(reviewId);
-  const { error } = await supabase.rpc("add_protocol_amendment", {
-    p_review_id: reviewId,
-    p_change: { text },
-  });
-  if (error) return { ok: false, error: "Falha ao registrar emenda (protocolo travado?)." };
-  revalidatePath(`/reviews/${reviewId}/protocol`);
+    .eq("review_id", reviewId)
+    .eq("type", "import_parse")
+    .in("status", ["queued", "running"]);
+  for (const j of (jobs ?? []) as Array<{ id: string }>) {
+    await processImportJob({ supabase: admin }, j.id);
+  }
+  revalidatePath(`/reviews/${reviewId}/workbench`);
   return { ok: true as const };
 }
 ```
 
-- [ ] **Step 3: Type-check**
+- [ ] **Step 5: ModeBar — superfície única, modos por searchParam (FR-027/Princípio V)**
 
-Run: `npm run typecheck`
-Expected: PASS.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add src/lib/protocol/queries.ts "app/reviews/[reviewId]/protocol/actions.ts"
-git commit -m "feat(protocol): queries + draft/save/lock/amend actions (US6)"
-```
-
----
-
-## Task 15 — US6: travamento e imutabilidade (teste de integração — SC-010)
-
-**Files:**
-- Test: `tests/integration/protocol-lock.test.ts`
-
-- [ ] **Step 1: Escrever o teste de integração**
-
-Create `tests/integration/protocol-lock.test.ts`:
-
-```ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { signUpUser } from "./helpers/supabase";
-
-describe("travamento de protocolo (US6 / SC-010)", () => {
-  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-
-  beforeAll(async () => {
-    const stamp = Date.now();
-    const u = await signUpUser(`pl_${stamp}@example.com`, "senha-teste-123");
-    client = u.client;
-    const { data: r } = await client.rpc("create_review", { p_title: "R Protocolo" });
-    reviewId = r.id;
-    await client.from("protocol").insert({
-      review_id: reviewId,
-      content: { contentMarkdown: "# rascunho" },
-      origin: "human",
-    });
-  });
-
-  it("lock_protocol trava e marca a Revisão", async () => {
-    const { error } = await client.rpc("lock_protocol", { p_review_id: reviewId });
-    expect(error).toBeNull();
-    const { data } = await client
-      .from("protocol")
-      .select("state, locked_at")
-      .eq("review_id", reviewId)
-      .single();
-    expect(data!.state).toBe("locked");
-    expect(data!.locked_at).not.toBeNull();
-  });
-
-  it("conteúdo travado é imutável (trigger barra UPDATE de content)", async () => {
-    const { error } = await client
-      .from("protocol")
-      .update({ content: { contentMarkdown: "# tentativa de sobrescrever" } })
-      .eq("review_id", reviewId);
-    expect(error).not.toBeNull();
-  });
-
-  it("mudança pós-travamento vira emenda versionada e datada", async () => {
-    const { error } = await client.rpc("add_protocol_amendment", {
-      p_review_id: reviewId,
-      p_change: { text: "ajuste de critério" },
-    });
-    expect(error).toBeNull();
-    const { data } = await client
-      .from("protocol_amendment")
-      .select("version, dated_at, change")
-      .eq("review_id", reviewId)
-      .order("version", { ascending: true });
-    expect(data!.length).toBe(1);
-    expect(data![0].version).toBe(1);
-    expect(data![0].dated_at).toBeTruthy();
-  });
-
-  it("trilha de auditoria registrou lock + emenda", async () => {
-    const { data } = await client
-      .from("audit_entry")
-      .select("action")
-      .eq("review_id", reviewId);
-    const actions = (data ?? []).map((a) => a.action);
-    expect(actions).toContain("lock_protocol");
-    expect(actions).toContain("add_protocol_amendment");
-  });
-});
-```
-
-- [ ] **Step 2: Rodar até passar (supabase local)**
-
-Run: `npm run test -- tests/integration/protocol-lock.test.ts`
-Expected: PASS (4 testes).
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add tests/integration/protocol-lock.test.ts
-git commit -m "test(protocol): lock immutability + versioned amendment (SC-010)"
-```
-
----
-
-## Task 16 — US6: UI do protocolo (page + editor + emendas + export)
-
-> **SKILL:** `frontend-design` (estado draft/locked visível), `react-best-practices`, `nextjs-best-practices` (Route Handler de download).
-
-**Files:**
-- Create: `app/reviews/[reviewId]/protocol/page.tsx`
-- Create: `app/reviews/[reviewId]/protocol/export/route.ts`
-- Create: `src/components/protocol/ProtocolEditor.tsx`
-- Create: `src/components/protocol/AmendmentList.tsx`
-
-- [ ] **Step 1: Page (RSC)**
-
-Create `app/reviews/[reviewId]/protocol/page.tsx`:
-
+Create `src/components/workbench/ModeBar.tsx`:
 ```tsx
-import { getProtocol, listAmendments } from "@/lib/protocol/queries";
-import { getByokStatus } from "@/lib/byok/queries";
-import { ProtocolEditor } from "@/components/protocol/ProtocolEditor";
-import { AmendmentList } from "@/components/protocol/AmendmentList";
+import Link from "next/link";
+
+export type WorkbenchMode =
+  | "import"
+  | "duplicates"
+  | "title_abstract"
+  | "full_text";
+
+const MODES: { key: WorkbenchMode; label: string; enabled: boolean }[] = [
+  { key: "import", label: "Importar", enabled: true },
+  { key: "duplicates", label: "Duplicatas", enabled: false },
+  { key: "title_abstract", label: "Título/Resumo", enabled: false },
+  { key: "full_text", label: "Texto completo", enabled: false },
+];
+
+export function ModeBar({
+  reviewId,
+  active,
+}: {
+  reviewId: string;
+  active: WorkbenchMode;
+}) {
+  return (
+    <nav
+      aria-label="Modos do workbench"
+      className="flex gap-1 border-b pb-2"
+      role="tablist"
+    >
+      {MODES.map((m) =>
+        m.enabled ? (
+          <Link
+            key={m.key}
+            href={`/reviews/${reviewId}/workbench?mode=${m.key}`}
+            role="tab"
+            aria-selected={active === m.key}
+            className={`rounded px-3 py-1 text-sm ${
+              active === m.key ? "bg-black text-white" : "hover:bg-gray-100"
+            }`}
+          >
+            {m.label}
+          </Link>
+        ) : (
+          <span
+            key={m.key}
+            role="tab"
+            aria-disabled="true"
+            title="Disponível em uma etapa seguinte"
+            className="cursor-not-allowed rounded px-3 py-1 text-sm text-gray-400"
+          >
+            {m.label}
+          </span>
+        ),
+      )}
+    </nav>
+  );
+}
+```
+
+- [ ] **Step 6: Página do workbench (RSC) — superfície única**
+
+Create `app/reviews/[reviewId]/workbench/page.tsx`:
+```tsx
+import { ModeBar, type WorkbenchMode } from "@/components/workbench/ModeBar";
+import { ImportPanel } from "@/components/workbench/ImportPanel";
+import { QueryProvider } from "@/components/providers/QueryProvider";
+import { countRecords } from "@/lib/jobs/queries";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProtocolPage({
+const VALID: WorkbenchMode[] = [
+  "import",
+  "duplicates",
+  "title_abstract",
+  "full_text",
+];
+
+export default async function WorkbenchPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ reviewId: string }>;
+  searchParams: Promise<{ mode?: string }>;
 }) {
   const { reviewId } = await params;
-  const [protocol, amendments, byok] = await Promise.all([
-    getProtocol(reviewId),
-    listAmendments(reviewId),
-    getByokStatus(reviewId),
-  ]);
-
-  const initialMd =
-    protocol && "contentMarkdown" in protocol.content
-      ? (protocol.content.contentMarkdown ?? "")
-      : "";
+  const { mode } = await searchParams;
+  const active: WorkbenchMode = VALID.includes(mode as WorkbenchMode)
+    ? (mode as WorkbenchMode)
+    : "import";
+  const identified = await countRecords(reviewId);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold">Protocolo PRISMA-P</h1>
-        {protocol?.state === "locked" ? (
-          <span className="rounded-full border border-zinc-500 bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">
-            🔒 Travado{protocol.locked_at ? ` em ${new Date(protocol.locked_at).toLocaleDateString("pt-BR")}` : ""}
-          </span>
-        ) : (
-          <span className="rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs dark:bg-violet-950">
-            Rascunho
-          </span>
-        )}
-        <a href={`/reviews/${reviewId}/protocol/export`} className="ml-auto text-sm underline">
-          Exportar (.md)
-        </a>
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-xl font-semibold">Workbench</h1>
+        <span className="text-sm text-gray-600" aria-live="polite">
+          Identificados (PRISMA): <strong>{identified}</strong>
+        </span>
       </div>
-
-      <ProtocolEditor
-        reviewId={reviewId}
-        initialMarkdown={initialMd}
-        locked={protocol?.state === "locked"}
-        canDraft={byok.present}
-      />
-
-      <AmendmentList reviewId={reviewId} amendments={amendments} locked={protocol?.state === "locked"} />
+      <ModeBar reviewId={reviewId} active={active} />
+      <QueryProvider>
+        {active === "import" ? (
+          <ImportPanel reviewId={reviewId} />
+        ) : (
+          <p className="text-sm text-gray-500">
+            Este modo é habilitado em uma etapa seguinte do Marco.
+          </p>
+        )}
+      </QueryProvider>
     </div>
   );
 }
 ```
 
-- [ ] **Step 2: Route Handler de export Markdown (FR-012)**
+- [ ] **Step 7: Link "Workbench" no shell da Revisão**
 
-Create `app/reviews/[reviewId]/protocol/export/route.ts`:
+Modify `app/reviews/[reviewId]/layout.tsx` — dentro do `<nav className="flex gap-3 text-sm">`, acrescentar após o link "Protocolo":
+```tsx
+          <a href={`/reviews/${active.id}/workbench`} className="underline">
+            Workbench
+          </a>
+```
 
-```ts
-import { getProtocol } from "@/lib/protocol/queries";
-import { protocolToMarkdown } from "@/lib/protocol/markdown";
+- [ ] **Step 8: Commit**
 
-export const dynamic = "force-dynamic";
+```bash
+git add src/components/providers/QueryProvider.tsx src/lib/jobs/queries.ts src/lib/search/schema.ts src/components/workbench/ModeBar.tsx "app/reviews/[reviewId]/workbench/page.tsx" "app/reviews/[reviewId]/workbench/actions.ts" "app/reviews/[reviewId]/layout.tsx"
+git commit -m "feat(workbench): single-surface shell + mode bar + import actions (US2/FR-027)"
+```
 
-export async function GET(
-  _req: Request,
-  { params }: { params: Promise<{ reviewId: string }> },
-) {
-  const { reviewId } = await params;
-  const protocol = await getProtocol(reviewId); // RLS garante o escopo
-  if (!protocol) return new Response("Protocolo não encontrado", { status: 404 });
+---
 
-  const md = protocolToMarkdown(protocol.content);
-  return new Response(md, {
-    headers: {
-      "Content-Type": "text/markdown; charset=utf-8",
-      "Content-Disposition": `attachment; filename="protocolo-${reviewId}.md"`,
-    },
-  });
+## Task 14: App — ImportPanel (preview + busca + confirmar + progresso)
+
+**Files:**
+- Create: `src/components/workbench/ImportPreview.tsx`
+- Create: `src/components/workbench/JobProgress.tsx`
+- Create: `src/components/workbench/ImportPanel.tsx`
+- Test: `tests/unit/workbench/import-preview.test.tsx`
+
+- [ ] **Step 1: Tabela de preview (FR-014)**
+
+Create `src/components/workbench/ImportPreview.tsx`:
+```tsx
+"use client";
+
+import type { ParsedRecord } from "@shared/import/types";
+
+export function ImportPreview({ records }: { records: ParsedRecord[] }) {
+  if (records.length === 0) return null;
+  return (
+    <div className="overflow-x-auto rounded border">
+      <table className="min-w-full text-sm">
+        <caption className="sr-only">Pré-visualização dos registros</caption>
+        <thead className="bg-gray-50 text-left">
+          <tr>
+            <th className="p-2">Título</th>
+            <th className="p-2">Autores</th>
+            <th className="p-2">Ano</th>
+            <th className="p-2">DOI</th>
+          </tr>
+        </thead>
+        <tbody>
+          {records.slice(0, 20).map((r, i) => (
+            <tr key={i} className="border-t">
+              <td className="p-2">{r.title}</td>
+              <td className="p-2">{r.authors.join("; ")}</td>
+              <td className="p-2">{r.year ?? "—"}</td>
+              <td className="p-2">{r.doi ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className="p-2 text-xs text-gray-500">
+        {records.length} registro(s) — exibindo até 20 na prévia.
+      </p>
+    </div>
+  );
 }
 ```
 
-- [ ] **Step 3: `ProtocolEditor` (client)**
+- [ ] **Step 2: Progresso do job por polling (FR-017)**
 
-Create `src/components/protocol/ProtocolEditor.tsx`:
+Create `src/components/workbench/JobProgress.tsx`:
+```tsx
+"use client";
 
+import { useQuery } from "@tanstack/react-query";
+import { createClient } from "@/lib/supabase/client";
+
+const TERMINAL = ["completed", "completed_with_errors", "failed"];
+
+export function JobProgress({ jobId }: { jobId: string }) {
+  const { data } = useQuery({
+    queryKey: ["job", jobId],
+    queryFn: async () => {
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from("job")
+        .select("status, progress")
+        .eq("id", jobId)
+        .single();
+      if (error) throw new Error(error.message);
+      return data;
+    },
+    refetchInterval: (q) =>
+      q.state.data && TERMINAL.includes(q.state.data.status) ? false : 800,
+  });
+
+  if (!data) return null;
+  return (
+    <div aria-live="polite" className="text-sm">
+      Processamento: <strong>{data.status}</strong> ({data.progress}%)
+    </div>
+  );
+}
+```
+
+- [ ] **Step 3: Painel de importação (orquestra tudo)**
+
+Create `src/components/workbench/ImportPanel.tsx`:
 ```tsx
 "use client";
 
 import { useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { parseContent } from "@shared/import/index";
+import type { ParsedRecord, SourceFormat } from "@shared/import/types";
+import { searchSchema, type SearchInput } from "@/lib/search/schema";
 import {
-  draftProtocol,
-  saveProtocolDraft,
-  lockProtocol,
-} from "../../../app/reviews/[reviewId]/protocol/actions";
+  enqueueImport,
+  runImportWorker,
+} from "@/app/reviews/[reviewId]/workbench/actions";
+import { ImportPreview } from "./ImportPreview";
+import { JobProgress } from "./JobProgress";
 
-export function ProtocolEditor({
-  reviewId,
-  initialMarkdown,
-  locked,
-  canDraft,
-}: {
-  reviewId: string;
-  initialMarkdown: string;
-  locked: boolean;
-  canDraft: boolean;
-}) {
-  const [md, setMd] = useState(initialMarkdown);
-  const [msg, setMsg] = useState<string | null>(null);
+function formatFromName(name: string): SourceFormat | null {
+  if (name.endsWith(".ris")) return "ris";
+  if (name.endsWith(".bib") || name.endsWith(".bibtex")) return "bibtex";
+  if (name.endsWith(".csv")) return "csv";
+  return null;
+}
+
+export function ImportPanel({ reviewId }: { reviewId: string }) {
+  const [content, setContent] = useState("");
+  const [format, setFormat] = useState<SourceFormat | null>(null);
+  const [preview, setPreview] = useState<ParsedRecord[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  const { register, handleSubmit, formState } = useForm<SearchInput>({
+    resolver: zodResolver(searchSchema),
+    defaultValues: { queryString: "", database: "", searchedOn: "", hits: 0 },
+  });
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    setError(null);
+    setJobId(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const fmt = formatFromName(file.name.toLowerCase());
+    if (!fmt) {
+      setError("Formato não suportado. Use .ris, .bib ou .csv.");
+      setPreview([]);
+      setFormat(null);
+      return;
+    }
+    const text = await file.text();
+    setContent(text);
+    setFormat(fmt);
+    const result = parseContent(fmt, text); // preview client-side (FR-014)
+    setPreview(result.records);
+    if (result.records.length === 0) {
+      setError(
+        result.errors[0]?.message ??
+          "Nenhum registro reconhecido neste arquivo.",
+      );
+    }
+  }
+
+  async function onConfirm(search: SearchInput) {
+    if (!format || preview.length === 0) return;
+    setPending(true);
+    setError(null);
+    const res = await enqueueImport(reviewId, { format, content, search });
+    if (!res.ok) {
+      setError(res.error);
+      setPending(false);
+      return;
+    }
+    setJobId(res.jobId);
+    // Marco 1: dispara o worker (stand-in do pg_cron — D-F3.5).
+    await runImportWorker(reviewId);
+    setPending(false);
+  }
 
   return (
-    <section className="flex flex-col gap-2">
-      <div className="flex gap-2">
-        <button
-          type="button"
-          disabled={locked || !canDraft}
-          title={canDraft ? "" : "Cadastre a chave de IA"}
-          onClick={async () => {
-            const r = await draftProtocol(reviewId);
-            setMsg(r.ok ? "Rascunho gerado pela IA." : r.error ?? "Erro");
-          }}
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
-        >
-          Rascunhar por IA
-        </button>
-        <button
-          type="button"
-          disabled={locked}
-          onClick={async () => {
-            const r = await saveProtocolDraft(reviewId, md);
-            setMsg(r.ok ? "Rascunho salvo." : r.error ?? "Erro");
-          }}
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
-        >
-          Salvar rascunho
-        </button>
-        <button
-          type="button"
-          disabled={locked}
-          onClick={async () => {
-            if (!window.confirm("Travar o protocolo? Mudanças passarão a ser emendas.")) return;
-            const r = await lockProtocol(reviewId);
-            setMsg(r.ok ? "Protocolo travado." : r.error ?? "Erro");
-          }}
-          className="rounded border border-zinc-700 px-3 py-1 text-sm disabled:opacity-50"
-        >
-          Travar protocolo
-        </button>
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <label htmlFor="import-file" className="text-sm font-medium">
+          Arquivo de referências (RIS, BibTeX ou CSV)
+        </label>
+        <input
+          id="import-file"
+          type="file"
+          accept=".ris,.bib,.bibtex,.csv"
+          onChange={onFile}
+        />
       </div>
 
-      <textarea
-        value={md}
-        onChange={(e) => setMd(e.target.value)}
-        readOnly={locked}
-        rows={16}
-        aria-label="Conteúdo do protocolo (Markdown)"
-        className="border p-2 font-mono text-sm read-only:bg-zinc-50 dark:read-only:bg-zinc-900"
-      />
-      {locked && (
-        <p className="text-xs text-zinc-600">
-          Protocolo travado: o conteúdo é imutável; registre mudanças como emendas abaixo.
+      <ImportPreview records={preview} />
+
+      <form onSubmit={handleSubmit(onConfirm)} className="flex flex-col gap-2">
+        <h2 className="text-lg font-medium">Registro da busca</h2>
+        <input
+          {...register("queryString")}
+          placeholder="String de busca"
+          className="rounded border p-2"
+        />
+        <input
+          {...register("database")}
+          placeholder="Base consultada"
+          className="rounded border p-2"
+        />
+        <input {...register("searchedOn")} type="date" className="rounded border p-2" />
+        <input
+          {...register("hits")}
+          type="number"
+          placeholder="Nº de hits"
+          className="rounded border p-2"
+        />
+        {formState.errors.queryString && (
+          <p className="text-sm text-red-600">
+            {formState.errors.queryString.message}
+          </p>
+        )}
+        <button
+          type="submit"
+          disabled={pending || preview.length === 0}
+          className="self-start rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
+        >
+          Confirmar importação
+        </button>
+      </form>
+
+      {error && (
+        <p role="alert" className="text-sm text-red-600">
+          {error}
         </p>
       )}
-      {msg && <p className="text-xs text-zinc-600">{msg}</p>}
+      {jobId && <JobProgress jobId={jobId} />}
     </section>
   );
 }
 ```
 
-- [ ] **Step 4: `AmendmentList` (client)**
+- [ ] **Step 4: Teste de unidade do preview (render)**
 
-Create `src/components/protocol/AmendmentList.tsx`:
-
+Create `tests/unit/workbench/import-preview.test.tsx`:
 ```tsx
-"use client";
+import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { ImportPreview } from "@/components/workbench/ImportPreview";
 
-import { useState } from "react";
-import type { AmendmentRow } from "@/lib/protocol/queries";
-import { addAmendment } from "../../../app/reviews/[reviewId]/protocol/actions";
+describe("ImportPreview", () => {
+  it("renderiza títulos dos registros", () => {
+    render(
+      <ImportPreview
+        records={[
+          {
+            title: "Estudo X",
+            authors: ["A"],
+            year: 2020,
+            doi: null,
+            abstract: null,
+            language: null,
+            raw: {},
+          },
+        ]}
+      />,
+    );
+    expect(screen.getByText("Estudo X")).toBeInTheDocument();
+  });
 
-export function AmendmentList({
-  reviewId,
-  amendments,
-  locked,
-}: {
-  reviewId: string;
-  amendments: AmendmentRow[];
-  locked: boolean;
-}) {
-  const [msg, setMsg] = useState<string | null>(null);
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-lg font-medium">Emendas versionadas</h2>
-      <ul className="flex flex-col gap-1">
-        {amendments.map((a) => (
-          <li key={a.id} className="rounded border p-2 text-sm">
-            <span className="font-semibold">v{a.version}</span>{" "}
-            <span className="text-zinc-500">({new Date(a.dated_at).toLocaleDateString("pt-BR")})</span>
-            <div>{(a.change as { text?: string }).text ?? JSON.stringify(a.change)}</div>
-          </li>
-        ))}
-        {amendments.length === 0 && <li className="text-sm text-zinc-500">Sem emendas.</li>}
-      </ul>
-
-      {locked && (
-        <form
-          action={async (fd) => {
-            const r = await addAmendment(reviewId, fd);
-            setMsg(r.ok ? "Emenda registrada." : r.error ?? "Erro");
-          }}
-          className="flex flex-col gap-2"
-        >
-          <textarea name="change" rows={2} required className="border p-2 text-sm"
-            placeholder="Descreva a mudança (emenda datada)" />
-          <button type="submit" className="self-start rounded border px-3 py-1 text-sm">
-            Adicionar emenda
-          </button>
-          {msg && <p className="text-xs text-zinc-600">{msg}</p>}
-        </form>
-      )}
-    </section>
-  );
-}
+  it("não renderiza nada sem registros", () => {
+    const { container } = render(<ImportPreview records={[]} />);
+    expect(container).toBeEmptyDOMElement();
+  });
+});
 ```
 
-- [ ] **Step 5: Type-check + lint**
+- [ ] **Step 5: Rodar testes de unidade + gates**
 
-Run: `npm run typecheck && npm run lint`
-Expected: PASS.
+Run: `npm test -- tests/unit/workbench/ && npm run typecheck && npm run lint`
+Expected: testes PASS; `tsc` limpo; ESLint sem erros.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add "app/reviews/[reviewId]/protocol" src/components/protocol
-git commit -m "feat(protocol): protocol page, editor, amendments, Markdown export (US6)"
+git add src/components/workbench/ImportPreview.tsx src/components/workbench/JobProgress.tsx src/components/workbench/ImportPanel.tsx tests/unit/workbench/import-preview.test.tsx
+git commit -m "feat(workbench): ImportPanel — preview, search form, confirm + job polling (FR-014/017)"
 ```
 
 ---
 
-## Task 17 — Navegação: links Pergunta/Protocolo no shell
-
-> **SKILL:** `nextjs-best-practices`. O trilho de fases completo é Fatia 6; aqui só links de navegação dentro da Revisão ativa.
+## Task 15: e2e — fluxo "importar" + invariante de superfície única
 
 **Files:**
-- Modify: `app/reviews/[reviewId]/layout.tsx`
+- Test: `tests/e2e/import.spec.ts`
 
-- [ ] **Step 1: Adicionar links após o `ReviewSwitcher`**
+- [ ] **Step 1: Conferir os seletores reais de cadastro/criação**
 
-In `app/reviews/[reviewId]/layout.tsx`, dentro do `<header>`, **após** a linha `<ReviewSwitcher reviews={reviews} activeId={active.id} />`, inserir:
+Antes de escrever o spec, abrir `app/(auth)/signup/page.tsx`, `app/reviews/new/page.tsx` e `tests/e2e/review-switch.spec.ts` e copiar os seletores reais (labels/botões) para o helper abaixo — ajustar se divergirem.
 
-```tsx
-        <nav className="flex gap-3 text-sm">
-          <a href={`/reviews/${active.id}/question`} className="underline">
-            Pergunta
-          </a>
-          <a href={`/reviews/${active.id}/protocol`} className="underline">
-            Protocolo
-          </a>
-        </nav>
-```
+- [ ] **Step 2: Escrever o e2e**
 
-- [ ] **Step 2: Type-check + lint**
-
-Run: `npm run typecheck && npm run lint`
-Expected: PASS.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add "app/reviews/[reviewId]/layout.tsx"
-git commit -m "feat(shell): question/protocol nav links in review header"
-```
-
----
-
-## Task 18 — BYOK + RLS: testes de integração (Vault round-trip + isolamento — SC-009)
-
-**Files:**
-- Test: `tests/integration/byok.test.ts`
-- Test: `tests/integration/rls.question-protocol.test.ts`
-
-- [ ] **Step 1: Teste do BYOK (Vault round-trip + decifragem só por service_role)**
-
-Create `tests/integration/byok.test.ts`:
-
+Create `tests/e2e/import.spec.ts`:
 ```ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { signUpUser, serviceClient } from "./helpers/supabase";
+import { test, expect, type Page } from "@playwright/test";
+import path from "node:path";
 
-describe("BYOK via Supabase Vault (R5/FR-032)", () => {
-  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
+// Ajustar os seletores ao padrão de tests/e2e/review-switch.spec.ts (Step 1).
+async function signupAndCreateReview(page: Page) {
+  const email = `e2e_imp_${Date.now()}@example.com`;
+  await page.goto("/signup");
+  await page.getByLabel(/e-mail/i).fill(email);
+  await page.getByLabel(/senha/i).fill("senha-teste-123");
+  await page.getByRole("button", { name: /cadastrar|entrar/i }).click();
+  await page.waitForURL("**/reviews");
+  await page.goto("/reviews/new");
+  await page.getByLabel(/título/i).fill("Revisão e2e import");
+  await page.getByRole("button", { name: /criar/i }).click();
+  await page.waitForURL("**/reviews/**");
+}
 
-  beforeAll(async () => {
-    const stamp = Date.now();
-    const u = await signUpUser(`k_${stamp}@example.com`, "senha-teste-123");
-    client = u.client;
-    const { data: r } = await client.rpc("create_review", { p_title: "R BYOK" });
-    reviewId = r.id;
-  });
+test("importar RIS: preview, registrar busca, confirmar, identificados sobem", async ({
+  page,
+}) => {
+  await signupAndCreateReview(page);
+  await page.getByRole("link", { name: "Workbench" }).click();
+  await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
 
-  it("set_byok_key grava metadados e cifra o segredo no Vault", async () => {
-    const { error } = await client.rpc("set_byok_key", {
-      p_review_id: reviewId,
-      p_provider: "anthropic",
-      p_api_key: "sk-ant-teste-123",
-    });
-    expect(error).toBeNull();
-    const { data } = await client
-      .from("byok_key")
-      .select("provider, vault_secret_id")
-      .eq("review_id", reviewId)
-      .single();
-    expect(data!.provider).toBe("anthropic");
-    expect(data!.vault_secret_id).toBeTruthy();
-  });
+  // Invariante Princípio V: os outros modos NÃO são links de navegação.
+  await expect(page.getByRole("tab", { name: "Duplicatas" })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  );
 
-  it("authenticated NÃO pode chamar get_byok_secret (decifragem só server-side)", async () => {
-    const { error } = await client.rpc("get_byok_secret", { p_review_id: reviewId });
-    expect(error).not.toBeNull(); // permissão negada
-  });
+  // Upload da fixture RIS → preview.
+  await page.setInputFiles(
+    "#import-file",
+    path.resolve("tests/fixtures/import/sample.ris"),
+  );
+  await expect(page.getByText("Aprendizagem ativa em sala")).toBeVisible();
 
-  it("service_role decifra o segredo original", async () => {
-    const admin = serviceClient();
-    const { data, error } = await admin.rpc("get_byok_secret", { p_review_id: reviewId });
-    expect(error).toBeNull();
-    expect(data?.[0]?.api_key).toBe("sk-ant-teste-123");
+  // Registrar busca + confirmar.
+  await page.getByPlaceholder("String de busca").fill("active learning");
+  await page.getByPlaceholder("Base consultada").fill("ERIC");
+  await page.locator('input[type="date"]').fill("2026-05-30");
+  await page.getByPlaceholder("Nº de hits").fill("2");
+  await page.getByRole("button", { name: /confirmar importação/i }).click();
+
+  // O worker (stand-in) roda e o contador de identificados reflete o corpus.
+  await expect(page.getByText(/Identificados \(PRISMA\):/)).toContainText("2", {
+    timeout: 15_000,
   });
 });
 ```
 
-- [ ] **Step 2: Teste de RLS nas tabelas novas (SC-009)**
+- [ ] **Step 3: Rodar o e2e (build de produção)**
 
-Create `tests/integration/rls.question-protocol.test.ts`:
-
-```ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { signUpUser } from "./helpers/supabase";
-
-describe("RLS — question/protocol/criteria/byok isolados por Revisão (SC-009)", () => {
-  let aClient: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let bClient: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewIdA: string;
-
-  beforeAll(async () => {
-    const stamp = Date.now();
-    const a = await signUpUser(`qa_${stamp}@example.com`, "senha-teste-123");
-    const b = await signUpUser(`qb_${stamp}@example.com`, "senha-teste-123");
-    aClient = a.client;
-    bClient = b.client;
-    const { data } = await aClient.rpc("create_review", { p_title: "R de A" });
-    reviewIdA = data.id;
-    await aClient.from("question").insert({
-      review_id: reviewIdA,
-      framework: "spider",
-      question_text: "Pergunta de A",
-    });
-  });
-
-  it("A enxerga a própria question", async () => {
-    const { data } = await aClient.from("question").select("id").eq("review_id", reviewIdA);
-    expect(data?.length).toBe(1);
-  });
-
-  it("B NÃO enxerga a question de A", async () => {
-    const { data } = await bClient.from("question").select("id").eq("review_id", reviewIdA);
-    expect(data ?? []).toHaveLength(0);
-  });
-
-  it("B NÃO consegue inserir protocol na Revisão de A", async () => {
-    const { error } = await bClient.from("protocol").insert({
-      review_id: reviewIdA,
-      content: { contentMarkdown: "tamper" },
-      origin: "human",
-    });
-    expect(error).not.toBeNull();
-  });
-
-  it("B NÃO consegue travar o protocolo de A (RPC checa membership)", async () => {
-    const { error } = await bClient.rpc("lock_protocol", { p_review_id: reviewIdA });
-    expect(error).not.toBeNull();
-  });
-});
-```
-
-- [ ] **Step 3: Rodar a suíte de integração inteira**
-
-Run: `npm run test -- tests/integration/`
-Expected: PASS — RLS da Fatia 1 + question-derivation + protocol-lock + byok + rls.question-protocol.
+Run: `npm run test:e2e -- import.spec.ts`
+Expected: PASS — preview visível, identificados = 2 após confirmar.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/integration/byok.test.ts tests/integration/rls.question-protocol.test.ts
-git commit -m "test: BYOK Vault round-trip + RLS isolation for question/protocol (SC-009)"
+git add tests/e2e/import.spec.ts
+git commit -m "test(e2e): import flow + single-surface invariant (US2/FR-027)"
 ```
 
 ---
 
-## Task 19 — Verificação final da fatia (portões de qualidade) + COMPLETION
+## Task 16: Self-review + portões de qualidade da fatia
 
-> **SKILL:** `verification-before-completion` (evidência antes de afirmar concluído).
+- [ ] **Step 1: Suíte completa de testes**
 
-**Files:**
-- Create: `specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-2.md`
+Run: `npm test`
+Expected: todas as suítes unit + integração PASS (incluindo as herdadas das Fatias 1–2).
 
-- [ ] **Step 1: Rodar todos os portões e capturar a saída**
+- [ ] **Step 2: e2e completo**
 
-Run, em sequência, capturando o resultado de cada um:
+Run: `npm run test:e2e`
+Expected: specs herdados (auth, review-switch, smoke) + `import.spec.ts` PASS.
 
-```bash
-npm run lint
-npm run typecheck
-npm run test
-npm run test:e2e
-```
+- [ ] **Step 3: Lint + typecheck (portões obrigatórios — constitution §Portões)**
 
-Expected: `lint` sem erros; `typecheck` limpo; `vitest` todos verdes (unit + integration); `playwright` — os e2e da Fatia 1 (auth, review-switch, smoke) continuam verdes (sem regressão). *(e2e novos de Pergunta/Protocolo não são obrigatórios nesta fatia — os fluxos críticos e2e do spec são importar/triar, das Fatias 3/5.)*
+Run: `npm run lint && npm run typecheck`
+Expected: ESLint "No ESLint warnings or errors"; `tsc` sem saída.
 
-- [ ] **Step 2: Escrever o COMPLETION da fatia**
+- [ ] **Step 4: Conferência manual de invariantes**
 
-Create `specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-2.md` com: FR cobertas (006–012, 030–034), US (US5, US6), itens entregues, decisões D-F2.\*, saída literal dos 4 portões, e o que ficou explicitamente para fatias seguintes (gatilho automático de lock → Fatia 5; export PDF → Marco 3; jobs/batch → Fatia 3/5).
+Relendo o diff, confirmar:
+- Princípio V: existe **uma** rota `app/reviews/[reviewId]/workbench/` — nenhuma rota separada para Duplicatas/T-R/Texto completo.
+- §VIII: nenhum `record` é inserido no caminho de enqueue; só no worker.
+- Sem `any` fora do ponto isolado e justificado em `jobs/types.ts`.
+- Datas: `searched_on` é `DATE` no banco; UI usa input `type="date"` (yyyy-mm-dd).
+- Dependências novas (papaparse, @retorquere/bibtex-parser, @tanstack/react-query) entraram via Task 1 (tarefa explícita).
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Escrever o COMPLETION da fatia**
 
-```bash
-git add specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-2.md
-git commit -m "docs: Fatia 2 completion report"
-```
+Create `specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-3.md` com: US/FR cobertas, decisões D-F3.\*, saída literal dos portões, e o que foi diferido (cron real exercitado só no deploy; Edge Functions verificadas no deploy). Atualizar `slicing.md` §"Estado das fatias" marcando a Fatia 3.
 
-- [ ] **Step 4: PARAR (CHECKPOINT 3)**
+- [ ] **Step 6: Parar no CHECKPOINT 3 (não mergear)**
 
-**NÃO** mergear. Apresentar ao desenvolvedor: branch `build/001-marco1-nucleo-fluxo/2-pergunta-protocolo`, o diff, e a saída de `lint` + `typecheck` + `test` + `test:e2e`. Aguardar o merge manual do desenvolvedor antes de qualquer próxima fatia (CLAUDE.md §5).
+Apresentar ao desenvolvedor: branch da fatia, diff, e a saída de `npm test` + `npm run lint` + `npm run typecheck` + `npm run test:e2e`. **Aguardar o merge manual** (CLAUDE.md §5). Não iniciar a Fatia 4.
 
 ---
 
-## Self-Review (writing-plans)
+## Self-Review (autor do plano)
 
-**1. Cobertura da spec (FR/US da Fatia 2 — slicing):**
-- FR-006 (framework SPIDER default + alternativas) → Task 10 (schema) + Task 12 (UI select). ✓
-- FR-007/008 (derivação IA ratificável; aceitar/editar/rejeitar c/ estado) → Task 11 (`deriveCriteria`/`ratifyCriterion`) + Task 12 (CriteriaPanel). ✓
-- FR-009 (rascunho PRISMA-P editável) → Task 14 (`draftProtocol`/`saveProtocolDraft`) + Task 16 (editor). ✓
-- FR-010 (travar; estado visível) → operação em Task 1 (`lock_protocol`) + Task 14/16; gatilho automático **diferido à Fatia 5** (D-F2.6, conforme slicing). ✓
-- FR-011 (emenda versionada/datada, sem sobrescrever) → Task 1 (`add_protocol_amendment` + trigger) + Task 15 (teste SC-010) + Task 16. ✓
-- FR-012 (export) → Task 13 (markdown) + Task 16 (route). Markdown (D-F2.1). ✓
-- FR-030 (estado visível, distinto de humano) → Task 8 (SuggestionChip/state). ✓
-- FR-031 (proveniência) → contrato em Task 2; persistida em Task 11/14; exibida em Task 8 (ProvenancePopover). ✓
-- FR-032 (BYOK cifrada; operar manualmente sem IA) → Task 1 (Vault RPCs) + Task 9 (form/action); `MissingByokError` mantém fases manuais (Task 11/14). ✓
-- FR-033 (estimativa de custo) → `estimateCost`/`ai_usage` (Task 1/4/5); **consumo na UI da fila** é Fatia 5 — aqui fica a base. ✓ (parcial-por-design)
-- FR-034 (not_found 1ª classe) → Task 2 (contrato) + Task 8 (NotFound) + Task 12 (render). ✓
-- US5 → Tasks 10–12. US6 → Tasks 13–16. ✓
+**Cobertura da spec/slicing:** US2, FR-013/014/015/016/017/027 e A3 mapeados (tabela "Escopo coberto"). §VIII coberto por enqueue/worker separados + teste "enqueue não processa". SC-009 por Task 11. Princípio V por Task 13/15 (uma rota, modos inertes). FR-038 (idioma original) preservado em `metadata.language`/`raw`.
 
-**2. Placeholders:** nenhuma tarefa contém "TBD"/"adicionar validação"/"similar à Task N". Todo código está escrito. ✓
+**Placeholders:** nenhum "TBD"/"etc." — todo passo tem código ou comando concreto. As notas de ajuste (shape do BibTeX na Task 7; seletores e2e na Task 15) apontam para o **teste como contrato** e o arquivo-padrão a conferir, não são lacunas de implementação.
 
-**3. Consistência de tipos:** `LlmSuggestion<T>`/`Provenance`/`SuggestionState` definidos na Task 2 e usados idênticos em Tasks 3/5/8/11/14. `CriterionRow`/`AmendmentRow`/`ProtocolRow` definidos nas queries (Tasks 11/14) e consumidos nas UIs (Tasks 12/16). RPCs (`lock_protocol`, `add_protocol_amendment`, `set_byok_key`, `get_byok_secret`, `is_review_member`) definidas na Task 1 e chamadas com a mesma assinatura nas actions. ✓
+**Consistência de tipos:** `ParsedRecord`/`ParseResult`/`BibliographicParser` definidos na Task 4 e usados igualmente em 5–10/13/14. `EnqueueResult`/`WorkerResult`/`EnqueueValidationError` definidos na Task 9 e reusados em 10/12/13. RPCs `create_import_job`/`insert_import_record` definidas na Task 2 e chamadas com a mesma assinatura em 9/10. Alias `@shared` definido na Task 1 e usado em todo o núcleo.
 
-**Nota de ordem de execução:** Task 1 (migration + tipos) **precede** todo consumo de schema (Princípio IV). Tasks 2–8 são fundação de IA/UI sem dependência de UI de feature. Tasks 9–12 (US5) e 13–16 (US6) dependem de 1–8. Tasks 18–19 fecham com integração e verificação.
+**Riscos conhecidos (sinalizar no CHECKPOINT 2):** (1) shape exato do `@retorquere/bibtex-parser` pode exigir ajuste do mapeamento (mitigado por TDD); (2) `pg_cron`/`pg_net` podem não existir na imagem local (mitigado pelo bloco guardado da Task 3 — reset não falha; worker roda pelo gatilho); (3) Edge Functions Deno não são exercitadas no host (mitigado: núcleo 100% testado; cascas finas verificadas no deploy).
