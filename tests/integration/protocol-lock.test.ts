@@ -54,8 +54,8 @@ describe("travamento de protocolo (US6 / SC-010)", () => {
       .eq("review_id", reviewId)
       .order("version", { ascending: true });
     expect(data!.length).toBe(1);
-    expect(data![0].version).toBe(1);
-    expect(data![0].dated_at).toBeTruthy();
+    expect(data![0]!.version).toBe(1);
+    expect(data![0]!.dated_at).toBeTruthy();
   });
 
   it("trilha de auditoria registrou lock + emenda", async () => {
