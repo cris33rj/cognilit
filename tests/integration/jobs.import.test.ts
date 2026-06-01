@@ -118,6 +118,30 @@ describe("import job — worker (§VIII resiliência por-item)", () => {
     expect(rec!.corpus_state).toBe("imported");
   });
 
+  it("re-run idempotente ⇒ sem registros duplicados, job completed, progress 100", async () => {
+    // Run the same job a second time. Items are already 'done', so no new records
+    // should be created and the job must remain completed at 100%.
+    const out2 = await processImportJob({ supabase: serviceClient() }, jobId);
+    expect(out2.status).toBe("completed");
+    expect(out2.done).toBe(2);
+    expect(out2.failed).toBe(0);
+
+    const { data: job } = await serviceClient()
+      .from("job")
+      .select("status, progress")
+      .eq("id", jobId)
+      .single();
+    expect(job!.status).toBe("completed");
+    expect(job!.progress).toBe(100);
+
+    // Most important: still exactly 2 records — no duplicates.
+    const { count: recordCount } = await userClient
+      .from("record")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId);
+    expect(recordCount).toBe(2);
+  });
+
   it("falha forçada num item ⇒ completed_with_errors, demais done", async () => {
     const u = await signUpUser(
       `wrk2_${Date.now()}@example.com`,

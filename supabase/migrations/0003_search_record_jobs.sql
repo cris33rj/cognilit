@@ -34,10 +34,12 @@ create table public.search (
 create index search_review_idx on public.search (review_id, created_at);
 
 -- ---------- record (registro bibliográfico — US2/US3/US4) ----------
+-- NOTE: job_item_id FK added via ALTER TABLE after job_item is created below.
 create table public.record (
   id uuid primary key default gen_random_uuid(),
   review_id uuid not null references public.review (id) on delete cascade,
   search_id uuid references public.search (id) on delete set null,
+  job_item_id uuid, -- FK + unique index added after job_item table
   source_format source_format not null,
   raw jsonb not null,
   metadata jsonb not null,
@@ -80,6 +82,15 @@ create table public.job_item (
   created_at timestamptz not null default now()
 );
 create index job_item_job_idx on public.job_item (job_id, status);
+
+-- Add FK from record.job_item_id → job_item.id (must come after job_item is created).
+alter table public.record
+  add constraint record_job_item_fk
+  foreign key (job_item_id) references public.job_item (id) on delete set null;
+
+-- Nullable unique index: allows multiple NULLs (future non-import records),
+-- but guarantees each job_item_id can only produce one record (idempotency).
+create unique index record_job_item_uidx on public.record (job_item_id) where job_item_id is not null;
 
 -- ============================================================
 -- RPC: create_import_job — search + job + job_items + audit (atômico)
@@ -164,26 +175,43 @@ set search_path = public
 as $$
 declare
   v_record_id uuid;
+  v_inserted  bool := false;
 begin
+  -- Idempotent insert: if a record already exists for this job_item, skip.
   insert into public.record (
-    review_id, search_id, source_format, raw, metadata,
+    review_id, search_id, job_item_id, source_format, raw, metadata,
     doi_normalized, title_norm, corpus_state
   )
   values (
-    p_review_id, p_search_id, p_source_format, p_raw, p_metadata,
+    p_review_id, p_search_id, p_job_item_id, p_source_format, p_raw, p_metadata,
     nullif(p_doi_normalized, ''), nullif(p_title_norm, ''), 'imported'
   )
+  on conflict (job_item_id) where job_item_id is not null do nothing
   returning id into v_record_id;
 
+  if v_record_id is not null then
+    -- New record was actually inserted.
+    v_inserted := true;
+  else
+    -- Conflict: fetch the existing record id.
+    select id into v_record_id
+      from public.record
+     where job_item_id = p_job_item_id;
+  end if;
+
+  -- Always mark the item done (idempotent update).
   update public.job_item set status = 'done' where id = p_job_item_id;
 
-  insert into public.audit_entry (
-    review_id, actor_type, actor_id, action, entity, entity_id, before, after
-  )
-  values (
-    p_review_id, 'system', null, 'import_record', 'record', v_record_id,
-    null, jsonb_build_object('source_format', p_source_format)
-  );
+  -- Only write audit entry when a new record was inserted.
+  if v_inserted then
+    insert into public.audit_entry (
+      review_id, actor_type, actor_id, action, entity, entity_id, before, after
+    )
+    values (
+      p_review_id, 'system', null, 'import_record', 'record', v_record_id,
+      null, jsonb_build_object('source_format', p_source_format)
+    );
+  end if;
 
   return v_record_id;
 end;

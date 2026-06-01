@@ -553,6 +553,7 @@ export type Database = {
           ft_decision: Database["public"]["Enums"]["ft_decision_state"] | null
           ft_exclusion_reason_id: string | null
           id: string
+          job_item_id: string | null
           metadata: Json
           raw: Json
           review_id: string
@@ -569,6 +570,7 @@ export type Database = {
           ft_decision?: Database["public"]["Enums"]["ft_decision_state"] | null
           ft_exclusion_reason_id?: string | null
           id?: string
+          job_item_id?: string | null
           metadata: Json
           raw: Json
           review_id: string
@@ -585,6 +587,7 @@ export type Database = {
           ft_decision?: Database["public"]["Enums"]["ft_decision_state"] | null
           ft_exclusion_reason_id?: string | null
           id?: string
+          job_item_id?: string | null
           metadata?: Json
           raw?: Json
           review_id?: string
@@ -595,6 +598,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "record_job_item_fk"
+            columns: ["job_item_id"]
+            isOneToOne: false
+            referencedRelation: "job_item"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "record_review_id_fkey"
             columns: ["review_id"]

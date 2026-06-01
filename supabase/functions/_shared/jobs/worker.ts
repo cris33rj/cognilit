@@ -12,6 +12,7 @@ interface WorkItem {
   id: string;
   payload: ImportItemPayload;
   review_id: string;
+  attempts: number;
 }
 
 export interface WorkerDeps extends JobDeps {
@@ -40,7 +41,7 @@ export async function processImportJob(
 
   const { data: items, error } = await supabase
     .from("job_item")
-    .select("id, payload, review_id")
+    .select("id, payload, review_id, attempts")
     .eq("job_id", jobId)
     .eq("status", "pending");
   if (error) throw new Error(error.message);
@@ -67,41 +68,58 @@ export async function processImportJob(
     if (rpcErr) throw new Error(rpcErr.message);
   };
 
-  let done = 0;
-  let failed = 0;
   for (const item of (items ?? []) as WorkItem[]) {
     try {
       if (deps.processItem) await deps.processItem(item, real);
       else await real(item);
-      done += 1;
     } catch (e) {
-      failed += 1;
       await supabase
         .from("job_item")
         .update({
           status: "failed",
           error: (e as Error).message,
-          attempts: 1,
+          attempts: (item.attempts ?? 0) + 1,
         })
         .eq("id", item.id);
     }
   }
 
-  const total = done + failed;
+  // Derive final status and progress from DB counts across ALL items for the job
+  // (robust to resumed/partial runs where this invocation didn't process all items).
+  const { data: counts, error: countErr } = await supabase
+    .from("job_item")
+    .select("status")
+    .eq("job_id", jobId);
+  if (countErr) throw new Error(countErr.message);
+
+  const allItems = (counts ?? []) as { status: string }[];
+  const totalDb = allItems.length;
+  const doneDb = allItems.filter((i) => i.status === "done").length;
+  const failedDb = allItems.filter((i) => i.status === "failed").length;
+
   const status =
-    failed === 0
+    failedDb === 0 && doneDb === totalDb
       ? "completed"
-      : done === 0
+      : doneDb === 0
         ? "failed"
         : "completed_with_errors";
-  await supabase
-    .from("job")
-    .update({
-      status,
-      progress: total > 0 ? Math.round((done / total) * 100) : 0,
-      finished_at: new Date().toISOString(),
-    })
-    .eq("id", jobId);
 
-  return { job_id: jobId, status, done, failed };
+  const progress = totalDb > 0 ? Math.round((doneDb / totalDb) * 100) : 0;
+
+  try {
+    await supabase
+      .from("job")
+      .update({
+        status,
+        progress,
+        finished_at: new Date().toISOString(),
+      })
+      .eq("id", jobId);
+  } catch (e) {
+    // Log and rethrow — do not swallow silently.
+    console.error("Failed to update job status:", e);
+    throw e;
+  }
+
+  return { job_id: jobId, status, done: doneDb, failed: failedDb };
 }
