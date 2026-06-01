@@ -1,0 +1,36 @@
+import { getQuestion, listCriteria } from "@/lib/question/queries";
+import { getByokStatus } from "@/lib/byok/queries";
+import { QuestionForm } from "@/components/question/QuestionForm";
+import { CriteriaPanel } from "@/components/question/CriteriaPanel";
+import { ByokKeyForm } from "@/components/ai/ByokKeyForm";
+
+export const dynamic = "force-dynamic";
+
+export default async function QuestionPage({
+  params,
+}: {
+  params: Promise<{ reviewId: string }>;
+}) {
+  const { reviewId } = await params;
+  const [question, criteria, byok] = await Promise.all([
+    getQuestion(reviewId),
+    listCriteria(reviewId),
+    getByokStatus(reviewId),
+  ]);
+
+  return (
+    <div className="flex flex-col gap-6">
+      <h1 className="text-xl font-semibold">Pergunta da Revisão</h1>
+      <QuestionForm reviewId={reviewId} initial={question} />
+      <section className="flex flex-col gap-2">
+        <h2 className="text-lg font-medium">Chave de IA (BYOK)</h2>
+        <ByokKeyForm reviewId={reviewId} present={byok.present} />
+      </section>
+      <CriteriaPanel
+        reviewId={reviewId}
+        criteria={criteria}
+        canDerive={!!question && byok.present}
+      />
+    </div>
+  );
+}

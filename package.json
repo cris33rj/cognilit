@@ -8,12 +8,14 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
+    "gen:types": "supabase gen types typescript --local > src/types/database.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "prepare": "husky"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.100.1",
     "@hookform/resolvers": "^3.10.0",
     "@supabase/ssr": "^0.3.0",
     "@supabase/supabase-js": "^2.106.2",

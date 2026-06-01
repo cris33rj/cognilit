@@ -34,6 +34,94 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_suggestion: {
+        Row: {
+          created_at: string
+          grounding: Json | null
+          id: string
+          not_found: boolean
+          output: Json
+          provenance: Json
+          review_id: string
+          state: Database["public"]["Enums"]["suggestion_state"]
+          target_id: string | null
+          target_kind: Database["public"]["Enums"]["ai_target_kind"]
+        }
+        Insert: {
+          created_at?: string
+          grounding?: Json | null
+          id?: string
+          not_found?: boolean
+          output: Json
+          provenance: Json
+          review_id: string
+          state?: Database["public"]["Enums"]["suggestion_state"]
+          target_id?: string | null
+          target_kind: Database["public"]["Enums"]["ai_target_kind"]
+        }
+        Update: {
+          created_at?: string
+          grounding?: Json | null
+          id?: string
+          not_found?: boolean
+          output?: Json
+          provenance?: Json
+          review_id?: string
+          state?: Database["public"]["Enums"]["suggestion_state"]
+          target_id?: string | null
+          target_kind?: Database["public"]["Enums"]["ai_target_kind"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_suggestion_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_usage: {
+        Row: {
+          cost: Json
+          created_at: string
+          id: string
+          job_id: string | null
+          phase: string
+          review_id: string
+          tokens_in: number
+          tokens_out: number
+        }
+        Insert: {
+          cost?: Json
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          phase: string
+          review_id: string
+          tokens_in?: number
+          tokens_out?: number
+        }
+        Update: {
+          cost?: Json
+          created_at?: string
+          id?: string
+          job_id?: string | null
+          phase?: string
+          review_id?: string
+          tokens_in?: number
+          tokens_out?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_usage_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_entry: {
         Row: {
           action: string
@@ -74,6 +162,96 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "audit_entry_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      byok_key: {
+        Row: {
+          created_at: string
+          id: string
+          provider: Database["public"]["Enums"]["llm_provider"]
+          review_id: string
+          vault_secret_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          provider?: Database["public"]["Enums"]["llm_provider"]
+          review_id: string
+          vault_secret_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          provider?: Database["public"]["Enums"]["llm_provider"]
+          review_id?: string
+          vault_secret_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "byok_key_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      eligibility_criterion: {
+        Row: {
+          ai_suggestion_id: string | null
+          created_at: string
+          id: string
+          kind: Database["public"]["Enums"]["criterion_kind"]
+          origin: Database["public"]["Enums"]["criterion_origin"]
+          question_id: string
+          ratification_state: Database["public"]["Enums"]["ratification_state"]
+          review_id: string
+          text: string
+        }
+        Insert: {
+          ai_suggestion_id?: string | null
+          created_at?: string
+          id?: string
+          kind: Database["public"]["Enums"]["criterion_kind"]
+          origin: Database["public"]["Enums"]["criterion_origin"]
+          question_id: string
+          ratification_state?: Database["public"]["Enums"]["ratification_state"]
+          review_id: string
+          text: string
+        }
+        Update: {
+          ai_suggestion_id?: string | null
+          created_at?: string
+          id?: string
+          kind?: Database["public"]["Enums"]["criterion_kind"]
+          origin?: Database["public"]["Enums"]["criterion_origin"]
+          question_id?: string
+          ratification_state?: Database["public"]["Enums"]["ratification_state"]
+          review_id?: string
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "eligibility_criterion_ai_suggestion_id_fkey"
+            columns: ["ai_suggestion_id"]
+            isOneToOne: false
+            referencedRelation: "ai_suggestion"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "eligibility_criterion_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "question"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "eligibility_criterion_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: false
             referencedRelation: "review"
@@ -138,6 +316,140 @@ export type Database = {
         }
         Relationships: []
       }
+      protocol: {
+        Row: {
+          ai_suggestion_id: string | null
+          content: Json
+          created_at: string
+          id: string
+          locked_at: string | null
+          origin: Database["public"]["Enums"]["protocol_origin"]
+          review_id: string
+          state: Database["public"]["Enums"]["protocol_state"]
+          updated_at: string
+        }
+        Insert: {
+          ai_suggestion_id?: string | null
+          content?: Json
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          origin?: Database["public"]["Enums"]["protocol_origin"]
+          review_id: string
+          state?: Database["public"]["Enums"]["protocol_state"]
+          updated_at?: string
+        }
+        Update: {
+          ai_suggestion_id?: string | null
+          content?: Json
+          created_at?: string
+          id?: string
+          locked_at?: string | null
+          origin?: Database["public"]["Enums"]["protocol_origin"]
+          review_id?: string
+          state?: Database["public"]["Enums"]["protocol_state"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "protocol_ai_suggestion_id_fkey"
+            columns: ["ai_suggestion_id"]
+            isOneToOne: false
+            referencedRelation: "ai_suggestion"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "protocol_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      protocol_amendment: {
+        Row: {
+          change: Json
+          created_at: string
+          dated_at: string
+          id: string
+          protocol_id: string
+          review_id: string
+          version: number
+        }
+        Insert: {
+          change: Json
+          created_at?: string
+          dated_at?: string
+          id?: string
+          protocol_id: string
+          review_id: string
+          version: number
+        }
+        Update: {
+          change?: Json
+          created_at?: string
+          dated_at?: string
+          id?: string
+          protocol_id?: string
+          review_id?: string
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "protocol_amendment_protocol_id_fkey"
+            columns: ["protocol_id"]
+            isOneToOne: false
+            referencedRelation: "protocol"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "protocol_amendment_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      question: {
+        Row: {
+          created_at: string
+          fields: Json
+          framework: Database["public"]["Enums"]["question_framework"]
+          id: string
+          question_text: string
+          review_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          fields?: Json
+          framework?: Database["public"]["Enums"]["question_framework"]
+          id?: string
+          question_text?: string
+          review_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          fields?: Json
+          framework?: Database["public"]["Enums"]["question_framework"]
+          id?: string
+          question_text?: string
+          review_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "question_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       review: {
         Row: {
           active_screening_started_at: string | null
@@ -178,6 +490,24 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_protocol_amendment: {
+        Args: { p_change: Json; p_review_id: string }
+        Returns: {
+          change: Json
+          created_at: string
+          dated_at: string
+          id: string
+          protocol_id: string
+          review_id: string
+          version: number
+        }
+        SetofOptions: {
+          from: "*"
+          to: "protocol_amendment"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_review: {
         Args: { p_title: string }
         Returns: {
@@ -195,11 +525,72 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      get_byok_secret: {
+        Args: { p_review_id: string }
+        Returns: {
+          api_key: string
+          provider: Database["public"]["Enums"]["llm_provider"]
+        }[]
+      }
       is_review_member: { Args: { p_review_id: string }; Returns: boolean }
+      lock_protocol: {
+        Args: { p_review_id: string }
+        Returns: {
+          ai_suggestion_id: string | null
+          content: Json
+          created_at: string
+          id: string
+          locked_at: string | null
+          origin: Database["public"]["Enums"]["protocol_origin"]
+          review_id: string
+          state: Database["public"]["Enums"]["protocol_state"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "protocol"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_byok_key: {
+        Args: {
+          p_api_key: string
+          p_provider: Database["public"]["Enums"]["llm_provider"]
+          p_review_id: string
+        }
+        Returns: {
+          created_at: string
+          id: string
+          provider: Database["public"]["Enums"]["llm_provider"]
+          review_id: string
+          vault_secret_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "byok_key"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
+      ai_target_kind: "eligibility" | "protocol_draft" | "screening"
       audit_actor_type: "human" | "ai" | "system"
+      criterion_kind: "inclusion" | "exclusion" | "search_term"
+      criterion_origin: "human" | "ai"
+      llm_provider: "anthropic"
       member_role: "owner" | "reviewer" | "viewer"
+      protocol_origin: "ai_draft" | "human"
+      protocol_state: "draft" | "locked"
+      question_framework: "spider" | "pico" | "peo" | "pcc" | "free"
+      ratification_state: "pending" | "accepted" | "edited" | "rejected"
+      suggestion_state:
+        | "pending"
+        | "accepted"
+        | "edited"
+        | "rejected"
+        | "inferred"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -330,8 +721,23 @@ export const Constants = {
   },
   public: {
     Enums: {
+      ai_target_kind: ["eligibility", "protocol_draft", "screening"],
       audit_actor_type: ["human", "ai", "system"],
+      criterion_kind: ["inclusion", "exclusion", "search_term"],
+      criterion_origin: ["human", "ai"],
+      llm_provider: ["anthropic"],
       member_role: ["owner", "reviewer", "viewer"],
+      protocol_origin: ["ai_draft", "human"],
+      protocol_state: ["draft", "locked"],
+      question_framework: ["spider", "pico", "peo", "pcc", "free"],
+      ratification_state: ["pending", "accepted", "edited", "rejected"],
+      suggestion_state: [
+        "pending",
+        "accepted",
+        "edited",
+        "rejected",
+        "inferred",
+      ],
     },
   },
 } as const

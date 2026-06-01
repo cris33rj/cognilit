@@ -27,6 +27,14 @@ export default async function ReviewLayout({
           Nova Revisão
         </a>
         <ReviewSwitcher reviews={reviews} activeId={active.id} />
+        <nav className="flex gap-3 text-sm">
+          <a href={`/reviews/${active.id}/question`} className="underline">
+            Pergunta
+          </a>
+          <a href={`/reviews/${active.id}/protocol`} className="underline">
+            Protocolo
+          </a>
+        </nav>
         <form action="/auth/signout" method="post" className="ml-auto">
           <button type="submit" className="text-sm underline">
             Sair
