@@ -74,12 +74,23 @@ export const bibtexParser: BibliographicParser = {
       return { records: [], errors, format: "bibtex" };
     }
 
-    const result = parse(content, {
-      verbatim: [],
-      errorHandler: () => {
-        // library's own error handler; errors surface via result.errors
-      },
-    });
+    let result: ReturnType<typeof parse>;
+    try {
+      result = parse(content, {
+        verbatim: [],
+        errorHandler: () => {
+          // library's own error handler; errors surface via result.errors
+        },
+      });
+    } catch (e) {
+      // FR-016: arquivo malformado vira erro claro, nunca exceção não-tratada
+      // (paridade com os parsers RIS/CSV; o enqueue mapeia 0 registros → 400).
+      errors.push({
+        line: null,
+        message: `Arquivo BibTeX inválido: ${(e as Error).message}`,
+      });
+      return { records: [], errors, format: "bibtex" };
+    }
 
     // Propagate library-level errors (unknown format issues)
     for (const e of result.errors ?? []) {
