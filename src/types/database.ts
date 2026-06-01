@@ -259,6 +259,101 @@ export type Database = {
           },
         ]
       }
+      job: {
+        Row: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        Insert: {
+          actual_cost?: Json | null
+          created_at?: string
+          estimated_cost?: Json | null
+          finished_at?: string | null
+          id?: string
+          progress?: number
+          review_id: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        Update: {
+          actual_cost?: Json | null
+          created_at?: string
+          estimated_cost?: Json | null
+          finished_at?: string | null
+          id?: string
+          progress?: number
+          review_id?: string
+          started_at?: string | null
+          status?: Database["public"]["Enums"]["job_status"]
+          type?: Database["public"]["Enums"]["job_type"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_item: {
+        Row: {
+          attempts: number
+          created_at: string
+          error: string | null
+          id: string
+          job_id: string
+          payload: Json
+          review_id: string
+          status: Database["public"]["Enums"]["job_item_status"]
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_id: string
+          payload: Json
+          review_id: string
+          status?: Database["public"]["Enums"]["job_item_status"]
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          error?: string | null
+          id?: string
+          job_id?: string
+          payload?: Json
+          review_id?: string
+          status?: Database["public"]["Enums"]["job_item_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_item_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "job"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_item_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       member: {
         Row: {
           created_at: string
@@ -450,6 +545,82 @@ export type Database = {
           },
         ]
       }
+      record: {
+        Row: {
+          corpus_state: Database["public"]["Enums"]["corpus_state"]
+          created_at: string
+          doi_normalized: string | null
+          ft_decision: Database["public"]["Enums"]["ft_decision_state"] | null
+          ft_exclusion_reason_id: string | null
+          id: string
+          job_item_id: string | null
+          metadata: Json
+          raw: Json
+          review_id: string
+          search_id: string | null
+          source_format: Database["public"]["Enums"]["source_format"]
+          title_norm: string | null
+          ts_decision: Database["public"]["Enums"]["ts_decision_state"] | null
+          updated_at: string
+        }
+        Insert: {
+          corpus_state?: Database["public"]["Enums"]["corpus_state"]
+          created_at?: string
+          doi_normalized?: string | null
+          ft_decision?: Database["public"]["Enums"]["ft_decision_state"] | null
+          ft_exclusion_reason_id?: string | null
+          id?: string
+          job_item_id?: string | null
+          metadata: Json
+          raw: Json
+          review_id: string
+          search_id?: string | null
+          source_format: Database["public"]["Enums"]["source_format"]
+          title_norm?: string | null
+          ts_decision?: Database["public"]["Enums"]["ts_decision_state"] | null
+          updated_at?: string
+        }
+        Update: {
+          corpus_state?: Database["public"]["Enums"]["corpus_state"]
+          created_at?: string
+          doi_normalized?: string | null
+          ft_decision?: Database["public"]["Enums"]["ft_decision_state"] | null
+          ft_exclusion_reason_id?: string | null
+          id?: string
+          job_item_id?: string | null
+          metadata?: Json
+          raw?: Json
+          review_id?: string
+          search_id?: string | null
+          source_format?: Database["public"]["Enums"]["source_format"]
+          title_norm?: string | null
+          ts_decision?: Database["public"]["Enums"]["ts_decision_state"] | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "record_job_item_fk"
+            columns: ["job_item_id"]
+            isOneToOne: false
+            referencedRelation: "job_item"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "record_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "record_search_id_fkey"
+            columns: ["search_id"]
+            isOneToOne: false
+            referencedRelation: "search"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       review: {
         Row: {
           active_screening_started_at: string | null
@@ -485,6 +656,44 @@ export type Database = {
           },
         ]
       }
+      search: {
+        Row: {
+          created_at: string
+          database: string
+          hits: number
+          id: string
+          query_string: string
+          review_id: string
+          searched_on: string
+        }
+        Insert: {
+          created_at?: string
+          database: string
+          hits: number
+          id?: string
+          query_string: string
+          review_id: string
+          searched_on: string
+        }
+        Update: {
+          created_at?: string
+          database?: string
+          hits?: number
+          id?: string
+          query_string?: string
+          review_id?: string
+          searched_on?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -504,6 +713,32 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "protocol_amendment"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_import_job: {
+        Args: {
+          p_format: Database["public"]["Enums"]["source_format"]
+          p_items: Json
+          p_review_id: string
+          p_search: Json
+        }
+        Returns: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -531,6 +766,19 @@ export type Database = {
           api_key: string
           provider: Database["public"]["Enums"]["llm_provider"]
         }[]
+      }
+      insert_import_record: {
+        Args: {
+          p_doi_normalized: string
+          p_job_item_id: string
+          p_metadata: Json
+          p_raw: Json
+          p_review_id: string
+          p_search_id: string
+          p_source_format: Database["public"]["Enums"]["source_format"]
+          p_title_norm: string
+        }
+        Returns: string
       }
       is_review_member: { Args: { p_review_id: string }; Returns: boolean }
       lock_protocol: {
@@ -573,24 +821,47 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
     }
     Enums: {
       ai_target_kind: "eligibility" | "protocol_draft" | "screening"
       audit_actor_type: "human" | "ai" | "system"
+      corpus_state:
+        | "imported"
+        | "active"
+        | "duplicate_exact"
+        | "duplicate_fuzzy"
+        | "excluded_ts"
+        | "maybe_ts"
+        | "included_ts"
+        | "excluded_ft"
+        | "included_ft"
       criterion_kind: "inclusion" | "exclusion" | "search_term"
       criterion_origin: "human" | "ai"
+      ft_decision_state: "included" | "excluded"
+      job_item_status: "pending" | "done" | "failed"
+      job_status:
+        | "queued"
+        | "running"
+        | "completed"
+        | "completed_with_errors"
+        | "failed"
+      job_type: "import_parse" | "ai_screening_batch"
       llm_provider: "anthropic"
       member_role: "owner" | "reviewer" | "viewer"
       protocol_origin: "ai_draft" | "human"
       protocol_state: "draft" | "locked"
       question_framework: "spider" | "pico" | "peo" | "pcc" | "free"
       ratification_state: "pending" | "accepted" | "edited" | "rejected"
+      source_format: "ris" | "bibtex" | "csv"
       suggestion_state:
         | "pending"
         | "accepted"
         | "edited"
         | "rejected"
         | "inferred"
+      ts_decision_state: "included" | "excluded" | "maybe"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -723,14 +994,36 @@ export const Constants = {
     Enums: {
       ai_target_kind: ["eligibility", "protocol_draft", "screening"],
       audit_actor_type: ["human", "ai", "system"],
+      corpus_state: [
+        "imported",
+        "active",
+        "duplicate_exact",
+        "duplicate_fuzzy",
+        "excluded_ts",
+        "maybe_ts",
+        "included_ts",
+        "excluded_ft",
+        "included_ft",
+      ],
       criterion_kind: ["inclusion", "exclusion", "search_term"],
       criterion_origin: ["human", "ai"],
+      ft_decision_state: ["included", "excluded"],
+      job_item_status: ["pending", "done", "failed"],
+      job_status: [
+        "queued",
+        "running",
+        "completed",
+        "completed_with_errors",
+        "failed",
+      ],
+      job_type: ["import_parse", "ai_screening_batch"],
       llm_provider: ["anthropic"],
       member_role: ["owner", "reviewer", "viewer"],
       protocol_origin: ["ai_draft", "human"],
       protocol_state: ["draft", "locked"],
       question_framework: ["spider", "pico", "peo", "pcc", "free"],
       ratification_state: ["pending", "accepted", "edited", "rejected"],
+      source_format: ["ris", "bibtex", "csv"],
       suggestion_state: [
         "pending",
         "accepted",
@@ -738,6 +1031,7 @@ export const Constants = {
         "rejected",
         "inferred",
       ],
+      ts_decision_state: ["included", "excluded", "maybe"],
     },
   },
 } as const

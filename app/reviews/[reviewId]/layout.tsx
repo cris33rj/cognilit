@@ -34,6 +34,9 @@ export default async function ReviewLayout({
           <a href={`/reviews/${active.id}/protocol`} className="underline">
             Protocolo
           </a>
+          <a href={`/reviews/${active.id}/workbench`} className="underline">
+            Workbench
+          </a>
         </nav>
         <form action="/auth/signout" method="post" className="ml-auto">
           <button type="submit" className="text-sm underline">
