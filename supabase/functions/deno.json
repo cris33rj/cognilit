@@ -1,0 +1,7 @@
+{
+  "imports": {
+    "papaparse": "npm:papaparse@5",
+    "@retorquere/bibtex-parser": "npm:@retorquere/bibtex-parser@9",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2"
+  }
+}
