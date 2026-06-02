@@ -21,7 +21,10 @@ create table public.dedup_decision (
   is_reversed boolean not null default false,
   reversed_at timestamptz,
   actor dedup_actor not null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  constraint dedup_distinct_pair check (record_b_id is null or record_b_id <> record_a_id),
+  constraint dedup_reversed_consistency check (is_reversed = (reversed_at is not null)),
+  constraint dedup_similarity_range check (similarity is null or (similarity >= 0.0 and similarity <= 1.0))
 );
 create index dedup_review_idx on public.dedup_decision (review_id, created_at desc);
 -- Acelera o "par já decidido?" da fila fuzzy (apenas decisões vivas).

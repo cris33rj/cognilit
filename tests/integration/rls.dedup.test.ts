@@ -30,13 +30,25 @@ describe("RLS dedup_decision (SC-009)", () => {
       })
       .select("id")
       .single();
+    const { data: rec2 } = await svc
+      .from("record")
+      .insert({
+        review_id: reviewId,
+        source_format: "ris",
+        raw: {},
+        metadata: { title: "y", year: "2020" },
+        title_norm: "y",
+        corpus_state: "active",
+      })
+      .select("id")
+      .single();
     const { data: dd } = await svc
       .from("dedup_decision")
       .insert({
         review_id: reviewId,
         kind: "exact_auto",
         record_a_id: rec!.id,
-        record_b_id: rec!.id,
+        record_b_id: rec2!.id,
         outcome: "removed",
         actor: "system",
       })
