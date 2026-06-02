@@ -391,3 +391,30 @@ describe("ai_screening_batch — enqueue + worker (FR-024/033, SC-008)", () => {
 });
 
 export { seedActiveRecord };
+
+import { runScreeningWorkerWith } from "@/lib/screening/run";
+
+describe("runScreeningWorkerWith — fia o worker (D-F5.5)", () => {
+  it("processa todos os itens pendentes do job ai_screening_batch da Revisão", async () => {
+    const s = Date.now();
+    const owner = (await signUpUser(`run_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Run worker",
+    });
+    const reviewId = review.id;
+    await seedActiveRecord(reviewId, { title: "Estudo run", abstract: "r" });
+    const { data: job } = await owner.rpc("create_screening_job", {
+      p_review_id: reviewId,
+      p_record_ids: null,
+    });
+    const svc = serviceClient();
+    await runScreeningWorkerWith(svc, new MockLLMProvider(), reviewId, []);
+    const { count } = await svc
+      .from("job_item")
+      .select("id", { count: "exact", head: true })
+      .eq("job_id", job.id)
+      .eq("status", "done");
+    expect(count).toBe(1);
+  });
+});
