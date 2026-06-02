@@ -383,13 +383,14 @@ describe("decide_fuzzy (FR-020/021)", () => {
       p_review_id: r2.id,
     });
     const p = cand![0];
-    await o2.rpc("decide_fuzzy", {
+    const { error: errKd } = await o2.rpc("decide_fuzzy", {
       p_review_id: r2.id,
       p_record_a: p.record_a_id,
       p_record_b: p.record_b_id,
       p_outcome: "kept_distinct",
       p_similarity: p.similarity,
     });
+    expect(errKd).toBeNull();
     const svc = serviceClient();
     const { data: recA } = await svc
       .from("record")

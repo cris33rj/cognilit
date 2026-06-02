@@ -258,6 +258,7 @@ set search_path = public
 as $$
 declare
   v_id uuid;
+  v_before_b text;
 begin
   if not public.is_review_member(p_review_id) then
     raise exception 'not a member';
@@ -266,10 +267,22 @@ begin
     raise exception 'invalid fuzzy outcome';
   end if;
 
+  if not exists (select 1 from public.record where id = p_record_a and review_id = p_review_id) then
+    raise exception 'record_a does not belong to this review';
+  end if;
+  select corpus_state::text into v_before_b
+    from public.record where id = p_record_b and review_id = p_review_id;
+  if v_before_b is null then
+    raise exception 'record_b does not belong to this review';
+  end if;
+
   if p_outcome = 'merged' then
     update public.record
        set corpus_state = 'duplicate_fuzzy', updated_at = now()
      where id = p_record_b and review_id = p_review_id and corpus_state = 'active';
+    if not found then
+      raise exception 'record_b is not active (cannot merge)';
+    end if;
   end if;
 
   insert into public.dedup_decision (
@@ -285,7 +298,9 @@ begin
   )
   values (
     p_review_id, 'human', auth.uid(), 'dedup_fuzzy_decide', 'dedup_decision', v_id,
-    null,
+    case when p_outcome = 'merged'
+         then jsonb_build_object('record_b_corpus_state', v_before_b)
+         else null end,
     jsonb_build_object('outcome', p_outcome, 'record_a', p_record_a, 'record_b', p_record_b)
   );
 
