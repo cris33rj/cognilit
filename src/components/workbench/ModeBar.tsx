@@ -8,7 +8,7 @@ export type WorkbenchMode =
 
 const MODES: { key: WorkbenchMode; label: string; enabled: boolean }[] = [
   { key: "import", label: "Importar", enabled: true },
-  { key: "duplicates", label: "Duplicatas", enabled: false },
+  { key: "duplicates", label: "Duplicatas", enabled: true },
   { key: "title_abstract", label: "Título/Resumo", enabled: false },
   { key: "full_text", label: "Texto completo", enabled: false },
 ];
