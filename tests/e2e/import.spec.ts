@@ -22,11 +22,18 @@ test("importar RIS: preview, registrar busca, confirmar, identificados sobem", a
   await page.getByRole("link", { name: "Workbench" }).click();
   await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
 
-  // Invariante Princípio V: outros modos NÃO são links navegáveis.
-  await expect(page.getByRole("tab", { name: "Duplicatas" })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
+  // Invariante Princípio V: modos ainda não habilitados NÃO são links navegáveis.
+  // Duplicatas foi habilitado na Fatia 4 — agora é link navegável.
+  await expect(
+    page.getByRole("tab", { name: "Duplicatas" }),
+  ).not.toHaveAttribute("aria-disabled", "true");
+  // Título/Resumo e Texto completo permanecem desabilitados.
+  await expect(
+    page.getByRole("tab", { name: "Título/Resumo" }),
+  ).toHaveAttribute("aria-disabled", "true");
+  await expect(
+    page.getByRole("tab", { name: "Texto completo" }),
+  ).toHaveAttribute("aria-disabled", "true");
 
   // Upload da fixture RIS → preview client-side.
   await page.setInputFiles(
