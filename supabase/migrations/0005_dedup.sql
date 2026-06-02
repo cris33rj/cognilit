@@ -193,39 +193,47 @@ begin
     raise exception 'not a member';
   end if;
 
+  -- Pré-filtro index-backed: o operador % usa similarity() simétrica (R2) e o GIN
+  -- trgm index (record_title_trgm_idx). Casamos o limiar do % ao p_threshold.
+  perform set_config('pg_trgm.similarity_threshold', p_threshold::text, true);
+
   return query
-  with active as (
-    select
-      id,
-      title_norm,
-      metadata ->> 'year'  as yr,
-      metadata ->> 'title' as ttl
-    from public.record
-    where review_id = p_review_id
-      and corpus_state = 'active'
-      and coalesce(nullif(title_norm, ''), '') <> ''
-  )
   select
-    a.id, b.id,
-    similarity(a.title_norm, b.title_norm)::real,
-    a.ttl, b.ttl, a.yr, b.yr
-  from active a
-  join active b
-    on a.id < b.id
-   and a.yr is not distinct from b.yr
-   and similarity(a.title_norm, b.title_norm) >= p_threshold
-  where not exists (
-    select 1
-    from public.dedup_decision d
-    where d.review_id = p_review_id
-      and d.kind = 'fuzzy_human'
-      and d.is_reversed = false
-      and (
-        (d.record_a_id = a.id and d.record_b_id = b.id) or
-        (d.record_a_id = b.id and d.record_b_id = a.id)
-      )
-  )
-  order by similarity(a.title_norm, b.title_norm) desc;
+    a.id,
+    b.id,
+    sim.value,
+    a.metadata ->> 'title',
+    b.metadata ->> 'title',
+    a.metadata ->> 'year',
+    b.metadata ->> 'year'
+  from public.record a
+  cross join lateral (
+    select r.id, r.title_norm, r.metadata
+    from public.record r
+    where r.review_id = p_review_id
+      and r.corpus_state = 'active'
+      and r.id > a.id
+      and (r.metadata ->> 'year') is not distinct from (a.metadata ->> 'year')
+      and coalesce(nullif(r.title_norm, ''), '') <> ''
+      and r.title_norm % a.title_norm          -- GIN-index probe (symmetric similarity)
+  ) b
+  cross join lateral (select similarity(a.title_norm, b.title_norm)::real as value) sim
+  where a.review_id = p_review_id
+    and a.corpus_state = 'active'
+    and coalesce(nullif(a.title_norm, ''), '') <> ''
+    and sim.value >= p_threshold               -- recheck exato (autoritativo)
+    and not exists (
+      select 1
+      from public.dedup_decision d
+      where d.review_id = p_review_id
+        and d.kind = 'fuzzy_human'
+        and d.is_reversed = false
+        and (
+          (d.record_a_id = a.id and d.record_b_id = b.id) or
+          (d.record_a_id = b.id and d.record_b_id = a.id)
+        )
+    )
+  order by sim.value desc;
 end;
 $$;
 
