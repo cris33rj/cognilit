@@ -45,7 +45,7 @@ test("dedup: exatas auto-removidas, par fuzzy confirmável, contador sobe", asyn
   await page.getByRole("button", { name: /confirmar importação/i }).click();
 
   // 5. Aguardar o worker processar: contador de identificados deve subir.
-  // Corpus: 4 entradas, 1 exacta removida → 3 identificados (2 fuzzy + 1 sem duplicata).
+  // "Identificados (PRISMA)" conta TODOS os records (estado flip, não deleção) — dedup não baixa esse número; "Duplicados" é o contador separado.
   await expect(page.getByText(/Identificados \(PRISMA\):/)).toContainText(
     /[1-9]/,
     { timeout: 20_000 },

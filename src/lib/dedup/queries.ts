@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { DEDUP_FUZZY_HIGH } from "@/lib/dedup/config";
 
 export interface ExactRemoval {
   decisionId: string;
@@ -62,6 +63,7 @@ export async function listFuzzyCandidates(
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("list_fuzzy_candidates", {
     p_review_id: reviewId,
+    p_threshold: DEDUP_FUZZY_HIGH,
   });
   if (error) throw new Error(error.message);
   type Row = {
