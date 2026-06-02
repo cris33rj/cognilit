@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ExactRemoval, FuzzyCandidate } from "@/lib/dedup/queries";
 
@@ -24,6 +25,9 @@ export function DuplicatesPanel({
   onReverse,
 }: DuplicatesPanelProps) {
   const qc = useQueryClient();
+  const [acting, setActing] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
   const exact = useQuery({
     queryKey: ["dedup", "exact", reviewId],
     queryFn: () => loadExactRemovals(reviewId),
@@ -39,22 +43,47 @@ export function DuplicatesPanel({
     c: FuzzyCandidate,
     outcome: "merged" | "kept_distinct",
   ) {
-    await onDecide({
-      recordA: c.recordAId,
-      recordB: c.recordBId,
-      outcome,
-      similarity: c.similarity,
-    });
-    await refetchAll();
+    if (acting) return;
+    setActing(true);
+    setActionError(null);
+    try {
+      await onDecide({
+        recordA: c.recordAId,
+        recordB: c.recordBId,
+        outcome,
+        similarity: c.similarity,
+      });
+      await refetchAll();
+    } catch (e) {
+      setActionError(
+        e instanceof Error ? e.message : "Falha ao registrar a decisão.",
+      );
+    } finally {
+      setActing(false);
+    }
   }
 
   async function reverse(decisionId: string) {
-    await onReverse(decisionId);
-    await refetchAll();
+    if (acting) return;
+    setActing(true);
+    setActionError(null);
+    try {
+      await onReverse(decisionId);
+      await refetchAll();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Falha ao desfazer.");
+    } finally {
+      setActing(false);
+    }
   }
 
   return (
     <div className="flex flex-col gap-6">
+      {actionError && (
+        <p role="alert" className="text-sm text-red-600">
+          {actionError}
+        </p>
+      )}
       <section aria-labelledby="fuzzy-h">
         <h2 id="fuzzy-h" className="mb-2 text-sm font-semibold">
           Pares prováveis para confirmar
@@ -90,14 +119,16 @@ export function DuplicatesPanel({
                 <div className="mt-2 flex gap-2">
                   <button
                     type="button"
-                    className="rounded bg-black px-3 py-1 text-sm text-white"
+                    className="rounded bg-black px-3 py-1 text-sm text-white disabled:opacity-50"
+                    disabled={acting}
                     onClick={() => decide(c, "merged")}
                   >
                     Mesma (mesclar)
                   </button>
                   <button
                     type="button"
-                    className="rounded border px-3 py-1 text-sm"
+                    className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+                    disabled={acting}
                     onClick={() => decide(c, "kept_distinct")}
                   >
                     Distintas
@@ -130,7 +161,8 @@ export function DuplicatesPanel({
                 </span>
                 <button
                   type="button"
-                  className="rounded border px-2 py-1 text-xs"
+                  className="rounded border px-2 py-1 text-xs disabled:opacity-50"
+                  disabled={acting}
                   onClick={() => reverse(r.decisionId)}
                 >
                   Desfazer

@@ -11,31 +11,27 @@ function renderPanel(
     <QueryClientProvider client={qc}>
       <DuplicatesPanel
         reviewId="r1"
-        loadExactRemovals={vi
-          .fn()
-          .mockResolvedValue([
-            {
-              decisionId: "d1",
-              removedRecordId: "rb",
-              keptRecordId: "ra",
-              removedTitle: "Estudo X copia",
-              keptTitle: "Estudo X",
-              createdAt: "2026-06-01T00:00:00Z",
-            },
-          ])}
-        loadFuzzyCandidates={vi
-          .fn()
-          .mockResolvedValue([
-            {
-              recordAId: "a",
-              recordBId: "b",
-              similarity: 0.95,
-              titleA: "deep learning triage",
-              titleB: "deep learning triages",
-              yearA: "2023",
-              yearB: "2023",
-            },
-          ])}
+        loadExactRemovals={vi.fn().mockResolvedValue([
+          {
+            decisionId: "d1",
+            removedRecordId: "rb",
+            keptRecordId: "ra",
+            removedTitle: "Estudo X copia",
+            keptTitle: "Estudo X",
+            createdAt: "2026-06-01T00:00:00Z",
+          },
+        ])}
+        loadFuzzyCandidates={vi.fn().mockResolvedValue([
+          {
+            recordAId: "a",
+            recordBId: "b",
+            similarity: 0.95,
+            titleA: "deep learning triage",
+            titleB: "deep learning triages",
+            yearA: "2023",
+            yearB: "2023",
+          },
+        ])}
         onDecide={vi.fn().mockResolvedValue({ ok: true })}
         onReverse={vi.fn().mockResolvedValue({ ok: true })}
         {...over}
@@ -61,5 +57,14 @@ describe("DuplicatesPanel (US3)", () => {
     expect(
       screen.getByRole("button", { name: /desfazer/i }),
     ).toBeInTheDocument();
+  });
+
+  it("exibe erro quando a decisão falha", async () => {
+    const onDecide = vi.fn().mockRejectedValue(new Error("rpc falhou"));
+    renderPanel({ onDecide });
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const btn = await screen.findByRole("button", { name: /mesma/i });
+    await user.click(btn);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/rpc falhou/i);
   });
 });
