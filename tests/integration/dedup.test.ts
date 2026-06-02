@@ -311,4 +311,103 @@ describe("list_fuzzy_candidates (FR-020 / R2: >=0.92 + mesmo ano)", () => {
   });
 });
 
+describe("decide_fuzzy (FR-020/021)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`df_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Decidir fuzzy",
+    });
+    reviewId = review.id;
+    await seedRecordActive(
+      reviewId,
+      "a systematic review of machine learning in medical imaging",
+      "2023",
+    );
+    await seedRecordActive(
+      reviewId,
+      "a systematic review of machine learning in medical imagings",
+      "2023",
+    );
+  });
+
+  it("'mesma' (merged) marca record_b duplicate_fuzzy, some da fila, é reversível", async () => {
+    const { data: simRows } = await owner.rpc("list_fuzzy_candidates", {
+      p_review_id: reviewId,
+    });
+    const pair = simRows![0];
+    const { error } = await owner.rpc("decide_fuzzy", {
+      p_review_id: reviewId,
+      p_record_a: pair.record_a_id,
+      p_record_b: pair.record_b_id,
+      p_outcome: "merged",
+      p_similarity: pair.similarity,
+    });
+    expect(error).toBeNull();
+
+    const svc = serviceClient();
+    const { data: rec } = await svc
+      .from("record")
+      .select("corpus_state")
+      .eq("id", pair.record_b_id)
+      .single();
+    expect(rec!.corpus_state).toBe("duplicate_fuzzy");
+
+    const { data: after } = await owner.rpc("list_fuzzy_candidates", {
+      p_review_id: reviewId,
+    });
+    expect(after!.length).toBe(0);
+  });
+
+  it("'distintas' (kept_distinct) não muda estado mas remove o par da fila", async () => {
+    const s = Date.now();
+    const o2 = (await signUpUser(`df2_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { data: r2 } = await o2.rpc("create_review", {
+      p_title: "Distintas",
+    });
+    await seedRecordActive(
+      r2.id,
+      "systematic review of randomized controlled trials in medicine",
+      "2024",
+    );
+    await seedRecordActive(
+      r2.id,
+      "systematic review of randomized controlled trials in medicines",
+      "2024",
+    );
+    const { data: cand } = await o2.rpc("list_fuzzy_candidates", {
+      p_review_id: r2.id,
+    });
+    const p = cand![0];
+    await o2.rpc("decide_fuzzy", {
+      p_review_id: r2.id,
+      p_record_a: p.record_a_id,
+      p_record_b: p.record_b_id,
+      p_outcome: "kept_distinct",
+      p_similarity: p.similarity,
+    });
+    const svc = serviceClient();
+    const { data: recA } = await svc
+      .from("record")
+      .select("corpus_state")
+      .eq("id", p.record_a_id)
+      .single();
+    const { data: recB } = await svc
+      .from("record")
+      .select("corpus_state")
+      .eq("id", p.record_b_id)
+      .single();
+    expect(recA!.corpus_state).toBe("active");
+    expect(recB!.corpus_state).toBe("active");
+    const { data: after } = await o2.rpc("list_fuzzy_candidates", {
+      p_review_id: r2.id,
+    });
+    expect(after!.length).toBe(0);
+  });
+});
+
 export { seedRecord, seedRecordActive };

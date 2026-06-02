@@ -238,3 +238,59 @@ end;
 $$;
 
 grant execute on function public.list_fuzzy_candidates(uuid, real) to authenticated;
+
+-- ============================================================
+-- RPC: decide_fuzzy — decisão humana de um par fuzzy (FR-020), reversível (FR-021).
+-- 'merged'        ⇒ record_b vira duplicate_fuzzy (record_a sobrevive).
+-- 'kept_distinct' ⇒ nenhum estado muda; a decisão registrada tira o par da fila.
+-- ============================================================
+create or replace function public.decide_fuzzy(
+  p_review_id uuid,
+  p_record_a uuid,
+  p_record_b uuid,
+  p_outcome dedup_outcome,
+  p_similarity real
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_id uuid;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+  if p_outcome not in ('merged', 'kept_distinct') then
+    raise exception 'invalid fuzzy outcome';
+  end if;
+
+  if p_outcome = 'merged' then
+    update public.record
+       set corpus_state = 'duplicate_fuzzy', updated_at = now()
+     where id = p_record_b and review_id = p_review_id and corpus_state = 'active';
+  end if;
+
+  insert into public.dedup_decision (
+    review_id, kind, record_a_id, record_b_id, similarity, outcome, actor
+  )
+  values (
+    p_review_id, 'fuzzy_human', p_record_a, p_record_b, p_similarity, p_outcome, 'human'
+  )
+  returning id into v_id;
+
+  insert into public.audit_entry (
+    review_id, actor_type, actor_id, action, entity, entity_id, before, after
+  )
+  values (
+    p_review_id, 'human', auth.uid(), 'dedup_fuzzy_decide', 'dedup_decision', v_id,
+    null,
+    jsonb_build_object('outcome', p_outcome, 'record_a', p_record_a, 'record_b', p_record_b)
+  );
+
+  return v_id;
+end;
+$$;
+
+grant execute on function public.decide_fuzzy(uuid, uuid, uuid, dedup_outcome, real) to authenticated;
