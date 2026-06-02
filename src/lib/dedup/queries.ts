@@ -33,6 +33,7 @@ export async function listExactRemovals(
     .eq("review_id", reviewId)
     .eq("kind", "exact_auto")
     .eq("is_reversed", false)
+    .not("record_b_id", "is", null)
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
   type Row = {
@@ -43,6 +44,7 @@ export async function listExactRemovals(
     kept: { metadata: { title?: string } } | null;
     removed: { metadata: { title?: string } } | null;
   };
+  // Embedded-FK select widens the inferred type beyond Supabase's generics; cast via unknown.
   return ((data ?? []) as unknown as Row[]).map((r) => ({
     decisionId: r.id,
     removedRecordId: r.record_b_id ?? "",
