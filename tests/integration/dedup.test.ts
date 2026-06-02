@@ -263,4 +263,52 @@ describe("reverse_dedup (FR-026 / Q4)", () => {
   });
 });
 
+describe("list_fuzzy_candidates (FR-020 / R2: >=0.92 + mesmo ano)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`fz_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Fuzzy",
+    });
+    reviewId = review.id;
+    // Par fuzzy forte (títulos quase iguais, mesmo ano, SEM doi → não são exatas).
+    await seedRecordActive(
+      reviewId,
+      "machine learning for screening reviews",
+      "2022",
+    );
+    await seedRecordActive(
+      reviewId,
+      "machine learning for screening review",
+      "2022",
+    );
+    // Mesmo título-quase mas ANO diferente ⇒ não é par.
+    await seedRecordActive(
+      reviewId,
+      "machine learning for screening reviews",
+      "2010",
+    );
+    // Título totalmente distinto ⇒ não é par.
+    await seedRecordActive(
+      reviewId,
+      "qualitative synthesis of nursing",
+      "2022",
+    );
+  });
+
+  it("retorna só o par com similaridade >=0.92 e mesmo ano", async () => {
+    const { data, error } = await owner.rpc("list_fuzzy_candidates", {
+      p_review_id: reviewId,
+    });
+    expect(error).toBeNull();
+    expect(data!.length).toBe(1);
+    expect(data![0].similarity).toBeGreaterThanOrEqual(0.92);
+    expect(data![0].year_a).toBe("2022");
+    expect(data![0].year_b).toBe("2022");
+  });
+});
+
 export { seedRecord, seedRecordActive };

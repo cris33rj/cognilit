@@ -164,3 +164,69 @@ end;
 $$;
 
 grant execute on function public.reverse_dedup(uuid) to authenticated;
+
+-- ============================================================
+-- RPC: list_fuzzy_candidates — pares de alta similaridade p/ confirmação humana
+-- (FR-020). similarity(title_norm) >= limiar E mesmo ano, entre 'active',
+-- excluindo pares já decididos (fuzzy_human vivo). a.id < b.id evita duplicar par.
+-- ============================================================
+create or replace function public.list_fuzzy_candidates(
+  p_review_id uuid,
+  p_threshold real default 0.92
+)
+returns table (
+  record_a_id uuid,
+  record_b_id uuid,
+  similarity  real,
+  title_a text,
+  title_b text,
+  year_a  text,
+  year_b  text
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  return query
+  with active as (
+    select
+      id,
+      title_norm,
+      metadata ->> 'year'  as yr,
+      metadata ->> 'title' as ttl
+    from public.record
+    where review_id = p_review_id
+      and corpus_state = 'active'
+      and coalesce(nullif(title_norm, ''), '') <> ''
+  )
+  select
+    a.id, b.id,
+    word_similarity(a.title_norm, b.title_norm)::real,
+    a.ttl, b.ttl, a.yr, b.yr
+  from active a
+  join active b
+    on a.id < b.id
+   and a.yr is not distinct from b.yr
+   and word_similarity(a.title_norm, b.title_norm) >= p_threshold
+  where not exists (
+    select 1
+    from public.dedup_decision d
+    where d.review_id = p_review_id
+      and d.kind = 'fuzzy_human'
+      and d.is_reversed = false
+      and (
+        (d.record_a_id = a.id and d.record_b_id = b.id) or
+        (d.record_a_id = b.id and d.record_b_id = a.id)
+      )
+  )
+  order by word_similarity(a.title_norm, b.title_norm) desc;
+end;
+$$;
+
+grant execute on function public.list_fuzzy_candidates(uuid, real) to authenticated;
