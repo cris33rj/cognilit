@@ -308,6 +308,55 @@ describe("list_screening_queue (FR-028) + create_screening_job (FR-024)", () => 
   });
 });
 
+describe("list_screening_queue — decision_id column (FR-026)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let decidedRecId: string;
+  let undecidedRecId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`qd_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Fila decision_id",
+    });
+    reviewId = review.id;
+    decidedRecId = await seedActiveRecord(reviewId, {
+      title: "Decidido",
+      abstract: "abs",
+    });
+    undecidedRecId = await seedActiveRecord(reviewId, {
+      title: "Não decidido",
+      abstract: "abs2",
+    });
+    // Decide on one record
+    await owner.rpc("decide_screening", {
+      p_review_id: reviewId,
+      p_record_id: decidedRecId,
+      p_stage: "title_abstract",
+      p_decision: "include",
+    });
+  });
+
+  it("row com decisão tem decision_id não-nulo; row sem decisão tem decision_id nulo", async () => {
+    const { data, error } = await owner.rpc("list_screening_queue", {
+      p_review_id: reviewId,
+      p_stage: "title_abstract",
+    });
+    expect(error).toBeNull();
+    const decided = data!.find(
+      (r: { record_id: string }) => r.record_id === decidedRecId,
+    );
+    const undecided = data!.find(
+      (r: { record_id: string }) => r.record_id === undecidedRecId,
+    );
+    expect(decided).toBeDefined();
+    expect(decided!.decision_id).not.toBeNull();
+    expect(undecided).toBeDefined();
+    expect(undecided!.decision_id).toBeNull();
+  });
+});
+
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { enqueueScreeningJob } from "@/lib/screening/enqueue";
 import { processScreeningJob } from "@/lib/screening/worker";

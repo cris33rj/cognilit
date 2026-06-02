@@ -16,6 +16,7 @@ export interface QueueRowRaw {
   ai_confidence: number | null;
   ai_reason: string | null;
   ai_state: "pending" | "accepted" | "edited" | "rejected" | "inferred" | null;
+  decision_id: string | null;
 }
 
 export interface AiHint {
@@ -36,6 +37,7 @@ export interface QueueRow {
   ftDecision: QueueRowRaw["ft_decision"];
   ftExclusionReasonId: string | null;
   ai: AiHint | null;
+  decisionId: string | null;
 }
 
 export interface ExclusionReason {
@@ -64,6 +66,7 @@ export function mapQueueRow(r: QueueRowRaw): QueueRow {
             state: r.ai_state,
           }
         : null,
+    decisionId: r.decision_id,
   };
 }
 

@@ -36,6 +36,7 @@ const ROWS: QueueRow[] = [
     tsDecision: null,
     ftDecision: null,
     ftExclusionReasonId: null,
+    decisionId: "d1",
     ai: {
       suggestionId: "s1",
       recommendation: "include",
@@ -53,6 +54,7 @@ const ROWS: QueueRow[] = [
     tsDecision: null,
     ftDecision: null,
     ftExclusionReasonId: null,
+    decisionId: null,
     ai: null,
   },
 ];
@@ -127,5 +129,46 @@ describe("ScreeningQueue (US4)", () => {
       screen.getByRole("button", { name: /incluir selecionados/i }),
     );
     expect(onDecide).toHaveBeenCalledTimes(2);
+  });
+
+  it("Fix 1 — confirmar exclusão: botão chama onDecide com motivo (FR-025 mouse path)", async () => {
+    const onDecide = vi.fn().mockResolvedValue({ ok: true });
+    renderQueue({ stage: "full_text", onDecide });
+    await screen.findByText("Estudo Alpha");
+    // Pressionar 'e' abre o gate mas NÃO chama onDecide ainda
+    await userEvent.keyboard("e");
+    expect(onDecide).not.toHaveBeenCalled();
+    // O botão "Confirmar exclusão" deve estar presente
+    const confirmBtn = screen.getByRole("button", {
+      name: /confirmar exclus/i,
+    });
+    expect(confirmBtn).toBeInTheDocument();
+    // Sem motivo selecionado: botão desabilitado
+    expect(confirmBtn).toBeDisabled();
+    // Selecionar motivo
+    const select = screen.getByRole("combobox", { name: /motivo/i });
+    await userEvent.selectOptions(select, "x1");
+    // Agora o botão está habilitado
+    expect(confirmBtn).not.toBeDisabled();
+    // Clicar confirma a exclusão
+    await userEvent.click(confirmBtn);
+    expect(onDecide).toHaveBeenCalledTimes(1);
+    expect(onDecide).toHaveBeenCalledWith(
+      expect.objectContaining({
+        decision: "exclude",
+        exclusionReasonId: "x1",
+      }),
+    );
+  });
+
+  it("Fix 2d — botão Desfazer aparece quando row.decisionId é não-nulo (FR-026)", async () => {
+    const onReverse = vi.fn().mockResolvedValue({ ok: true });
+    renderQueue({ onReverse });
+    await screen.findByText("Estudo Alpha");
+    // r1 tem decisionId='d1' → deve mostrar Desfazer
+    const desfazers = screen.getAllByRole("button", { name: /desfazer/i });
+    expect(desfazers.length).toBeGreaterThanOrEqual(1);
+    await userEvent.click(desfazers[0]!);
+    expect(onReverse).toHaveBeenCalledWith("d1");
   });
 });

@@ -17,12 +17,14 @@ describe("mapQueueRow", () => {
       ai_confidence: 0.7,
       ai_reason: "razão",
       ai_state: "pending",
+      decision_id: "d1",
     });
     expect(row.recordId).toBe("r1");
     expect(row.ai?.recommendation).toBe("include");
     expect(row.ai?.confidence).toBe(0.7);
+    expect(row.decisionId).toBe("d1");
   });
-  it("ai = null quando não há sugestão", () => {
+  it("ai = null quando não há sugestão; decision_id null quando sem decisão", () => {
     const row = mapQueueRow({
       record_id: "r2",
       title: "T",
@@ -37,7 +39,9 @@ describe("mapQueueRow", () => {
       ai_confidence: null,
       ai_reason: null,
       ai_state: null,
+      decision_id: null,
     });
     expect(row.ai).toBeNull();
+    expect(row.decisionId).toBeNull();
   });
 });

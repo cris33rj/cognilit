@@ -1026,6 +1026,7 @@ export type Database = {
           ai_state: Database["public"]["Enums"]["suggestion_state"]
           ai_suggestion_id: string
           corpus_state: Database["public"]["Enums"]["corpus_state"]
+          decision_id: string
           ft_decision: Database["public"]["Enums"]["ft_decision_state"]
           ft_exclusion_reason_id: string
           record_id: string

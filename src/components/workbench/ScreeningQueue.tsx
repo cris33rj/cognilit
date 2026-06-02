@@ -35,6 +35,7 @@ export function ScreeningQueue({
   loadQueue,
   loadReasons,
   onDecide,
+  onReverse,
 }: ScreeningQueueProps) {
   const qc = useQueryClient();
   const [density, setDensity] = useState<Density>("comfortable");
@@ -113,6 +114,16 @@ export function ScreeningQueue({
       await qc.invalidateQueries({ queryKey: ["screening"] });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha na ação em lote.");
+    }
+  }
+
+  async function handleReverse(decisionId: string) {
+    setError(null);
+    try {
+      await onReverse(decisionId);
+      await qc.invalidateQueries({ queryKey: ["screening"] });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao desfazer a decisão.");
     }
   }
 
@@ -212,22 +223,35 @@ export function ScreeningQueue({
       {/* Seletor de motivo de exclusão — obrigatório no Texto completo (FR-025) */}
       {stage === "full_text" && pendingExclude && (
         <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm">
-          <label className="flex items-center gap-2">
-            <span>Motivo da exclusão</span>
-            <select
-              aria-label="Motivo da exclusão"
-              value={reasonId}
-              onChange={(e) => setReasonId(e.target.value)}
-              className="rounded border px-2 py-1"
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2">
+              <span>Motivo da exclusão</span>
+              <select
+                aria-label="Motivo da exclusão"
+                value={reasonId}
+                onChange={(e) => setReasonId(e.target.value)}
+                className="rounded border px-2 py-1"
+              >
+                <option value="">Selecione…</option>
+                {(reasons.data ?? []).map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              disabled={!reasonId}
+              onClick={() => {
+                const row = rows.find((r) => r.recordId === pendingExclude);
+                if (row && reasonId) void decide(row, "exclude");
+              }}
+              className="rounded bg-red-600 px-3 py-1 text-white disabled:opacity-40"
             >
-              <option value="">Selecione…</option>
-              {(reasons.data ?? []).map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              Confirmar exclusão
+            </button>
+          </div>
         </div>
       )}
 
@@ -247,17 +271,20 @@ export function ScreeningQueue({
           </p>
         ) : (
           <div
+            role="rowgroup"
             style={{ height: virtualizer.getTotalSize(), position: "relative" }}
           >
             {virtualizer.getVirtualItems().map((v) => {
               const row = rows[v.index];
               if (!row) return null;
               const focused = v.index === focusIdx;
+              const isSelected = selected.has(row.recordId);
               return (
                 <div
                   key={row.recordId}
                   role="row"
-                  aria-selected={focused}
+                  aria-selected={isSelected}
+                  aria-current={focused ? true : undefined}
                   onClick={() => setFocusIdx(v.index)}
                   className={`absolute left-0 top-0 flex w-full items-center gap-3 border-b px-3 ${
                     focused
@@ -274,7 +301,7 @@ export function ScreeningQueue({
                     type="checkbox"
                     role="gridcell"
                     aria-label={`Selecionar ${row.title}`}
-                    checked={selected.has(row.recordId)}
+                    checked={isSelected}
                     onChange={() => toggleSelect(row.recordId)}
                   />
 
@@ -307,6 +334,22 @@ export function ScreeningQueue({
                           : "excluir"}
                         {row.ai.reason ? ` — ${row.ai.reason}` : ""}
                       </span>
+                    </span>
+                  )}
+
+                  {/* Desfazer decisão — disponível quando há decisão não revertida (FR-026) */}
+                  {row.decisionId && (
+                    <span role="gridcell">
+                      <button
+                        type="button"
+                        className="rounded border px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleReverse(row.decisionId!);
+                        }}
+                      >
+                        Desfazer
+                      </button>
                     </span>
                   )}
                 </div>

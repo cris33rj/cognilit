@@ -267,7 +267,8 @@ returns table (
   ai_recommendation text,
   ai_confidence real,
   ai_reason text,
-  ai_state suggestion_state
+  ai_state suggestion_state,
+  decision_id uuid
 )
 language plpgsql
 stable
@@ -287,7 +288,8 @@ begin
     r.metadata ->> 'year',
     r.corpus_state, r.ts_decision, r.ft_decision, r.ft_exclusion_reason_id,
     s.id, s.output ->> 'recommendation', (s.output ->> 'confidence')::real,
-    s.output ->> 'reason', s.state
+    s.output ->> 'reason', s.state,
+    sd.id
   from public.record r
   left join lateral (
     select a.id, a.output, a.state
@@ -296,6 +298,13 @@ begin
     order by a.created_at desc
     limit 1
   ) s on true
+  left join lateral (
+    select sd.id
+    from public.screening_decision sd
+    where sd.record_id = r.id and sd.stage = p_stage and sd.is_reversed = false
+    order by sd.created_at desc
+    limit 1
+  ) sd on true
   where r.review_id = p_review_id
     and (
       (p_stage = 'title_abstract'
