@@ -308,4 +308,86 @@ describe("list_screening_queue (FR-028) + create_screening_job (FR-024)", () => 
   });
 });
 
+import { MockLLMProvider } from "@/lib/ai/llm/mock";
+import { enqueueScreeningJob } from "@/lib/screening/enqueue";
+import { processScreeningJob } from "@/lib/screening/worker";
+
+describe("ai_screening_batch — enqueue + worker (FR-024/033, SC-008)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let recId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`ai_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "IA lote",
+    });
+    reviewId = review.id;
+    recId = await seedActiveRecord(reviewId, {
+      title: "Estudo IA",
+      abstract: "resumo",
+    });
+  });
+
+  it("enqueue retorna estimativa de custo prévia (FR-033)", async () => {
+    const res = await enqueueScreeningJob({ supabase: owner }, reviewId, null);
+    expect(res.item_count).toBe(1);
+    expect(res.estimated_cost).not.toBeNull();
+    expect(res.estimated_cost!.tokensEstimated).toBeGreaterThan(0);
+  });
+
+  it("worker anexa sugestão de IA ao registro e grava ai_usage; NUNCA altera o estado (FR-024)", async () => {
+    const res = await enqueueScreeningJob({ supabase: owner }, reviewId, null);
+    const svc = serviceClient();
+    const before = await svc
+      .from("record")
+      .select("corpus_state")
+      .eq("id", recId)
+      .single();
+
+    await processScreeningJob(
+      {
+        supabase: svc,
+        provider: new MockLLMProvider(),
+        criteria: ["incluir tema"],
+      },
+      res.job_id,
+    );
+
+    const sug = await svc
+      .from("ai_suggestion")
+      .select("target_kind, target_id, output, provenance")
+      .eq("review_id", reviewId)
+      .eq("target_id", recId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+    expect(sug.data!.target_kind).toBe("screening");
+    expect(sug.data!.output).toHaveProperty("recommendation");
+    expect(sug.data!.provenance).toHaveProperty("model");
+
+    const usage = await svc
+      .from("ai_usage")
+      .select("phase")
+      .eq("review_id", reviewId)
+      .eq("phase", "screening");
+    expect(usage.data?.length ?? 0).toBeGreaterThan(0);
+
+    const after = await svc
+      .from("record")
+      .select("corpus_state")
+      .eq("id", recId)
+      .single();
+    expect(after.data!.corpus_state).toBe(before.data!.corpus_state); // IA não decide
+
+    const { data: job } = await svc
+      .from("job")
+      .select("status")
+      .eq("id", res.job_id)
+      .single();
+    expect(["completed", "completed_with_errors"]).toContain(job!.status);
+  });
+});
+
 export { seedActiveRecord };
