@@ -1543,3 +1543,4 @@ Apresente ao desenvolvedor: branch `build/001-marco1-nucleo-fluxo/4-deduplicacao
 **Consistência de tipos/nomes:** `dedup_decision(record_a_id=mantido, record_b_id=removido)`, enums `dedup_kind/outcome/actor`, RPCs `dedup_exact/reverse_dedup/list_fuzzy_candidates/decide_fuzzy`, queries `listExactRemovals/listFuzzyCandidates/countDuplicates`, actions `runExactDedup/decideFuzzy/reverseDedup/fetchExactRemovals/fetchFuzzyCandidates` — usados de forma idêntica em todas as tasks. ✔
 
 **Placeholders:** o único conteúdo deixado ao executor é o boilerplate de login/import do e2e (Task 11), explicitamente derivado de `import.spec.ts` existente — não pode ir com TODO ao commit final.
+        
