@@ -32,7 +32,8 @@ async function setupPerfUser(
   await page.getByRole("button", { name: "Criar Revisão" }).click();
   await expect(page).toHaveURL(/\/reviews\/[0-9a-f-]+$/, { timeout: 10_000 });
 
-  const reviewId = page.url().split("/reviews/")[1].split("/")[0];
+  const reviewId = page.url().split("/reviews/")[1]?.split("/")[0];
+  if (!reviewId) throw new Error("reviewId não encontrado na URL");
   return { reviewId };
 }
 
