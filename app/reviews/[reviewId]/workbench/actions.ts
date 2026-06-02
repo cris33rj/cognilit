@@ -8,6 +8,7 @@ import { processImportJob } from "@shared/jobs/worker";
 import { EnqueueValidationError } from "@shared/jobs/types";
 import { searchSchema } from "@/lib/search/schema";
 import type { SourceFormat } from "@shared/import/types";
+import { listExactRemovals, listFuzzyCandidates } from "@/lib/dedup/queries";
 
 async function requireMember(reviewId: string) {
   const supabase = await createClient();
@@ -117,4 +118,14 @@ export async function reverseDedup(reviewId: string, decisionId: string) {
   if (error) throw new Error(error.message);
   revalidatePath(`/reviews/${reviewId}/workbench`);
   return { ok: true as const };
+}
+
+export async function fetchExactRemovals(reviewId: string) {
+  await requireMember(reviewId);
+  return listExactRemovals(reviewId);
+}
+
+export async function fetchFuzzyCandidates(reviewId: string) {
+  await requireMember(reviewId);
+  return listFuzzyCandidates(reviewId);
 }

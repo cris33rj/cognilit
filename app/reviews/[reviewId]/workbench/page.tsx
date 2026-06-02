@@ -1,7 +1,15 @@
 import { ModeBar, type WorkbenchMode } from "@/components/workbench/ModeBar";
 import { ImportPanel } from "@/components/workbench/ImportPanel";
+import { DuplicatesPanel } from "@/components/workbench/DuplicatesPanel";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { countRecords } from "@/lib/jobs/queries";
+import { countDuplicates } from "@/lib/dedup/queries";
+import {
+  decideFuzzy,
+  reverseDedup,
+  fetchExactRemovals,
+  fetchFuzzyCandidates,
+} from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +33,8 @@ export default async function WorkbenchPage({
     ? (mode as WorkbenchMode)
     : "import";
   const identified = await countRecords(reviewId);
+  const duplicates =
+    active === "duplicates" ? await countDuplicates(reviewId) : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -33,11 +43,24 @@ export default async function WorkbenchPage({
         <span className="text-sm text-gray-600" aria-live="polite">
           Identificados (PRISMA): <strong>{identified}</strong>
         </span>
+        {duplicates !== null && (
+          <span className="text-sm text-gray-600" aria-live="polite">
+            Duplicados (PRISMA): <strong>{duplicates}</strong>
+          </span>
+        )}
       </div>
       <ModeBar reviewId={reviewId} active={active} />
       <QueryProvider>
         {active === "import" ? (
           <ImportPanel reviewId={reviewId} />
+        ) : active === "duplicates" ? (
+          <DuplicatesPanel
+            reviewId={reviewId}
+            loadExactRemovals={fetchExactRemovals}
+            loadFuzzyCandidates={fetchFuzzyCandidates}
+            onDecide={decideFuzzy.bind(null, reviewId)}
+            onReverse={reverseDedup.bind(null, reviewId)}
+          />
         ) : (
           <p className="text-sm text-gray-500">
             Este modo é habilitado em uma etapa seguinte do Marco.
