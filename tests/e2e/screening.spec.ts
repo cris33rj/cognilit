@@ -20,7 +20,8 @@ async function setupScreeningCorpus(page: Page): Promise<string> {
   await expect(page).toHaveURL(/\/reviews\/[0-9a-f-]+$/);
 
   // Extract reviewId from URL before navigating further.
-  const reviewId = page.url().split("/reviews/")[1].split("/")[0];
+  const reviewId = page.url().split("/reviews/")[1]?.split("/")[0];
+  if (!reviewId) throw new Error("reviewId não encontrado na URL");
 
   // Navigate to Workbench (import mode).
   await page.getByRole("link", { name: "Workbench" }).click();
