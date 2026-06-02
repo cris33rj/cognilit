@@ -91,3 +91,102 @@ alter table public.screening_decision enable row level security;
 create policy screening_select on public.screening_decision
   for select using (public.is_review_member(review_id));
 -- INSERT/UPDATE só via RPCs security definer abaixo (sem policy de write).
+
+-- ============================================================
+-- RPC: decide_screening — registra decisão humana + transiciona record + audita.
+-- Texto completo exige ts_decision=included (Q1) e motivo p/ exclude (FR-025).
+-- 'maybe' só em title_abstract. 1ª decisão da Revisão trava o protocolo (FR-010).
+-- Retorna o id da screening_decision criada. A IA nunca chama isto (FR-024).
+-- ============================================================
+create or replace function public.decide_screening(
+  p_review_id uuid,
+  p_record_id uuid,
+  p_stage screening_stage,
+  p_decision screening_choice,
+  p_exclusion_reason_id uuid default null,
+  p_ai_suggestion_id uuid default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_rec public.record;
+  v_id uuid;
+  v_new_state corpus_state;
+  v_first boolean;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  select * into v_rec from public.record
+   where id = p_record_id and review_id = p_review_id;
+  if not found then
+    raise exception 'record not found';
+  end if;
+
+  if p_stage = 'full_text' then
+    if v_rec.ts_decision is distinct from 'included' then
+      raise exception 'record must be included at title_abstract before full_text';
+    end if;
+    if p_decision = 'maybe' then
+      raise exception 'maybe is not allowed at full_text';
+    end if;
+    if p_decision = 'exclude' and p_exclusion_reason_id is null then
+      raise exception 'exclusion reason required at full_text';
+    end if;
+  end if;
+
+  select not exists (select 1 from public.screening_decision where review_id = p_review_id)
+    into v_first;
+
+  insert into public.screening_decision (
+    review_id, record_id, stage, decision, exclusion_reason_id, ai_suggestion_id
+  ) values (
+    p_review_id, p_record_id, p_stage, p_decision, p_exclusion_reason_id, p_ai_suggestion_id
+  ) returning id into v_id;
+
+  if p_stage = 'title_abstract' then
+    v_new_state := (case p_decision
+      when 'include' then 'included_ts' when 'exclude' then 'excluded_ts'
+      else 'maybe_ts' end)::corpus_state;
+    update public.record set
+      ts_decision = (case p_decision
+        when 'include' then 'included' when 'exclude' then 'excluded'
+        else 'maybe' end)::ts_decision_state,
+      corpus_state = v_new_state, updated_at = now()
+    where id = p_record_id;
+  else
+    v_new_state := (case p_decision
+      when 'include' then 'included_ft' else 'excluded_ft' end)::corpus_state;
+    update public.record set
+      ft_decision = (case p_decision
+        when 'include' then 'included' else 'excluded' end)::ft_decision_state,
+      ft_exclusion_reason_id = p_exclusion_reason_id,
+      corpus_state = v_new_state, updated_at = now()
+    where id = p_record_id;
+  end if;
+
+  -- FR-010: a 1ª decisão de triagem trava o protocolo (se existir).
+  if v_first and exists (select 1 from public.protocol where review_id = p_review_id) then
+    perform public.lock_protocol(p_review_id);
+  end if;
+
+  insert into public.audit_entry (
+    review_id, actor_type, actor_id, action, entity, entity_id, before, after
+  ) values (
+    p_review_id, 'human', auth.uid(), 'screening_decide', 'record', p_record_id,
+    jsonb_build_object('corpus_state', v_rec.corpus_state,
+                       'ts_decision', v_rec.ts_decision, 'ft_decision', v_rec.ft_decision),
+    jsonb_build_object('stage', p_stage, 'decision', p_decision,
+                       'corpus_state', v_new_state, 'decision_id', v_id)
+  );
+
+  return v_id;
+end;
+$$;
+grant execute on function
+  public.decide_screening(uuid, uuid, screening_stage, screening_choice, uuid, uuid)
+  to authenticated;
