@@ -69,7 +69,10 @@ export async function runImportWorker(reviewId: string) {
     await processImportJob({ supabase: admin }, j.id);
   }
   // Dedup exato automático ao concluir a importação (FR-018 / D-F4.3). Idempotente.
-  await supabase.rpc("dedup_exact", { p_review_id: reviewId });
+  const { error: dedupError } = await supabase.rpc("dedup_exact", {
+    p_review_id: reviewId,
+  });
+  if (dedupError) throw new Error(dedupError.message);
   revalidatePath(`/reviews/${reviewId}/workbench`);
   return { ok: true as const };
 }
