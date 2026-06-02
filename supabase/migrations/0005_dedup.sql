@@ -207,13 +207,13 @@ begin
   )
   select
     a.id, b.id,
-    word_similarity(a.title_norm, b.title_norm)::real,
+    similarity(a.title_norm, b.title_norm)::real,
     a.ttl, b.ttl, a.yr, b.yr
   from active a
   join active b
     on a.id < b.id
    and a.yr is not distinct from b.yr
-   and word_similarity(a.title_norm, b.title_norm) >= p_threshold
+   and similarity(a.title_norm, b.title_norm) >= p_threshold
   where not exists (
     select 1
     from public.dedup_decision d
@@ -225,7 +225,7 @@ begin
         (d.record_a_id = b.id and d.record_b_id = a.id)
       )
   )
-  order by word_similarity(a.title_norm, b.title_norm) desc;
+  order by similarity(a.title_norm, b.title_norm) desc;
 end;
 $$;
 

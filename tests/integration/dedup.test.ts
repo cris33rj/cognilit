@@ -274,27 +274,27 @@ describe("list_fuzzy_candidates (FR-020 / R2: >=0.92 + mesmo ano)", () => {
       p_title: "Fuzzy",
     });
     reviewId = review.id;
-    // Par fuzzy forte (títulos quase iguais, mesmo ano, SEM doi → não são exatas).
+    // Par fuzzy forte: similarity()=0.960526, mesmo ano, SEM doi → não são exatas.
     await seedRecordActive(
       reviewId,
-      "machine learning for screening reviews",
+      "a systematic review of machine learning methods for medical image segmentation",
       "2022",
     );
     await seedRecordActive(
       reviewId,
-      "machine learning for screening review",
+      "a systematic review of machine learning methods for medical image segmentations",
       "2022",
     );
-    // Mesmo título-quase mas ANO diferente ⇒ não é par.
+    // Mesmo título-quase mas ANO diferente ⇒ não é par (filtro de ano exclui).
     await seedRecordActive(
       reviewId,
-      "machine learning for screening reviews",
+      "a systematic review of machine learning methods for medical image segmentation",
       "2010",
     );
-    // Título totalmente distinto ⇒ não é par.
+    // Título totalmente distinto ⇒ não é par (similarity ~0.12).
     await seedRecordActive(
       reviewId,
-      "qualitative synthesis of nursing",
+      "qualitative synthesis of nursing interventions",
       "2022",
     );
   });
