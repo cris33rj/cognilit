@@ -37,3 +37,76 @@ alter table public.dedup_decision enable row level security;
 create policy dedup_select on public.dedup_decision
   for select using (public.is_review_member(review_id));
 -- INSERT/UPDATE de dedup_decision só via RPCs security definer (próximas tasks); sem policy de write.
+
+-- ============================================================
+-- RPC: dedup_exact — remove duplicatas exatas (FR-018), reversível (FR-019).
+-- Idempotente: opera só sobre 'active'; promove 'imported'→'active' primeiro.
+-- Chave: doi_normalized; na ausência, title_norm + metadata->>'year' (R2).
+-- Sobrevivente = mais antigo (created_at, id). Retorna nº de removidos nesta execução.
+-- ============================================================
+create or replace function public.dedup_exact(p_review_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_removed int := 0;
+  r record;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  -- Registros importados entram no corpus como 'active'.
+  update public.record
+     set corpus_state = 'active', updated_at = now()
+   where review_id = p_review_id and corpus_state = 'imported';
+
+  for r in
+    with keyed as (
+      select
+        id, created_at,
+        case
+          when coalesce(nullif(doi_normalized, ''), '') <> '' then 'doi:' || doi_normalized
+          when coalesce(nullif(title_norm, ''), '') <> ''
+            then 'tt:' || title_norm || '|' || coalesce(metadata ->> 'year', '')
+          else null
+        end as dkey
+      from public.record
+      where review_id = p_review_id and corpus_state = 'active'
+    ),
+    ranked as (
+      select
+        id, dkey,
+        first_value(id) over (partition by dkey order by created_at, id) as keep_id,
+        row_number()  over (partition by dkey order by created_at, id) as rn
+      from keyed
+      where dkey is not null
+    )
+    select id, keep_id from ranked where rn > 1
+  loop
+    update public.record
+       set corpus_state = 'duplicate_exact', updated_at = now()
+     where id = r.id;
+
+    insert into public.dedup_decision (review_id, kind, record_a_id, record_b_id, outcome, actor)
+    values (p_review_id, 'exact_auto', r.keep_id, r.id, 'removed', 'system');
+
+    insert into public.audit_entry (
+      review_id, actor_type, actor_id, action, entity, entity_id, before, after
+    )
+    values (
+      p_review_id, 'system', null, 'dedup_exact_remove', 'record', r.id,
+      jsonb_build_object('corpus_state', 'active'),
+      jsonb_build_object('corpus_state', 'duplicate_exact', 'kept', r.keep_id)
+    );
+
+    v_removed := v_removed + 1;
+  end loop;
+
+  return v_removed;
+end;
+$$;
+
+grant execute on function public.dedup_exact(uuid) to authenticated;
