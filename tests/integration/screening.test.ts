@@ -198,4 +198,66 @@ describe("decide_screening — 1ª decisão trava o protocolo (FR-010/Q5)", () =
   });
 });
 
+describe("reverse_screening (FR-026 / Q4)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let recId: string;
+  let decisionId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`rs_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Reverter triagem",
+    });
+    reviewId = review.id;
+    recId = await seedActiveRecord(reviewId, { title: "Para reverter" });
+    const { data: id } = await owner.rpc("decide_screening", {
+      p_review_id: reviewId,
+      p_record_id: recId,
+      p_stage: "title_abstract",
+      p_decision: "exclude",
+    });
+    decisionId = id as string;
+  });
+
+  it("desfaz decisão de T/R: record volta a active, decisão marcada, nova auditoria", async () => {
+    const { error } = await owner.rpc("reverse_screening", {
+      p_decision_id: decisionId,
+    });
+    expect(error).toBeNull();
+
+    const svc = serviceClient();
+    const { data: rec } = await svc
+      .from("record")
+      .select("corpus_state, ts_decision")
+      .eq("id", recId)
+      .single();
+    expect(rec!.corpus_state).toBe("active");
+    expect(rec!.ts_decision).toBeNull();
+
+    const { data: dec } = await svc
+      .from("screening_decision")
+      .select("is_reversed, reversed_at")
+      .eq("id", decisionId)
+      .single();
+    expect(dec!.is_reversed).toBe(true);
+    expect(dec!.reversed_at).not.toBeNull();
+
+    const { count } = await svc
+      .from("audit_entry")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId)
+      .eq("action", "screening_reverse");
+    expect(count).toBe(1);
+  });
+
+  it("reverter duas vezes é rejeitado", async () => {
+    const { error } = await owner.rpc("reverse_screening", {
+      p_decision_id: decisionId,
+    });
+    expect(error).not.toBeNull();
+  });
+});
+
 export { seedActiveRecord };

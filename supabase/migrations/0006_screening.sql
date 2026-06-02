@@ -190,3 +190,57 @@ $$;
 grant execute on function
   public.decide_screening(uuid, uuid, screening_stage, screening_choice, uuid, uuid)
   to authenticated;
+
+-- ============================================================
+-- RPC: reverse_screening — desfaz uma decisão por item, a qualquer momento (Q4).
+-- Restaura o estado anterior da etapa (T/R → active; Texto completo → included_ts),
+-- marca is_reversed, NÃO apaga a decisão, e escreve NOVA audit_entry (FR-026).
+-- ============================================================
+create or replace function public.reverse_screening(p_decision_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  d public.screening_decision;
+  v_rec public.record;
+begin
+  select * into d from public.screening_decision where id = p_decision_id;
+  if d.id is null then
+    raise exception 'decision not found';
+  end if;
+  if not public.is_review_member(d.review_id) then
+    raise exception 'not a member';
+  end if;
+  if d.is_reversed then
+    raise exception 'decision already reversed';
+  end if;
+
+  select * into v_rec from public.record where id = d.record_id;
+
+  if d.stage = 'title_abstract' then
+    update public.record
+       set ts_decision = null, corpus_state = 'active', updated_at = now()
+     where id = d.record_id;
+  else
+    update public.record
+       set ft_decision = null, ft_exclusion_reason_id = null,
+           corpus_state = 'included_ts', updated_at = now()
+     where id = d.record_id;
+  end if;
+
+  update public.screening_decision
+     set is_reversed = true, reversed_at = now()
+   where id = d.id;
+
+  insert into public.audit_entry (
+    review_id, actor_type, actor_id, action, entity, entity_id, before, after
+  ) values (
+    d.review_id, 'human', auth.uid(), 'screening_reverse', 'screening_decision', d.id,
+    jsonb_build_object('corpus_state', v_rec.corpus_state),
+    jsonb_build_object('is_reversed', true, 'restored_record', d.record_id)
+  );
+end;
+$$;
+grant execute on function public.reverse_screening(uuid) to authenticated;
