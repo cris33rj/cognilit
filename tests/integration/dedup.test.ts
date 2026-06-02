@@ -191,4 +191,76 @@ describe("dedup_exact — fallback title_norm+year (sem DOI)", () => {
   });
 });
 
+describe("reverse_dedup (FR-026 / Q4)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let dupId: string;
+  let decisionId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`rv_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Reverter",
+    });
+    reviewId = review.id;
+    await seedRecord(reviewId, {
+      title: "Estudo A",
+      year: "2021",
+      doi: "10.9/dup",
+      createdAt: "2021-01-01T00:00:00Z",
+    });
+    dupId = await seedRecord(reviewId, {
+      title: "Estudo A dup",
+      year: "2021",
+      doi: "10.9/dup",
+      createdAt: "2021-02-01T00:00:00Z",
+    });
+    await owner.rpc("dedup_exact", { p_review_id: reviewId });
+    const { data: dec } = await serviceClient()
+      .from("dedup_decision")
+      .select("id")
+      .eq("record_b_id", dupId)
+      .single();
+    decisionId = dec!.id;
+  });
+
+  it("desfaz a remoção: record volta a active, decisão marcada is_reversed, nova auditoria criada", async () => {
+    const { error } = await owner.rpc("reverse_dedup", {
+      p_decision_id: decisionId,
+    });
+    expect(error).toBeNull();
+
+    const svc = serviceClient();
+    const { data: rec } = await svc
+      .from("record")
+      .select("corpus_state")
+      .eq("id", dupId)
+      .single();
+    expect(rec!.corpus_state).toBe("active");
+
+    const { data: dec } = await svc
+      .from("dedup_decision")
+      .select("is_reversed, reversed_at")
+      .eq("id", decisionId)
+      .single();
+    expect(dec!.is_reversed).toBe(true);
+    expect(dec!.reversed_at).not.toBeNull();
+
+    const { count } = await svc
+      .from("audit_entry")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId)
+      .eq("action", "dedup_reverse");
+    expect(count).toBe(1);
+  });
+
+  it("reverter duas vezes é rejeitado (decisão já revertida)", async () => {
+    const { error } = await owner.rpc("reverse_dedup", {
+      p_decision_id: decisionId,
+    });
+    expect(error).not.toBeNull();
+  });
+});
+
 export { seedRecord, seedRecordActive };

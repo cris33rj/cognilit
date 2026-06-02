@@ -113,3 +113,52 @@ end;
 $$;
 
 grant execute on function public.dedup_exact(uuid) to authenticated;
+
+-- ============================================================
+-- RPC: reverse_dedup — desfaz uma decisão (exata ou fuzzy), por item, a qualquer
+-- momento (Q4). Restaura record_b para 'active', marca is_reversed, NÃO apaga a
+-- decisão e escreve NOVA audit_entry (FR-019/021/026).
+-- ============================================================
+create or replace function public.reverse_dedup(p_decision_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  d public.dedup_decision;
+begin
+  select * into d from public.dedup_decision where id = p_decision_id;
+  if d.id is null then
+    raise exception 'decision not found';
+  end if;
+  if not public.is_review_member(d.review_id) then
+    raise exception 'not a member';
+  end if;
+  if d.is_reversed then
+    raise exception 'decision already reversed';
+  end if;
+
+  if d.outcome in ('removed', 'merged') and d.record_b_id is not null then
+    update public.record
+       set corpus_state = 'active', updated_at = now()
+     where id = d.record_b_id
+       and corpus_state in ('duplicate_exact', 'duplicate_fuzzy');
+  end if;
+
+  update public.dedup_decision
+     set is_reversed = true, reversed_at = now()
+   where id = d.id;
+
+  insert into public.audit_entry (
+    review_id, actor_type, actor_id, action, entity, entity_id, before, after
+  )
+  values (
+    d.review_id, 'human', auth.uid(), 'dedup_reverse', 'dedup_decision', d.id,
+    jsonb_build_object('is_reversed', false),
+    jsonb_build_object('is_reversed', true, 'restored_record', d.record_b_id)
+  );
+end;
+$$;
+
+grant execute on function public.reverse_dedup(uuid) to authenticated;
