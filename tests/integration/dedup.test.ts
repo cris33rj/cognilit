@@ -127,4 +127,68 @@ describe("dedup_exact (FR-018/019)", () => {
   });
 });
 
+describe("dedup_exact — fallback title_norm+year (sem DOI)", () => {
+  it("remove duplicata pela chave title_norm+year quando não há DOI", async () => {
+    const s = Date.now();
+    const { client: owner2 } = await signUpUser(
+      `dx_nodoi_${s}@example.com`,
+      "senha-teste-123",
+    );
+    const { data: review } = await owner2.rpc("create_review", {
+      p_title: "Sem DOI Review",
+    });
+    const rid = review.id;
+
+    // Dois records com mesmo título e ano, sem DOI — deveriam ser colapsados.
+    const keepId = await seedRecord(rid, {
+      title: "Sem DOI estudo",
+      year: "2018",
+      createdAt: "2018-01-01T00:00:00Z",
+    });
+    const dupId = await seedRecord(rid, {
+      title: "Sem DOI estudo",
+      year: "2018",
+      createdAt: "2018-03-01T00:00:00Z",
+    });
+    // Terceiro record com título diferente — não deve ser removido.
+    await seedRecord(rid, {
+      title: "Totalmente diferente",
+      year: "2018",
+      createdAt: "2018-02-01T00:00:00Z",
+    });
+
+    const { data: removed, error } = await owner2.rpc("dedup_exact", {
+      p_review_id: rid,
+    });
+    expect(error).toBeNull();
+    expect(removed).toBe(1);
+
+    const svc = serviceClient();
+    const { data: keepRec } = await svc
+      .from("record")
+      .select("corpus_state")
+      .eq("id", keepId)
+      .single();
+    const { data: dupRec } = await svc
+      .from("record")
+      .select("corpus_state")
+      .eq("id", dupId)
+      .single();
+    expect(keepRec!.corpus_state).toBe("active");
+    expect(dupRec!.corpus_state).toBe("duplicate_exact");
+
+    const { data: dec } = await svc
+      .from("dedup_decision")
+      .select("kind, outcome, record_a_id, record_b_id")
+      .eq("review_id", rid)
+      .eq("record_b_id", dupId)
+      .single();
+    expect(dec).toMatchObject({
+      kind: "exact_auto",
+      outcome: "removed",
+      record_a_id: keepId,
+    });
+  });
+});
+
 export { seedRecord, seedRecordActive };

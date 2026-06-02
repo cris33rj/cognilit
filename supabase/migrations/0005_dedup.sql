@@ -43,6 +43,9 @@ create policy dedup_select on public.dedup_decision
 -- Idempotente: opera só sobre 'active'; promove 'imported'→'active' primeiro.
 -- Chave: doi_normalized; na ausência, title_norm + metadata->>'year' (R2).
 -- Sobrevivente = mais antigo (created_at, id). Retorna nº de removidos nesta execução.
+-- Pré-condição: chamado após a importação concluir (runImportWorker). Promove TODOS
+-- os records 'imported' da Revisão para 'active' — esse é o comportamento desejado:
+-- um record só existe se seu item foi inserido com sucesso (worker, Fatia 3).
 -- ============================================================
 create or replace function public.dedup_exact(p_review_id uuid)
 returns integer
