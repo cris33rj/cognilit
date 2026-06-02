@@ -128,8 +128,8 @@ as $$
 declare
   d public.dedup_decision;
 begin
-  select * into d from public.dedup_decision where id = p_decision_id;
-  if d.id is null then
+  select * into d from public.dedup_decision where id = p_decision_id for update;
+  if not found then
     raise exception 'decision not found';
   end if;
   if not public.is_review_member(d.review_id) then
@@ -142,6 +142,8 @@ begin
   if d.outcome in ('removed', 'merged') and d.record_b_id is not null then
     update public.record
        set corpus_state = 'active', updated_at = now()
+    -- Restaura só se ainda for duplicata: se o record já foi movido a outro estado
+    -- por operação posterior, não o tocamos (a decisão é marcada revertida de todo modo).
      where id = d.record_b_id
        and corpus_state in ('duplicate_exact', 'duplicate_fuzzy');
   end if;
