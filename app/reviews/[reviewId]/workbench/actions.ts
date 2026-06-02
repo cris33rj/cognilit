@@ -57,7 +57,7 @@ export async function enqueueImport(
  * Revisão da qual o chamador é membro.
  */
 export async function runImportWorker(reviewId: string) {
-  await requireMember(reviewId);
+  const { supabase } = await requireMember(reviewId);
   const admin = createAdminClient();
   const { data: jobs } = await admin
     .from("job")
@@ -68,6 +68,50 @@ export async function runImportWorker(reviewId: string) {
   for (const j of (jobs ?? []) as Array<{ id: string }>) {
     await processImportJob({ supabase: admin }, j.id);
   }
+  // Dedup exato automático ao concluir a importação (FR-018 / D-F4.3). Idempotente.
+  await supabase.rpc("dedup_exact", { p_review_id: reviewId });
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
+}
+
+export async function runExactDedup(reviewId: string) {
+  const { supabase } = await requireMember(reviewId);
+  const { data, error } = await supabase.rpc("dedup_exact", {
+    p_review_id: reviewId,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const, removed: data ?? 0 };
+}
+
+export async function decideFuzzy(
+  reviewId: string,
+  input: {
+    recordA: string;
+    recordB: string;
+    outcome: "merged" | "kept_distinct";
+    similarity: number;
+  },
+) {
+  const { supabase } = await requireMember(reviewId);
+  const { error } = await supabase.rpc("decide_fuzzy", {
+    p_review_id: reviewId,
+    p_record_a: input.recordA,
+    p_record_b: input.recordB,
+    p_outcome: input.outcome,
+    p_similarity: input.similarity,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
+}
+
+export async function reverseDedup(reviewId: string, decisionId: string) {
+  const { supabase } = await requireMember(reviewId);
+  const { error } = await supabase.rpc("reverse_dedup", {
+    p_decision_id: decisionId,
+  });
+  if (error) throw new Error(error.message);
   revalidatePath(`/reviews/${reviewId}/workbench`);
   return { ok: true as const };
 }

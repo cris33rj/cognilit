@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { signUpUser, serviceClient } from "./helpers/supabase";
+import { enqueueImportJob } from "@shared/jobs/enqueue";
+import { processImportJob } from "@shared/jobs/worker";
 
 // Insere um record diretamente (service role) já no estado dado.
 async function seedRecord(
@@ -408,6 +410,49 @@ describe("decide_fuzzy (FR-020/021)", () => {
       p_review_id: r2.id,
     });
     expect(after!.length).toBe(0);
+  });
+});
+
+describe("dedup_exact dispara após a importação concluir (D-F4.3)", () => {
+  it("worker insere records; dedup_exact remove a exata e survivors ficam active", async () => {
+    const s = Date.now();
+    const owner = (await signUpUser(`auto_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Auto dedup",
+    });
+    const reviewId = review.id;
+    const ris = [
+      "TY  - JOUR",
+      "TI  - Estudo X",
+      "PY  - 2020",
+      "DO  - 10.5/same",
+      "ER  - ",
+      "TY  - JOUR",
+      "TI  - Estudo X copia",
+      "PY  - 2020",
+      "DO  - 10.5/same",
+      "ER  - ",
+    ].join("\n");
+    const res = await enqueueImportJob({ supabase: owner }, reviewId, {
+      format: "ris",
+      content: ris,
+      search: {
+        queryString: "x",
+        database: "ERIC",
+        searchedOn: "2026-05-30",
+        hits: 2,
+      },
+    });
+    await processImportJob({ supabase: serviceClient() }, res.job_id);
+    const removed = await owner.rpc("dedup_exact", { p_review_id: reviewId });
+    expect(removed.data).toBe(1);
+    const { count: active } = await owner
+      .from("record")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId)
+      .eq("corpus_state", "active");
+    expect(active).toBe(1);
   });
 });
 
