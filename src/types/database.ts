@@ -201,6 +201,70 @@ export type Database = {
           },
         ]
       }
+      dedup_decision: {
+        Row: {
+          actor: Database["public"]["Enums"]["dedup_actor"]
+          created_at: string
+          id: string
+          is_reversed: boolean
+          kind: Database["public"]["Enums"]["dedup_kind"]
+          outcome: Database["public"]["Enums"]["dedup_outcome"]
+          record_a_id: string
+          record_b_id: string | null
+          reversed_at: string | null
+          review_id: string
+          similarity: number | null
+        }
+        Insert: {
+          actor: Database["public"]["Enums"]["dedup_actor"]
+          created_at?: string
+          id?: string
+          is_reversed?: boolean
+          kind: Database["public"]["Enums"]["dedup_kind"]
+          outcome: Database["public"]["Enums"]["dedup_outcome"]
+          record_a_id: string
+          record_b_id?: string | null
+          reversed_at?: string | null
+          review_id: string
+          similarity?: number | null
+        }
+        Update: {
+          actor?: Database["public"]["Enums"]["dedup_actor"]
+          created_at?: string
+          id?: string
+          is_reversed?: boolean
+          kind?: Database["public"]["Enums"]["dedup_kind"]
+          outcome?: Database["public"]["Enums"]["dedup_outcome"]
+          record_a_id?: string
+          record_b_id?: string | null
+          reversed_at?: string | null
+          review_id?: string
+          similarity?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dedup_decision_record_a_id_fkey"
+            columns: ["record_a_id"]
+            isOneToOne: false
+            referencedRelation: "record"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dedup_decision_record_b_id_fkey"
+            columns: ["record_b_id"]
+            isOneToOne: false
+            referencedRelation: "record"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dedup_decision_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       eligibility_criterion: {
         Row: {
           ai_suggestion_id: string | null
@@ -839,6 +903,9 @@ export type Database = {
         | "included_ft"
       criterion_kind: "inclusion" | "exclusion" | "search_term"
       criterion_origin: "human" | "ai"
+      dedup_actor: "system" | "human"
+      dedup_kind: "exact_auto" | "fuzzy_human"
+      dedup_outcome: "removed" | "merged" | "kept_distinct"
       ft_decision_state: "included" | "excluded"
       job_item_status: "pending" | "done" | "failed"
       job_status:
@@ -1007,6 +1074,9 @@ export const Constants = {
       ],
       criterion_kind: ["inclusion", "exclusion", "search_term"],
       criterion_origin: ["human", "ai"],
+      dedup_actor: ["system", "human"],
+      dedup_kind: ["exact_auto", "fuzzy_human"],
+      dedup_outcome: ["removed", "merged", "kept_distinct"],
       ft_decision_state: ["included", "excluded"],
       job_item_status: ["pending", "done", "failed"],
       job_status: [
