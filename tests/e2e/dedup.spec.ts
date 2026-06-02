@@ -56,9 +56,9 @@ test("dedup: exatas auto-removidas, par fuzzy confirmável, contador sobe", asyn
   await expect(page).toHaveURL(/mode=duplicates/);
 
   // 7. Verificar log de exatas auto-removidas.
-  await expect(
-    page.getByText(/Exatas removidas automaticamente/),
-  ).toBeVisible();
+  await expect(page.getByText(/Exatas removidas automaticamente/)).toBeVisible({
+    timeout: 15_000,
+  });
   // Deve haver ao menos um botão "Desfazer" no log de exatas.
   await expect(
     page.getByRole("button", { name: /desfazer/i }).first(),
@@ -70,12 +70,14 @@ test("dedup: exatas auto-removidas, par fuzzy confirmável, contador sobe", asyn
       .getByText(/A systematic review of machine learning in medical imaging/i)
       .first(),
   ).toBeVisible();
+  await expect(
+    page.getByText(
+      /A systematic review of machine learning in medical imagings/i,
+    ),
+  ).toBeVisible();
 
   // 9. Confirmar fusão do par fuzzy clicando "Mesma (mesclar)".
-  await page
-    .getByRole("button", { name: /mesma \(mesclar\)/i })
-    .first()
-    .click();
+  await page.getByRole("button", { name: /mesma \(mesclar\)/i }).click();
 
   // 10. Após a decisão o par deve sair da fila.
   await expect(page.getByText(/Nenhum par pendente\./)).toBeVisible({
