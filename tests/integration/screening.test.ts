@@ -260,4 +260,52 @@ describe("reverse_screening (FR-026 / Q4)", () => {
   });
 });
 
+describe("list_screening_queue (FR-028) + create_screening_job (FR-024)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`q_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Fila",
+    });
+    reviewId = review.id;
+    await seedActiveRecord(reviewId, {
+      title: "Estudo A",
+      abstract: "resumo A",
+    });
+    await seedActiveRecord(reviewId, {
+      title: "Estudo B",
+      abstract: "resumo B",
+    });
+  });
+
+  it("fila title_abstract lista os registros ativos com colunas de exibição", async () => {
+    const { data, error } = await owner.rpc("list_screening_queue", {
+      p_review_id: reviewId,
+      p_stage: "title_abstract",
+    });
+    expect(error).toBeNull();
+    expect(data!.length).toBe(2);
+    expect(data![0]).toHaveProperty("record_id");
+    expect(data![0]).toHaveProperty("title");
+    expect(data![0]).toHaveProperty("corpus_state");
+  });
+
+  it("create_screening_job cria job ai_screening_batch + 1 job_item por registro elegível", async () => {
+    const { data: job, error } = await owner.rpc("create_screening_job", {
+      p_review_id: reviewId,
+      p_record_ids: null,
+    });
+    expect(error).toBeNull();
+    expect(job.type).toBe("ai_screening_batch");
+    const { count } = await serviceClient()
+      .from("job_item")
+      .select("id", { count: "exact", head: true })
+      .eq("job_id", job.id);
+    expect(count).toBe(2);
+  });
+});
+
 export { seedActiveRecord };

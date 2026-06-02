@@ -244,3 +244,116 @@ begin
 end;
 $$;
 grant execute on function public.reverse_screening(uuid) to authenticated;
+
+-- ============================================================
+-- RPC: list_screening_queue — registros do estágio + última sugestão de IA anexada.
+-- title_abstract: corpus_state em active/maybe_ts/included_ts/excluded_ts.
+-- full_text:      corpus_state em included_ts/included_ft/excluded_ft.
+-- ============================================================
+create or replace function public.list_screening_queue(
+  p_review_id uuid,
+  p_stage screening_stage
+)
+returns table (
+  record_id uuid,
+  title text,
+  abstract text,
+  year text,
+  corpus_state corpus_state,
+  ts_decision ts_decision_state,
+  ft_decision ft_decision_state,
+  ft_exclusion_reason_id uuid,
+  ai_suggestion_id uuid,
+  ai_recommendation text,
+  ai_confidence real,
+  ai_reason text,
+  ai_state suggestion_state
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  return query
+  select
+    r.id,
+    r.metadata ->> 'title',
+    r.metadata ->> 'abstract',
+    r.metadata ->> 'year',
+    r.corpus_state, r.ts_decision, r.ft_decision, r.ft_exclusion_reason_id,
+    s.id, s.output ->> 'recommendation', (s.output ->> 'confidence')::real,
+    s.output ->> 'reason', s.state
+  from public.record r
+  left join lateral (
+    select a.id, a.output, a.state
+    from public.ai_suggestion a
+    where a.target_kind = 'screening' and a.target_id = r.id
+    order by a.created_at desc
+    limit 1
+  ) s on true
+  where r.review_id = p_review_id
+    and (
+      (p_stage = 'title_abstract'
+        and r.corpus_state in ('active','maybe_ts','included_ts','excluded_ts'))
+      or
+      (p_stage = 'full_text'
+        and r.corpus_state in ('included_ts','included_ft','excluded_ft'))
+    )
+  order by r.created_at;
+end;
+$$;
+grant execute on function public.list_screening_queue(uuid, screening_stage) to authenticated;
+
+-- ============================================================
+-- RPC: create_screening_job — cria job ai_screening_batch + job_items (1/registro),
+-- só sobre registros elegíveis (active/maybe_ts/included_ts), audita. Não processa
+-- (§VIII). p_record_ids = subconjunto opcional (lote sobre seleção).
+-- ============================================================
+create or replace function public.create_screening_job(
+  p_review_id uuid,
+  p_record_ids jsonb default null
+)
+returns public.job
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.job;
+  v_count int;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  insert into public.job (review_id, type, status)
+  values (p_review_id, 'ai_screening_batch', 'queued')
+  returning * into v_job;
+
+  insert into public.job_item (job_id, review_id, status, payload)
+  select v_job.id, p_review_id, 'pending', jsonb_build_object('record_id', r.id)
+  from public.record r
+  where r.review_id = p_review_id
+    and r.corpus_state in ('active','maybe_ts','included_ts')
+    and (
+      p_record_ids is null
+      or r.id::text in (select jsonb_array_elements_text(p_record_ids))
+    );
+  get diagnostics v_count = row_count;
+
+  insert into public.audit_entry (
+    review_id, actor_type, actor_id, action, entity, entity_id, before, after
+  ) values (
+    p_review_id, 'human', auth.uid(), 'enqueue_screening_batch', 'job', v_job.id,
+    null, jsonb_build_object('item_count', v_count)
+  );
+
+  return v_job;
+end;
+$$;
+grant execute on function public.create_screening_job(uuid, jsonb) to authenticated;
