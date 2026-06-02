@@ -323,6 +323,41 @@ export type Database = {
           },
         ]
       }
+      exclusion_reason: {
+        Row: {
+          created_at: string
+          id: string
+          is_active: boolean
+          label: string
+          review_id: string
+          sort_order: number
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label: string
+          review_id: string
+          sort_order?: number
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          label?: string
+          review_id?: string
+          sort_order?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exclusion_reason_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job: {
         Row: {
           actual_cost: Json | null
@@ -663,6 +698,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "record_ft_exclusion_reason_fk"
+            columns: ["ft_exclusion_reason_id"]
+            isOneToOne: false
+            referencedRelation: "exclusion_reason"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "record_job_item_fk"
             columns: ["job_item_id"]
             isOneToOne: false
@@ -716,6 +758,77 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profile"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      screening_decision: {
+        Row: {
+          actor: string
+          ai_suggestion_id: string | null
+          created_at: string
+          decision: Database["public"]["Enums"]["screening_choice"]
+          exclusion_reason_id: string | null
+          id: string
+          is_reversed: boolean
+          record_id: string
+          reversed_at: string | null
+          review_id: string
+          stage: Database["public"]["Enums"]["screening_stage"]
+        }
+        Insert: {
+          actor?: string
+          ai_suggestion_id?: string | null
+          created_at?: string
+          decision: Database["public"]["Enums"]["screening_choice"]
+          exclusion_reason_id?: string | null
+          id?: string
+          is_reversed?: boolean
+          record_id: string
+          reversed_at?: string | null
+          review_id: string
+          stage: Database["public"]["Enums"]["screening_stage"]
+        }
+        Update: {
+          actor?: string
+          ai_suggestion_id?: string | null
+          created_at?: string
+          decision?: Database["public"]["Enums"]["screening_choice"]
+          exclusion_reason_id?: string | null
+          id?: string
+          is_reversed?: boolean
+          record_id?: string
+          reversed_at?: string | null
+          review_id?: string
+          stage?: Database["public"]["Enums"]["screening_stage"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "screening_decision_ai_suggestion_id_fkey"
+            columns: ["ai_suggestion_id"]
+            isOneToOne: false
+            referencedRelation: "ai_suggestion"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "screening_decision_exclusion_reason_id_fkey"
+            columns: ["exclusion_reason_id"]
+            isOneToOne: false
+            referencedRelation: "exclusion_reason"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "screening_decision_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "record"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "screening_decision_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
             referencedColumns: ["id"]
           },
         ]
@@ -824,6 +937,49 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_screening_job: {
+        Args: { p_record_ids?: Json; p_review_id: string }
+        Returns: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      decide_fuzzy: {
+        Args: {
+          p_outcome: Database["public"]["Enums"]["dedup_outcome"]
+          p_record_a: string
+          p_record_b: string
+          p_review_id: string
+          p_similarity: number
+        }
+        Returns: string
+      }
+      decide_screening: {
+        Args: {
+          p_ai_suggestion_id?: string
+          p_decision: Database["public"]["Enums"]["screening_choice"]
+          p_exclusion_reason_id?: string
+          p_record_id: string
+          p_review_id: string
+          p_stage: Database["public"]["Enums"]["screening_stage"]
+        }
+        Returns: string
+      }
+      dedup_exact: { Args: { p_review_id: string }; Returns: number }
       get_byok_secret: {
         Args: { p_review_id: string }
         Returns: {
@@ -845,6 +1001,39 @@ export type Database = {
         Returns: string
       }
       is_review_member: { Args: { p_review_id: string }; Returns: boolean }
+      list_fuzzy_candidates: {
+        Args: { p_review_id: string; p_threshold?: number }
+        Returns: {
+          record_a_id: string
+          record_b_id: string
+          similarity: number
+          title_a: string
+          title_b: string
+          year_a: string
+          year_b: string
+        }[]
+      }
+      list_screening_queue: {
+        Args: {
+          p_review_id: string
+          p_stage: Database["public"]["Enums"]["screening_stage"]
+        }
+        Returns: {
+          abstract: string
+          ai_confidence: number
+          ai_reason: string
+          ai_recommendation: string
+          ai_state: Database["public"]["Enums"]["suggestion_state"]
+          ai_suggestion_id: string
+          corpus_state: Database["public"]["Enums"]["corpus_state"]
+          ft_decision: Database["public"]["Enums"]["ft_decision_state"]
+          ft_exclusion_reason_id: string
+          record_id: string
+          title: string
+          ts_decision: Database["public"]["Enums"]["ts_decision_state"]
+          year: string
+        }[]
+      }
       lock_protocol: {
         Args: { p_review_id: string }
         Returns: {
@@ -864,6 +1053,12 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      reverse_dedup: { Args: { p_decision_id: string }; Returns: undefined }
+      reverse_screening: { Args: { p_decision_id: string }; Returns: undefined }
+      seed_default_exclusion_reasons: {
+        Args: { p_review_id: string }
+        Returns: undefined
       }
       set_byok_key: {
         Args: {
@@ -921,6 +1116,8 @@ export type Database = {
       protocol_state: "draft" | "locked"
       question_framework: "spider" | "pico" | "peo" | "pcc" | "free"
       ratification_state: "pending" | "accepted" | "edited" | "rejected"
+      screening_choice: "include" | "exclude" | "maybe"
+      screening_stage: "title_abstract" | "full_text"
       source_format: "ris" | "bibtex" | "csv"
       suggestion_state:
         | "pending"
@@ -1093,6 +1290,8 @@ export const Constants = {
       protocol_state: ["draft", "locked"],
       question_framework: ["spider", "pico", "peo", "pcc", "free"],
       ratification_state: ["pending", "accepted", "edited", "rejected"],
+      screening_choice: ["include", "exclude", "maybe"],
+      screening_stage: ["title_abstract", "full_text"],
       source_format: ["ris", "bibtex", "csv"],
       suggestion_state: [
         "pending",
