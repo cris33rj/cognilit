@@ -58,3 +58,36 @@ begin
 end;
 $$;
 grant execute on function public.seed_default_exclusion_reasons(uuid) to authenticated;
+
+-- ---------- enums de triagem ----------
+create type screening_stage  as enum ('title_abstract', 'full_text');
+create type screening_choice as enum ('include', 'exclude', 'maybe');
+
+-- ---------- screening_decision (decisão de triagem — US4) ----------
+create table public.screening_decision (
+  id uuid primary key default gen_random_uuid(),
+  review_id uuid not null references public.review (id) on delete cascade,
+  record_id uuid not null references public.record (id) on delete cascade,
+  stage screening_stage not null,
+  decision screening_choice not null,
+  exclusion_reason_id uuid references public.exclusion_reason (id) on delete set null,
+  ai_suggestion_id uuid references public.ai_suggestion (id) on delete set null,
+  is_reversed boolean not null default false,
+  reversed_at timestamptz,
+  actor text not null default 'human', -- a IA nunca decide (Princípio I / FR-024)
+  created_at timestamptz not null default now(),
+  -- FR-025: exclusão no Texto completo exige motivo.
+  constraint screening_ft_reason_required
+    check (not (stage = 'full_text' and decision = 'exclude' and exclusion_reason_id is null)),
+  -- 'maybe' só existe no Título/Resumo (Q1).
+  constraint screening_maybe_only_ts
+    check (not (stage = 'full_text' and decision = 'maybe'))
+);
+create index screening_review_idx on public.screening_decision (review_id, created_at desc);
+create index screening_record_live_idx
+  on public.screening_decision (record_id) where is_reversed = false;
+
+alter table public.screening_decision enable row level security;
+create policy screening_select on public.screening_decision
+  for select using (public.is_review_member(review_id));
+-- INSERT/UPDATE só via RPCs security definer abaixo (sem policy de write).
