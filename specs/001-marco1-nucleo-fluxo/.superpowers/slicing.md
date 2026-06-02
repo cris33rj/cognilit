@@ -215,7 +215,7 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 
 - [x] Fatia 1 — Fundação & Revisão isolada (mergeada)
 - [x] Fatia 2 — Pergunta + Protocolo (mergeada)
-- [x] Fatia 3 — Workbench shell + Importação (CHECKPOINT 3 — aguardando merge)
-- [ ] Fatia 4 — Deduplicação
+- [x] Fatia 3 — Workbench shell + Importação (mergeada — commit `114da4f`)
+- [ ] Fatia 4 — Deduplicação (em preparação — `writing-plans`/CHECKPOINT 2)
 - [ ] Fatia 5 — Triagem 2 etapas + IA-no-laço
 - [ ] Fatia 6 — Shell, trilho & PRISMA vivo + export de auditoria

@@ -1,370 +1,752 @@
-# Fatia 3 — Workbench shell + Importação & registro de busca — Implementation Plan
+# Fatia 4 — Deduplicação no workbench — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Escopo:** esta é a **Fatia 3 de 6** do Marco 1 (`001-marco1-nucleo-fluxo`).
+> **Escopo:** esta é a **Fatia 4 de 6** do Marco 1 (`001-marco1-nucleo-fluxo`).
 > Fronteiras, dependências e gate de cobertura em
 > [.superpowers/slicing.md](./.superpowers/slicing.md). NÃO planejar/implementar
-> capacidades de outras fatias (dedup = Fatia 4; triagem/IA-em-lote = Fatia 5;
-> trilho/PRISMA view/export de auditoria = Fatia 6).
-> *(Os planos das Fatias 1 e 2 permanecem no histórico git — commit `6df6f8d` e anteriores.)*
+> capacidades de outras fatias (triagem/IA-em-lote = Fatia 5; trilho/PRISMA view/
+> export de auditoria = Fatia 6).
+> *(Os planos das Fatias 1–3 permanecem no histórico git — commit `84b20ec` e anteriores.)*
 >
-> **Branch de trabalho:** `build/001-marco1-nucleo-fluxo/3-workbench-importacao`
+> **Branch de trabalho:** `build/001-marco1-nucleo-fluxo/4-deduplicacao`
 > (criar via `superpowers:using-git-worktrees`). A sessão **NUNCA** faz `git merge`
 > nem `git push` para a feature branch ou `main` — o merge é manual do desenvolvedor
 > ao fim da fatia (CHECKPOINT 3).
 
-**Goal:** Estabelecer a superfície única do workbench (Princípio V) com o modo **Importar** funcional — registro de busca + importação RIS/BibTeX/CSV com preview, sobre a infra de **jobs assíncronos** (enqueue valida → worker persiste, resiliente por-item).
+**Goal:** No modo **Duplicatas** da bancada única, remover automaticamente duplicatas exatas (com log reversível) e oferecer uma fila de pares fuzzy lado a lado para decisão humana mesma/distintas — toda decisão e reversão registradas na trilha append-only.
 
-**Architecture:** Núcleo de parsing e de jobs em **TypeScript portátil** (`supabase/functions/_shared/`), consumido por três frentes: (a) preview client-side no Next; (b) testes Vitest em Node; (c) Edge Functions Deno (`jobs-enqueue`/`jobs-worker`) como cascas HTTP finas. `jobs-enqueue` **parseia para validar** (malformado ⇒ 400, zero persistência — FR-016) e cria `job` + um `job_item` por registro via RPC atômica; o **worker** normaliza (`doi_normalized`/`title_norm`) e **insere os `record`s por item** (§VIII). A UI observa por **polling (TanStack Query)**. Em produção o worker é agendado por `pg_cron`→`pg_net`; nos testes/e2e o worker é disparado por um gatilho server-side guardado (sem depender de timing de cron nem de Deno no host).
+**Architecture:** Toda a lógica de dedup vive em **RPCs Postgres `security definer`** (migration `0005_dedup.sql`), espelhando o padrão da Fatia 3 (`create_import_job`/`insert_import_record`): atômicas, testáveis em Node contra o Postgres local, e que sempre escrevem `audit_entry`. A camada TS (`src/lib/dedup/`) só consome essas RPCs; as Server Actions em `app/reviews/[reviewId]/workbench/actions.ts` aplicam `requireMember` e disparam o dedup exato **automaticamente ao concluir a importação** (estendendo `runImportWorker`). A UI é um novo **modo** (`DuplicatesPanel`) na mesma rota `workbench/` — **nenhuma rota/tela nova** (Princípio V). Nenhuma dependência nova é introduzida (`pg_trgm` já habilitado na 0003; `@tanstack/react-query` já presente).
 
-**Tech Stack:** Next.js 14 (App Router, RSC default), TypeScript strict, Supabase (Postgres + RLS + RPC `SECURITY DEFINER` + Edge Functions Deno + `pg_trgm`/`pg_cron`/`pg_net`), TanStack Query, `papaparse` (CSV), `@retorquere/bibtex-parser` (BibTeX), parser RIS próprio. Vitest (unit+integração), Playwright (e2e).
-
----
-
-## Decisões de implementação desta fatia (D-F3.\*)
-
-Registradas aqui (espelham o estilo das D-F2.\* da Fatia 2). As marcadas **[DESVIO]** alteram o caminho literal do contrato/plan por restrição de ambiente e devem ser confirmadas no CHECKPOINT 2.
-
-- **D-F3.1 — Núcleo portátil + Edge Functions reais (casca).** A lógica de parse/validação/enqueue/processamento-por-item vive em módulos TS portáveis em `supabase/functions/_shared/`. As Edge Functions `jobs-enqueue`/`jobs-worker` são cascas HTTP Deno sobre o núcleo. Os portões (Vitest contra o Postgres local; Playwright) exercitam o **núcleo** diretamente / via gatilho de teste guardado — sem Deno no host nem timing de `pg_cron`. (Decisão do desenvolvedor no CHECKPOINT 2.)
-- **D-F3.2 — [DESVIO] Localização do núcleo de import/jobs.** O contrato `import-parsers.md` cita `src/lib/import/`. Como o deploy Deno **não alcança `src/`**, o núcleo vive em `supabase/functions/_shared/import/` e `supabase/functions/_shared/jobs/`. O app importa via alias `@shared/*`. Interface pública idêntica ao contrato (`ParsedRecord`, `ParseResult`, `BibliographicParser`).
-- **D-F3.3 — [DESVIO] `tsconfig` exclui `supabase/functions`.** Os `index.ts` das Edge Functions usam globais Deno (`Deno.serve`) e specifiers `npm:`; seriam erro sob o `tsc` do host. O `tsconfig` raiz passa a `exclude` `supabase/functions`; o núcleo `_shared` (TS puro, sem globais Deno) é checado **transitivamente** pelo `tsc` ao ser importado por `src/`/`app/`, e os shells Deno são checados pelo Deno (no deploy), fora do host.
-- **D-F3.4 — Parse valida no enqueue; persistência no worker.** `jobs-enqueue` roda o parser para validar (0 registros válidos ⇒ 400, zero persistência — FR-016) e cria `job`+`job_item`s (1 por `ParsedRecord`) via RPC atômica `create_import_job`. O **worker** normaliza e **insere os `record`s** por item, com commit por item (resiliência §VIII; persistência final no worker, fiel a `import-parsers.md`). (Decisão do desenvolvedor no CHECKPOINT 2.)
-- **D-F3.5 — Gatilho do worker.** Produção: `pg_cron`→`pg_net` `POST` na Edge Function `jobs-worker` (migration `0004`, bloco guardado e resiliente a extensão ausente localmente). Marco 1/local/e2e: Server Action guardada `runImportWorker(reviewId)` (cliente service-role, escopada à Revisão do membro) chama o **mesmo** núcleo do worker. Documentada como stand-in síncrono do cron.
-- **D-F3.6 — A3 (dependências de parsing) pinadas.** CSV = `papaparse`; BibTeX = `@retorquere/bibtex-parser` (maduro; ecossistema Zotero/BBT); RIS = parser próprio (formato tagged, line-oriented). `@tanstack/react-query` para polling. Todas entram por **tarefa explícita** (Task 1, constitution §Portões). Adapters isolam a lib atrás de `BibliographicParser` — troca de lib toca só `bibtex.ts`.
-- **D-F3.7 — Wiring do app sobre o núcleo.** O modo Importar (client) parseia para preview e, no confirmar, chama a Server Action `enqueueImport` (núcleo de enqueue, cliente RLS do usuário, via RPC `create_import_job`). A Edge Function `jobs-enqueue` é o endpoint HTTP equivalente sobre o mesmo núcleo (contrato `async-jobs.md`), sem duplicar lógica.
-- **D-F3.8 — PRISMA "identificados" mínimo.** A view `prisma_counter` completa é da Fatia 6. Aqui exibimos apenas `count(record)` da Revisão ("identificados") no cabeçalho do workbench. Sem view derivada nesta fatia.
+**Tech Stack:** Next.js 14 App Router (RSC + Server Actions), Supabase Postgres + RLS + `pg_trgm`, `@supabase/supabase-js`, `@tanstack/react-query`, Vitest (unit + integration contra Postgres local), Playwright (e2e). TypeScript strict, sem `any`.
 
 ---
 
-## Escopo coberto (rastreio à spec/slicing)
+## Contexto de execução
 
-| Item | Onde nesta fatia |
-|------|------------------|
-| US2 (importar + registrar busca no workbench) | Tasks 13–14 (workbench + Importar + busca) |
-| FR-013 (importar RIS/BibTeX/CSV) | Tasks 5–8 (parsers) |
-| FR-014 (preview com mapeamento de campos antes de confirmar) | Tasks 8, 14 (preview client) |
-| FR-015 (registrar string/base/data/hits) | Tasks 9, 13, 14 (`search`) |
-| FR-016 (malformado ⇒ erro claro, zero persistência parcial) | Tasks 9, 14 (validação no enqueue) |
-| FR-017 (parsing de importações grandes sem bloquear; progresso visível) | Tasks 10, 14 (worker + polling) |
-| FR-027 (workbench = superfície única por modos, sem telas separadas) | Task 13 (ModeBar + 1 rota) |
-| A3 (libs de parsing pinadas) | Task 1 |
-| §VIII (enqueue enfileira; worker processa por-item, retomável) | Tasks 9, 10 |
-| SC-009 (isolamento RLS) | Task 11 |
-| Princípio III (auditoria append-only de mudanças de estado) | Tasks 2, 9, 10 (audit em RPCs) |
+- **Pré-condição:** Fatias 1–3 mergeadas em `001-marco1-nucleo-fluxo`. Existem: `record` (com `doi_normalized`, `title_norm` coluna, `metadata.year` em jsonb, `corpus_state` enum com `imported|active|duplicate_exact|duplicate_fuzzy|…`), índices `record_doi_idx` e `record_title_trgm_idx` (gin_trgm_ops), `audit_entry` (insert-only), helper `is_review_member(uuid)`, infra de jobs + `runImportWorker`.
+- **Higiene:** se ainda existir o worktree órfão `.worktrees/3-workbench-importacao`, removê-lo é decisão do desenvolvedor (fora deste plano).
+- **Banco de testes:** os testes de integração rodam contra o Supabase local (`supabase start` já feito). O loop TDD de SQL é: editar `supabase/migrations/0005_dedup.sql` → `supabase db reset` → rodar o teste de integração.
+- **PARADA OBRIGATÓRIA:** ao fim da fatia (CHECKPOINT 3) a sessão **não faz merge/push** — apresenta diff + portões e aguarda o merge manual (CLAUDE.md §5).
 
-**Fora desta fatia (não fazer):** modos Duplicatas/T-R/Texto completo funcionais (Fatia 4/5 — aqui ficam **presentes-mas-inertes**); `ai_screening_batch` (Fatia 5); dedup (Fatia 4); view `prisma_counter` completa, trilho de fases e export de auditoria (Fatia 6).
+## Decisões de implementação (D-F4.*)
+
+- **D-F4.1** — Toda a lógica de dedup é **RPC Postgres `security definer`** (não código Deno/`_shared`), para ser atômica + auditável + testável em Node, espelhando a Fatia 3. O worker Deno **não** é editado.
+- **D-F4.2** — `dedup_exact` é **idempotente**: opera só sobre `corpus_state='active'`; promove `imported→active` no início; re-rodar não re-marca nem duplica decisões.
+- **D-F4.3** — Dedup exato dispara **automaticamente ao concluir a importação**, estendendo a Server Action `runImportWorker` (chama `dedup_exact` após processar os jobs). Também exposto como Server Action `runExactDedup` (re-executável; idempotente).
+- **D-F4.4** — Chave exata: `doi_normalized` quando presente; senão `title_norm` + `metadata->>'year'` (R2). Sobrevivente do grupo = registro mais antigo (`created_at, id`); demais ⇒ `duplicate_exact`.
+- **D-F4.5** — Fila fuzzy: `similarity(title_norm)` (`pg_trgm`) **≥ 0.92** **e** mesmo ano, entre registros `active`, excluindo pares já decididos (decisão `fuzzy_human` não revertida). Limiar em constante `DEDUP_FUZZY_HIGH` (`src/lib/dedup/config.ts`), ajustável sem schema (R2).
+- **D-F4.6** — Reversão **por item, a qualquer momento** (Q4): seta `is_reversed=true`+`reversed_at`, restaura `record_b` para `active`, e escreve **nova** `audit_entry` (não apaga a original).
+- **D-F4.7** — Contador PRISMA "duplicados" mínimo no cabeçalho do workbench = `dedup_decision` com `outcome ∈ {removed,merged}` e `is_reversed=false` (a view `prisma_counter` completa é Fatia 6, espelhando D-F3.8).
 
 ---
 
 ## File Structure
 
-**Núcleo portátil (Deno + Node + browser) — `supabase/functions/_shared/`**
-- `import/types.ts` — `SourceFormat`, `ParsedRecord`, `ParseError`, `ParseResult`, `BibliographicParser`.
-- `import/normalize.ts` — `normalizeDoi`, `normalizeTitle` (chaves de dedup — R2, consumidas pelo worker).
-- `import/csv.ts` — parser CSV via `papaparse`.
-- `import/ris.ts` — parser RIS próprio.
-- `import/bibtex.ts` — parser BibTeX (adapter sobre `@retorquere/bibtex-parser`).
-- `import/index.ts` — `parserFor(format)`, `parseContent(format, content, opts)`.
-- `jobs/types.ts` — `JobType`, `JobStatus`, `EnqueueImportInput`, `EnqueueResult`, `WorkerResult`, `EnqueueValidationError`.
-- `jobs/enqueue.ts` — `enqueueImportJob(deps, reviewId, input)`.
-- `jobs/worker.ts` — `processImportJob(deps, jobId)`.
+**Criar:**
+- `supabase/migrations/0005_dedup.sql` — tabela `dedup_decision` + enums + RLS + RPCs (`dedup_exact`, `reverse_dedup`, `list_fuzzy_candidates`, `decide_fuzzy`).
+- `src/lib/dedup/config.ts` — constantes de limiar fuzzy.
+- `src/lib/dedup/queries.ts` — leituras: log de exatas, candidatos fuzzy, contador de duplicados.
+- `src/components/workbench/DuplicatesPanel.tsx` — modo Duplicatas (client, TanStack Query).
+- `tests/integration/dedup.test.ts` — exatas, reversão, fuzzy, decisão, auto-dispatch.
+- `tests/integration/rls.dedup.test.ts` — isolamento RLS de `dedup_decision`.
+- `tests/unit/dedup/config.test.ts` — sanidade das constantes.
+- `tests/e2e/dedup.spec.ts` — fluxo ponta-a-ponta no modo Duplicatas.
 
-**Edge Functions (cascas Deno) — `supabase/functions/`**
-- `jobs-enqueue/index.ts` — `Deno.serve` → núcleo de enqueue (cliente RLS do chamador).
-- `jobs-worker/index.ts` — `Deno.serve` → núcleo do worker (cliente service-role).
-- `deno.json` — import map (`papaparse`, `@retorquere/bibtex-parser`, `@supabase/supabase-js`) para o runtime Deno.
-
-**Migrations — `supabase/migrations/`**
-- `0003_search_record_jobs.sql` — enums + `search`, `record`, `job`, `job_item` + índices (`pg_trgm`) + RLS + RPCs `create_import_job`, `insert_import_record`.
-- `0004_jobs_cron.sql` — `pg_cron`/`pg_net` + agendamento do worker (bloco guardado, resiliente a extensão ausente local).
-
-**App (Next) — `src/` e `app/`**
-- `src/components/providers/QueryProvider.tsx` — provider TanStack Query (client).
-- `src/lib/jobs/queries.ts` — `listJobs`, `countRecords`.
-- `src/lib/search/schema.ts` — Zod do registro de busca.
-- `src/components/workbench/ModeBar.tsx` — barra dos 4 modos (Importar ativo; demais inertes).
-- `src/components/workbench/ImportPanel.tsx` — client: arquivo + preview + form de busca + confirmar + progresso.
-- `src/components/workbench/ImportPreview.tsx` — tabela de preview.
-- `src/components/workbench/JobProgress.tsx` — client: polling de status do job.
-- `app/reviews/[reviewId]/workbench/page.tsx` — RSC: lê `?mode=`, monta ModeBar + modo ativo + contador "identificados".
-- `app/reviews/[reviewId]/workbench/actions.ts` — `enqueueImport`, `runImportWorker`.
-- `app/reviews/[reviewId]/layout.tsx` — **modificar**: link de nav "Workbench".
-
-**Tooling (modificar)**
-- `tsconfig.json` — `exclude` `supabase/functions`; `paths` `@shared/*`.
-- `vitest.config.ts` — alias `@shared`.
-- `package.json` — deps (Task 1).
-- `.env.example` — `SUPABASE_FUNCTIONS_URL`, `CRON_SECRET` (worker).
-
-**Testes — `tests/`**
-- `tests/fixtures/import/{sample.ris,sample.bib,sample.csv,malformed.ris}`.
-- `tests/unit/import/{normalize,csv,ris,bibtex,parse-content}.test.ts`.
-- `tests/unit/workbench/import-preview.test.tsx`.
-- `tests/integration/jobs.import.test.ts` — enqueue+worker contra Postgres local.
-- `tests/integration/rls.record-search-job.test.ts` — SC-009 para tabelas novas.
-- `tests/e2e/import.spec.ts` — fluxo "importar" + invariante de superfície única.
+**Modificar:**
+- `src/types/database.ts` — regenerado (`npm run gen:types`) após a migration.
+- `app/reviews/[reviewId]/workbench/actions.ts` — `runExactDedup`, `decideFuzzy`, `reverseDedup`; `runImportWorker` passa a chamar `dedup_exact`.
+- `src/components/workbench/ModeBar.tsx:9-14` — habilitar o modo `duplicates`.
+- `app/reviews/[reviewId]/workbench/page.tsx` — renderizar `DuplicatesPanel` quando `active==='duplicates'`; contador "Duplicados" no cabeçalho.
 
 ---
 
-## Task 1: Dependências + toolchain (A3, §Portões)
+## Task 1: Migration — tabela `dedup_decision` + enums + RLS
 
 **Files:**
-- Modify: `package.json` (deps)
-- Create: `supabase/functions/deno.json`
-- Modify: `tsconfig.json`
-- Modify: `vitest.config.ts`
-- Modify: `.env.example`
+- Create: `supabase/migrations/0005_dedup.sql`
+- Test: `tests/integration/rls.dedup.test.ts`
 
-- [ ] **Step 1: Instalar dependências de runtime e dev (tarefa explícita A3)**
+- [ ] **Step 1: Write the failing test** (RLS de `dedup_decision`)
 
-Run:
-```bash
-npm install papaparse @tanstack/react-query @retorquere/bibtex-parser
-npm install -D @types/papaparse
-```
-Expected: `package.json` ganha `papaparse`, `@tanstack/react-query`, `@retorquere/bibtex-parser` em `dependencies` e `@types/papaparse` em `devDependencies`. (Versões: deixar o npm pinar a atual; não editar à mão.)
+`tests/integration/rls.dedup.test.ts`:
 
-- [ ] **Step 2: Excluir `supabase/functions` do `tsc` do host e adicionar alias `@shared`**
-
-Modify `tsconfig.json` — em `compilerOptions.paths` adicionar `@shared/*`, e trocar `exclude`:
-```jsonc
-    "paths": {
-      "@/*": ["./src/*"],
-      "@shared/*": ["./supabase/functions/_shared/*"]
-    }
-```
-```jsonc
-  "exclude": ["node_modules", "supabase/functions"]
-```
-Rationale (D-F3.3): os shells Deno usam globais que quebrariam o `tsc` do host; o núcleo `_shared` é checado transitivamente via imports de `src`/`app`.
-
-- [ ] **Step 3: Alias `@shared` no Vitest**
-
-Modify `vitest.config.ts` — em `resolve.alias` adicionar a entrada `@shared`:
 ```ts
-    resolve: {
-      alias: {
-        "@": fileURLToPath(new URL("./src", import.meta.url)),
-        "@shared": fileURLToPath(
-          new URL("./supabase/functions/_shared", import.meta.url),
-        ),
-      },
-    },
+import { describe, it, expect, beforeAll } from "vitest";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+
+describe("RLS dedup_decision (SC-009)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let intruder: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let decisionId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`dd_owner_${s}@example.com`, "senha-teste-123")).client;
+    intruder = (await signUpUser(`dd_intr_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", { p_title: "Dedup RLS" });
+    reviewId = review.id;
+    // Seed via service role (bypass RLS para setup).
+    const svc = serviceClient();
+    const { data: rec } = await svc
+      .from("record")
+      .insert({
+        review_id: reviewId,
+        source_format: "ris",
+        raw: {},
+        metadata: { title: "x", year: "2020" },
+        title_norm: "x",
+        corpus_state: "active",
+      })
+      .select("id")
+      .single();
+    const { data: dd } = await svc
+      .from("dedup_decision")
+      .insert({
+        review_id: reviewId,
+        kind: "exact_auto",
+        record_a_id: rec!.id,
+        record_b_id: rec!.id,
+        outcome: "removed",
+        actor: "system",
+      })
+      .select("id")
+      .single();
+    decisionId = dd!.id;
+  });
+
+  it("owner enxerga a decisão; intruso não-membro enxerga zero", async () => {
+    const own = await owner.from("dedup_decision").select("id").eq("id", decisionId);
+    expect(own.data?.length).toBe(1);
+    const intr = await intruder.from("dedup_decision").select("id").eq("id", decisionId);
+    expect(intr.data?.length ?? 0).toBe(0);
+  });
+});
 ```
 
-- [ ] **Step 4: Import map do Deno para as Edge Functions**
+- [ ] **Step 2: Run it to confirm it fails**
 
-Create `supabase/functions/deno.json`:
-```json
-{
-  "imports": {
-    "papaparse": "npm:papaparse@5",
-    "@retorquere/bibtex-parser": "npm:@retorquere/bibtex-parser@9",
-    "@supabase/supabase-js": "npm:@supabase/supabase-js@2"
-  }
-}
-```
-Nota: o núcleo `_shared` usa specifiers nus (`"papaparse"`, etc.); no host resolvem por `node_modules`, no Deno por este import map.
+Run: `npm run test -- tests/integration/rls.dedup.test.ts`
+Expected: FAIL — relation `public.dedup_decision` does not exist.
 
-- [ ] **Step 5: Variáveis de ambiente do worker**
+- [ ] **Step 3: Create the migration (table + enums + RLS)**
 
-Modify `.env.example` — acrescentar ao fim:
-```bash
+`supabase/migrations/0005_dedup.sql`:
 
-# Worker de jobs assíncronos (D-F3.5)
-# URL base das Edge Functions (local: igual ao SUPABASE_URL). Usada pelo pg_cron
-# (produção) e pela Server Action de gatilho (local/e2e).
-SUPABASE_FUNCTIONS_URL=http://127.0.0.1:54321
-# Segredo compartilhado que autentica o disparo do worker (header x-cron-secret).
-CRON_SECRET=local-dev-cron-secret
-```
-
-- [ ] **Step 6: Verificar typecheck e lint limpos (nada quebrou)**
-
-Run: `npm run typecheck && npm run lint`
-Expected: `tsc` sem saída; ESLint "No ESLint warnings or errors".
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add package.json package-lock.json tsconfig.json vitest.config.ts supabase/functions/deno.json .env.example
-git commit -m "chore(fatia3): pin parsing/query deps + @shared alias + tsconfig exclude (A3)"
-```
-
----
-
-## Task 2: Migration 0003 — search, record, job, job_item (+ RLS + RPCs)
-
-**Files:**
-- Create: `supabase/migrations/0003_search_record_jobs.sql`
-- Modify: `src/types/database.ts` (gerado)
-
-- [ ] **Step 1: Escrever a migration**
-
-Create `supabase/migrations/0003_search_record_jobs.sql`:
 ```sql
 -- ============================================================
--- Marco 1 / Fatia 3 — Importação & jobs: search, record, job, job_item
--- RLS habilitado em TODAS as tabelas (Princípio IV).
--- Parsing valida no enqueue; persistência (record) no worker (D-F3.4).
+-- Marco 1 / Fatia 4 — Deduplicação: dedup_decision + RPCs
+-- US3 / FR-018..021, FR-026. RLS habilitado (Princípio IV).
+-- Toda lógica de dedup é RPC security definer e escreve audit_entry (Princípio III).
 -- ============================================================
 
-create extension if not exists pg_trgm;
+create type dedup_kind    as enum ('exact_auto', 'fuzzy_human');
+create type dedup_outcome as enum ('removed', 'merged', 'kept_distinct');
+create type dedup_actor   as enum ('system', 'human');
 
--- enums
-create type source_format    as enum ('ris', 'bibtex', 'csv');
-create type corpus_state      as enum (
-  'imported', 'active',
-  'duplicate_exact', 'duplicate_fuzzy',
-  'excluded_ts', 'maybe_ts', 'included_ts', 'excluded_ft', 'included_ft'
-);
-create type ts_decision_state as enum ('included', 'excluded', 'maybe');
-create type ft_decision_state as enum ('included', 'excluded');
-create type job_type          as enum ('import_parse', 'ai_screening_batch');
-create type job_status        as enum (
-  'queued', 'running', 'completed', 'completed_with_errors', 'failed'
-);
-create type job_item_status   as enum ('pending', 'done', 'failed');
-
--- ---------- search (busca registrada — US2/FR-015) ----------
-create table public.search (
+-- ---------- dedup_decision (decisão de dedup — US3) ----------
+-- record_a_id = sobrevivente/mantido; record_b_id = removido/mesclado (nullable p/ data-model).
+create table public.dedup_decision (
   id uuid primary key default gen_random_uuid(),
   review_id uuid not null references public.review (id) on delete cascade,
-  query_string text not null,
-  database text not null,
-  searched_on date not null,
-  hits integer not null check (hits >= 0),
+  kind dedup_kind not null,
+  record_a_id uuid not null references public.record (id) on delete cascade,
+  record_b_id uuid references public.record (id) on delete cascade,
+  similarity real,
+  outcome dedup_outcome not null,
+  is_reversed boolean not null default false,
+  reversed_at timestamptz,
+  actor dedup_actor not null,
   created_at timestamptz not null default now()
 );
-create index search_review_idx on public.search (review_id, created_at);
+create index dedup_review_idx on public.dedup_decision (review_id, created_at desc);
+-- Acelera o "par já decidido?" da fila fuzzy (apenas decisões vivas).
+create index dedup_active_pair_idx
+  on public.dedup_decision (review_id, record_a_id, record_b_id)
+  where is_reversed = false;
 
--- ---------- record (registro bibliográfico — US2/US3/US4) ----------
-create table public.record (
-  id uuid primary key default gen_random_uuid(),
-  review_id uuid not null references public.review (id) on delete cascade,
-  search_id uuid references public.search (id) on delete set null,
-  source_format source_format not null,
-  raw jsonb not null,
-  metadata jsonb not null,
-  doi_normalized text,
-  title_norm text,
-  corpus_state corpus_state not null default 'imported',
-  ts_decision ts_decision_state,
-  ft_decision ft_decision_state,
-  ft_exclusion_reason_id uuid, -- FK adicionada na Fatia 5 (exclusion_reason)
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-create index record_review_idx on public.record (review_id, created_at);
-create index record_doi_idx on public.record (review_id, doi_normalized);
-create index record_title_trgm_idx on public.record using gin (title_norm gin_trgm_ops);
+-- ---------- RLS ----------
+alter table public.dedup_decision enable row level security;
+create policy dedup_select on public.dedup_decision
+  for select using (public.is_review_member(review_id));
+-- INSERT/UPDATE de dedup_decision só via RPCs security definer abaixo (sem policy de write).
+```
 
--- ---------- job + job_item (jobs assíncronos — §VIII/R3) ----------
-create table public.job (
-  id uuid primary key default gen_random_uuid(),
-  review_id uuid not null references public.review (id) on delete cascade,
-  type job_type not null,
-  status job_status not null default 'queued',
-  progress integer not null default 0 check (progress between 0 and 100),
-  estimated_cost jsonb,
-  actual_cost jsonb,
-  created_at timestamptz not null default now(),
-  started_at timestamptz,
-  finished_at timestamptz
-);
-create index job_review_idx on public.job (review_id, created_at desc);
+- [ ] **Step 4: Apply migration and run the test**
 
-create table public.job_item (
-  id uuid primary key default gen_random_uuid(),
-  job_id uuid not null references public.job (id) on delete cascade,
-  review_id uuid not null references public.review (id) on delete cascade,
-  status job_item_status not null default 'pending',
-  payload jsonb not null,
-  error text,
-  attempts integer not null default 0,
-  created_at timestamptz not null default now()
-);
-create index job_item_job_idx on public.job_item (job_id, status);
+Run: `supabase db reset && npm run test -- tests/integration/rls.dedup.test.ts`
+Expected: PASS (owner vê 1, intruso vê 0).
 
+- [ ] **Step 5: Regenerate DB types**
+
+Run: `npm run gen:types && npm run typecheck`
+Expected: `src/types/database.ts` passa a conter `dedup_decision`; typecheck sem saída (limpo).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add supabase/migrations/0005_dedup.sql tests/integration/rls.dedup.test.ts src/types/database.ts
+git commit -m "feat(db): migration 0005 dedup_decision + RLS (US3/SC-009)"
+```
+
+---
+
+## Task 2: RPC `dedup_exact` — remoção automática de exatas (FR-018/019)
+
+**Files:**
+- Modify: `supabase/migrations/0005_dedup.sql` (append)
+- Test: `tests/integration/dedup.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/integration/dedup.test.ts` (primeiro bloco):
+
+```ts
+import { describe, it, expect, beforeAll } from "vitest";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+
+// Insere um record diretamente (service role) já no estado dado.
+async function seedRecord(
+  reviewId: string,
+  opts: { title: string; year: string; doi?: string; createdAt?: string },
+) {
+  const svc = serviceClient();
+  const { data, error } = await svc
+    .from("record")
+    .insert({
+      review_id: reviewId,
+      source_format: "ris",
+      raw: {},
+      metadata: { title: opts.title, year: opts.year, doi: opts.doi ?? null },
+      doi_normalized: opts.doi ?? null,
+      title_norm: opts.title.toLowerCase().trim(),
+      corpus_state: "imported",
+      ...(opts.createdAt ? { created_at: opts.createdAt } : {}),
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return data!.id;
+}
+
+// Insere já como 'active' (para testes de fila fuzzy, Tasks 4/5).
+async function seedRecordActive(reviewId: string, title: string, year: string) {
+  const svc = serviceClient();
+  const { error } = await svc.from("record").insert({
+    review_id: reviewId,
+    source_format: "ris",
+    raw: {},
+    metadata: { title, year },
+    title_norm: title,
+    corpus_state: "active",
+  });
+  if (error) throw new Error(error.message);
+}
+
+describe("dedup_exact (FR-018/019)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let keepId: string;
+  let dupId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`dx_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", { p_title: "Exatas" });
+    reviewId = review.id;
+    keepId = await seedRecord(reviewId, {
+      title: "Active learning", year: "2020", doi: "10.1/abc",
+      createdAt: "2020-01-01T00:00:00Z",
+    });
+    dupId = await seedRecord(reviewId, {
+      title: "Active learning (dup)", year: "2020", doi: "10.1/abc",
+      createdAt: "2020-02-01T00:00:00Z",
+    });
+    await seedRecord(reviewId, { title: "Outro estudo", year: "2019", doi: "10.2/zzz" });
+  });
+
+  it("remove a exata mais nova, mantém a mais antiga ativa, registra decisão reversível + auditoria", async () => {
+    const { data: removed, error } = await owner.rpc("dedup_exact", { p_review_id: reviewId });
+    expect(error).toBeNull();
+    expect(removed).toBe(1);
+
+    const svc = serviceClient();
+    const { data: keep } = await svc.from("record").select("corpus_state").eq("id", keepId).single();
+    const { data: dup } = await svc.from("record").select("corpus_state").eq("id", dupId).single();
+    expect(keep!.corpus_state).toBe("active");
+    expect(dup!.corpus_state).toBe("duplicate_exact");
+
+    const { data: dec } = await svc
+      .from("dedup_decision")
+      .select("kind, outcome, actor, record_a_id, record_b_id, is_reversed")
+      .eq("review_id", reviewId).eq("record_b_id", dupId).single();
+    expect(dec).toMatchObject({
+      kind: "exact_auto", outcome: "removed", actor: "system",
+      record_a_id: keepId, is_reversed: false,
+    });
+
+    const { count: auditCount } = await svc
+      .from("audit_entry").select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId).eq("action", "dedup_exact_remove");
+    expect(auditCount).toBe(1);
+  });
+
+  it("re-rodar é idempotente — não remove mais nada nem duplica decisões", async () => {
+    const { data: removed2 } = await owner.rpc("dedup_exact", { p_review_id: reviewId });
+    expect(removed2).toBe(0);
+    const { count } = await serviceClient()
+      .from("dedup_decision").select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId);
+    expect(count).toBe(1);
+  });
+});
+
+export { seedRecord, seedRecordActive };
+```
+
+> Os helpers `seedRecord`/`seedRecordActive` ficam no topo deste arquivo e são reutilizados pelos blocos das Tasks 3–7 (mesmo arquivo, não re-declarar).
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npm run test -- tests/integration/dedup.test.ts`
+Expected: FAIL — function `public.dedup_exact(uuid)` does not exist.
+
+- [ ] **Step 3: Append the RPC to the migration**
+
+Em `supabase/migrations/0005_dedup.sql`, adicione:
+
+```sql
 -- ============================================================
--- RPC: create_import_job — search + job + job_items + audit (atômico)
--- Chamado pelo enqueue com o JWT do usuário (D-F3.7). FR-016: o chamador TS
--- só invoca esta RPC se houver >= 1 registro válido (zero persistência se 0).
+-- RPC: dedup_exact — remove duplicatas exatas (FR-018), reversível (FR-019).
+-- Idempotente: opera só sobre 'active'; promove 'imported'→'active' primeiro.
+-- Chave: doi_normalized; na ausência, title_norm + metadata->>'year' (R2).
+-- Sobrevivente = mais antigo (created_at, id). Retorna nº de removidos nesta execução.
 -- ============================================================
-create or replace function public.create_import_job(
-  p_review_id uuid,
-  p_format source_format,
-  p_search jsonb,
-  p_items jsonb  -- array de ParsedRecord
-)
-returns public.job
+create or replace function public.dedup_exact(p_review_id uuid)
+returns integer
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
-  v_search public.search;
-  v_job public.job;
-  v_item jsonb;
-  v_count int;
+  v_removed int := 0;
+  r record;
 begin
   if not public.is_review_member(p_review_id) then
     raise exception 'not a member';
   end if;
-  v_count := jsonb_array_length(p_items);
-  if v_count is null or v_count = 0 then
-    raise exception 'no records to import';
+
+  -- Registros importados entram no corpus como 'active'.
+  update public.record
+     set corpus_state = 'active', updated_at = now()
+   where review_id = p_review_id and corpus_state = 'imported';
+
+  for r in
+    with keyed as (
+      select
+        id, created_at,
+        case
+          when coalesce(nullif(doi_normalized, ''), '') <> '' then 'doi:' || doi_normalized
+          when coalesce(nullif(title_norm, ''), '') <> ''
+            then 'tt:' || title_norm || '|' || coalesce(metadata ->> 'year', '')
+          else null
+        end as dkey
+      from public.record
+      where review_id = p_review_id and corpus_state = 'active'
+    ),
+    ranked as (
+      select
+        id, dkey,
+        first_value(id) over (partition by dkey order by created_at, id) as keep_id,
+        row_number()  over (partition by dkey order by created_at, id) as rn
+      from keyed
+      where dkey is not null
+    )
+    select id, keep_id from ranked where rn > 1
+  loop
+    update public.record
+       set corpus_state = 'duplicate_exact', updated_at = now()
+     where id = r.id;
+
+    insert into public.dedup_decision (review_id, kind, record_a_id, record_b_id, outcome, actor)
+    values (p_review_id, 'exact_auto', r.keep_id, r.id, 'removed', 'system');
+
+    insert into public.audit_entry (
+      review_id, actor_type, actor_id, action, entity, entity_id, before, after
+    )
+    values (
+      p_review_id, 'system', null, 'dedup_exact_remove', 'record', r.id,
+      jsonb_build_object('corpus_state', 'active'),
+      jsonb_build_object('corpus_state', 'duplicate_exact', 'kept', r.keep_id)
+    );
+
+    v_removed := v_removed + 1;
+  end loop;
+
+  return v_removed;
+end;
+$$;
+
+grant execute on function public.dedup_exact(uuid) to authenticated;
+```
+
+- [ ] **Step 4: Apply migration and run the test**
+
+Run: `supabase db reset && npm run test -- tests/integration/dedup.test.ts`
+Expected: PASS (ambos os blocos `dedup_exact`).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add supabase/migrations/0005_dedup.sql tests/integration/dedup.test.ts
+git commit -m "feat(dedup): dedup_exact RPC — exatas auto-removidas reversíveis (FR-018/019)"
+```
+
+---
+
+## Task 3: RPC `reverse_dedup` — reversão por item, a qualquer momento (FR-026/Q4)
+
+**Files:**
+- Modify: `supabase/migrations/0005_dedup.sql` (append)
+- Test: `tests/integration/dedup.test.ts` (novo bloco)
+
+- [ ] **Step 1: Write the failing test** (anexar ao arquivo)
+
+```ts
+describe("reverse_dedup (FR-026 / Q4)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let dupId: string;
+  let decisionId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`rv_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", { p_title: "Reverter" });
+    reviewId = review.id;
+    await seedRecord(reviewId, {
+      title: "Estudo A", year: "2021", doi: "10.9/dup", createdAt: "2021-01-01T00:00:00Z",
+    });
+    dupId = await seedRecord(reviewId, {
+      title: "Estudo A dup", year: "2021", doi: "10.9/dup", createdAt: "2021-02-01T00:00:00Z",
+    });
+    await owner.rpc("dedup_exact", { p_review_id: reviewId });
+    const { data: dec } = await serviceClient()
+      .from("dedup_decision").select("id").eq("record_b_id", dupId).single();
+    decisionId = dec!.id;
+  });
+
+  it("desfaz a remoção: record volta a active, decisão marcada is_reversed, nova auditoria criada", async () => {
+    const { error } = await owner.rpc("reverse_dedup", { p_decision_id: decisionId });
+    expect(error).toBeNull();
+
+    const svc = serviceClient();
+    const { data: rec } = await svc.from("record").select("corpus_state").eq("id", dupId).single();
+    expect(rec!.corpus_state).toBe("active");
+
+    const { data: dec } = await svc
+      .from("dedup_decision").select("is_reversed, reversed_at").eq("id", decisionId).single();
+    expect(dec!.is_reversed).toBe(true);
+    expect(dec!.reversed_at).not.toBeNull();
+
+    const { count } = await svc
+      .from("audit_entry").select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId).eq("action", "dedup_reverse");
+    expect(count).toBe(1);
+  });
+
+  it("reverter duas vezes é rejeitado (decisão já revertida)", async () => {
+    const { error } = await owner.rpc("reverse_dedup", { p_decision_id: decisionId });
+    expect(error).not.toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npm run test -- tests/integration/dedup.test.ts -t reverse_dedup`
+Expected: FAIL — function `public.reverse_dedup(uuid)` does not exist.
+
+- [ ] **Step 3: Append the RPC**
+
+```sql
+-- ============================================================
+-- RPC: reverse_dedup — desfaz uma decisão (exata ou fuzzy), por item, a qualquer
+-- momento (Q4). Restaura record_b para 'active', marca is_reversed, NÃO apaga a
+-- decisão e escreve NOVA audit_entry (FR-019/021/026).
+-- ============================================================
+create or replace function public.reverse_dedup(p_decision_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  d public.dedup_decision;
+begin
+  select * into d from public.dedup_decision where id = p_decision_id;
+  if d.id is null then
+    raise exception 'decision not found';
+  end if;
+  if not public.is_review_member(d.review_id) then
+    raise exception 'not a member';
+  end if;
+  if d.is_reversed then
+    raise exception 'decision already reversed';
   end if;
 
-  insert into public.search (review_id, query_string, database, searched_on, hits)
-  values (
-    p_review_id,
-    p_search ->> 'queryString',
-    p_search ->> 'database',
-    (p_search ->> 'searchedOn')::date,
-    (p_search ->> 'hits')::int
-  )
-  returning * into v_search;
+  if d.outcome in ('removed', 'merged') and d.record_b_id is not null then
+    update public.record
+       set corpus_state = 'active', updated_at = now()
+     where id = d.record_b_id
+       and corpus_state in ('duplicate_exact', 'duplicate_fuzzy');
+  end if;
 
-  insert into public.job (review_id, type, status)
-  values (p_review_id, 'import_parse', 'queued')
-  returning * into v_job;
-
-  for v_item in select * from jsonb_array_elements(p_items)
-  loop
-    insert into public.job_item (job_id, review_id, payload)
-    values (
-      v_job.id, p_review_id,
-      jsonb_build_object('record', v_item, 'search_id', v_search.id, 'format', p_format)
-    );
-  end loop;
+  update public.dedup_decision
+     set is_reversed = true, reversed_at = now()
+   where id = d.id;
 
   insert into public.audit_entry (
     review_id, actor_type, actor_id, action, entity, entity_id, before, after
   )
   values (
-    p_review_id, 'human', auth.uid(), 'enqueue_import', 'job', v_job.id,
-    null, jsonb_build_object('item_count', v_count, 'search_id', v_search.id)
+    d.review_id, 'human', auth.uid(), 'dedup_reverse', 'dedup_decision', d.id,
+    jsonb_build_object('is_reversed', false),
+    jsonb_build_object('is_reversed', true, 'restored_record', d.record_b_id)
   );
-
-  return v_job;
 end;
 $$;
 
+grant execute on function public.reverse_dedup(uuid) to authenticated;
+```
+
+- [ ] **Step 4: Apply migration and run the test**
+
+Run: `supabase db reset && npm run test -- tests/integration/dedup.test.ts`
+Expected: PASS (todos os blocos até aqui).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add supabase/migrations/0005_dedup.sql tests/integration/dedup.test.ts
+git commit -m "feat(dedup): reverse_dedup RPC — reversão por item + nova auditoria (FR-026/Q4)"
+```
+
+---
+
+## Task 4: RPC `list_fuzzy_candidates` — fila de pares fuzzy (FR-020)
+
+**Files:**
+- Modify: `supabase/migrations/0005_dedup.sql` (append)
+- Test: `tests/integration/dedup.test.ts` (novo bloco)
+
+- [ ] **Step 1: Write the failing test** (anexar; usa `seedRecordActive` do topo)
+
+```ts
+describe("list_fuzzy_candidates (FR-020 / R2: >=0.92 + mesmo ano)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`fz_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", { p_title: "Fuzzy" });
+    reviewId = review.id;
+    // Par fuzzy forte (títulos quase iguais, mesmo ano, SEM doi → não são exatas).
+    await seedRecordActive(reviewId, "machine learning for screening reviews", "2022");
+    await seedRecordActive(reviewId, "machine learning for screening review", "2022");
+    // Mesmo título-quase mas ANO diferente ⇒ não é par.
+    await seedRecordActive(reviewId, "machine learning for screening reviews", "2010");
+    // Título totalmente distinto ⇒ não é par.
+    await seedRecordActive(reviewId, "qualitative synthesis of nursing", "2022");
+  });
+
+  it("retorna só o par com similaridade >=0.92 e mesmo ano", async () => {
+    const { data, error } = await owner.rpc("list_fuzzy_candidates", { p_review_id: reviewId });
+    expect(error).toBeNull();
+    expect(data!.length).toBe(1);
+    expect(data![0].similarity).toBeGreaterThanOrEqual(0.92);
+    expect(data![0].year_a).toBe("2022");
+    expect(data![0].year_b).toBe("2022");
+  });
+});
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npm run test -- tests/integration/dedup.test.ts -t list_fuzzy_candidates`
+Expected: FAIL — function `public.list_fuzzy_candidates` does not exist.
+
+- [ ] **Step 3: Append the RPC**
+
+```sql
 -- ============================================================
--- RPC: insert_import_record — insere record + marca item done + audit (atômico)
--- Chamado pelo worker (service-role). Normalização vem pronta do TS (D-F3.4).
+-- RPC: list_fuzzy_candidates — pares de alta similaridade p/ confirmação humana
+-- (FR-020). similarity(title_norm) >= limiar E mesmo ano, entre 'active',
+-- excluindo pares já decididos (fuzzy_human vivo). a.id < b.id evita duplicar par.
 -- ============================================================
-create or replace function public.insert_import_record(
+create or replace function public.list_fuzzy_candidates(
   p_review_id uuid,
-  p_search_id uuid,
-  p_job_item_id uuid,
-  p_source_format source_format,
-  p_raw jsonb,
-  p_metadata jsonb,
-  p_doi_normalized text,
-  p_title_norm text
+  p_threshold real default 0.92
+)
+returns table (
+  record_a_id uuid,
+  record_b_id uuid,
+  similarity  real,
+  title_a text,
+  title_b text,
+  year_a  text,
+  year_b  text
+)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  return query
+  with active as (
+    select
+      id,
+      title_norm,
+      metadata ->> 'year'  as yr,
+      metadata ->> 'title' as ttl
+    from public.record
+    where review_id = p_review_id
+      and corpus_state = 'active'
+      and coalesce(nullif(title_norm, ''), '') <> ''
+  )
+  select
+    a.id, b.id,
+    similarity(a.title_norm, b.title_norm)::real,
+    a.ttl, b.ttl, a.yr, b.yr
+  from active a
+  join active b
+    on a.id < b.id
+   and a.yr is not distinct from b.yr
+   and similarity(a.title_norm, b.title_norm) >= p_threshold
+  where not exists (
+    select 1
+    from public.dedup_decision d
+    where d.review_id = p_review_id
+      and d.kind = 'fuzzy_human'
+      and d.is_reversed = false
+      and (
+        (d.record_a_id = a.id and d.record_b_id = b.id) or
+        (d.record_a_id = b.id and d.record_b_id = a.id)
+      )
+  )
+  order by similarity(a.title_norm, b.title_norm) desc;
+end;
+$$;
+
+grant execute on function public.list_fuzzy_candidates(uuid, real) to authenticated;
+```
+
+- [ ] **Step 4: Apply migration and run the test**
+
+Run: `supabase db reset && npm run test -- tests/integration/dedup.test.ts`
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add supabase/migrations/0005_dedup.sql tests/integration/dedup.test.ts
+git commit -m "feat(dedup): list_fuzzy_candidates RPC — fila >=0.92 mesmo ano (FR-020/R2)"
+```
+
+---
+
+## Task 5: RPC `decide_fuzzy` — decisão humana mesma/distintas (FR-020/021)
+
+**Files:**
+- Modify: `supabase/migrations/0005_dedup.sql` (append)
+- Test: `tests/integration/dedup.test.ts` (novo bloco)
+
+- [ ] **Step 1: Write the failing test** (anexar)
+
+```ts
+describe("decide_fuzzy (FR-020/021)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`df_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", { p_title: "Decidir fuzzy" });
+    reviewId = review.id;
+    await seedRecordActive(reviewId, "deep learning triage", "2023");
+    await seedRecordActive(reviewId, "deep learning triages", "2023");
+  });
+
+  it("'mesma' (merged) marca record_b duplicate_fuzzy, some da fila, é reversível", async () => {
+    const { data: simRows } = await owner.rpc("list_fuzzy_candidates", { p_review_id: reviewId });
+    const pair = simRows![0];
+    const { error } = await owner.rpc("decide_fuzzy", {
+      p_review_id: reviewId,
+      p_record_a: pair.record_a_id,
+      p_record_b: pair.record_b_id,
+      p_outcome: "merged",
+      p_similarity: pair.similarity,
+    });
+    expect(error).toBeNull();
+
+    const svc = serviceClient();
+    const { data: rec } = await svc.from("record")
+      .select("corpus_state").eq("id", pair.record_b_id).single();
+    expect(rec!.corpus_state).toBe("duplicate_fuzzy");
+
+    const { data: after } = await owner.rpc("list_fuzzy_candidates", { p_review_id: reviewId });
+    expect(after!.length).toBe(0);
+  });
+
+  it("'distintas' (kept_distinct) não muda estado mas remove o par da fila", async () => {
+    const s = Date.now();
+    const o2 = (await signUpUser(`df2_${s}@example.com`, "senha-teste-123")).client;
+    const { data: r2 } = await o2.rpc("create_review", { p_title: "Distintas" });
+    await seedRecordActive(r2.id, "active recall study", "2024");
+    await seedRecordActive(r2.id, "active recall studies", "2024");
+    const { data: cand } = await o2.rpc("list_fuzzy_candidates", { p_review_id: r2.id });
+    const p = cand![0];
+    await o2.rpc("decide_fuzzy", {
+      p_review_id: r2.id, p_record_a: p.record_a_id, p_record_b: p.record_b_id,
+      p_outcome: "kept_distinct", p_similarity: p.similarity,
+    });
+    const svc = serviceClient();
+    const { data: recA } = await svc.from("record").select("corpus_state").eq("id", p.record_a_id).single();
+    const { data: recB } = await svc.from("record").select("corpus_state").eq("id", p.record_b_id).single();
+    expect(recA!.corpus_state).toBe("active");
+    expect(recB!.corpus_state).toBe("active");
+    const { data: after } = await o2.rpc("list_fuzzy_candidates", { p_review_id: r2.id });
+    expect(after!.length).toBe(0);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npm run test -- tests/integration/dedup.test.ts -t decide_fuzzy`
+Expected: FAIL — function `public.decide_fuzzy` does not exist.
+
+- [ ] **Step 3: Append the RPC**
+
+```sql
+-- ============================================================
+-- RPC: decide_fuzzy — decisão humana de um par fuzzy (FR-020), reversível (FR-021).
+-- 'merged'        ⇒ record_b vira duplicate_fuzzy (record_a sobrevive).
+-- 'kept_distinct' ⇒ nenhum estado muda; a decisão registrada tira o par da fila.
+-- ============================================================
+create or replace function public.decide_fuzzy(
+  p_review_id uuid,
+  p_record_a uuid,
+  p_record_b uuid,
+  p_outcome dedup_outcome,
+  p_similarity real
 )
 returns uuid
 language plpgsql
@@ -372,1598 +754,264 @@ security definer
 set search_path = public
 as $$
 declare
-  v_record_id uuid;
+  v_id uuid;
 begin
-  insert into public.record (
-    review_id, search_id, source_format, raw, metadata,
-    doi_normalized, title_norm, corpus_state
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+  if p_outcome not in ('merged', 'kept_distinct') then
+    raise exception 'invalid fuzzy outcome';
+  end if;
+
+  if p_outcome = 'merged' then
+    update public.record
+       set corpus_state = 'duplicate_fuzzy', updated_at = now()
+     where id = p_record_b and review_id = p_review_id and corpus_state = 'active';
+  end if;
+
+  insert into public.dedup_decision (
+    review_id, kind, record_a_id, record_b_id, similarity, outcome, actor
   )
   values (
-    p_review_id, p_search_id, p_source_format, p_raw, p_metadata,
-    nullif(p_doi_normalized, ''), nullif(p_title_norm, ''), 'imported'
+    p_review_id, 'fuzzy_human', p_record_a, p_record_b, p_similarity, p_outcome, 'human'
   )
-  returning id into v_record_id;
-
-  update public.job_item set status = 'done' where id = p_job_item_id;
+  returning id into v_id;
 
   insert into public.audit_entry (
     review_id, actor_type, actor_id, action, entity, entity_id, before, after
   )
   values (
-    p_review_id, 'system', null, 'import_record', 'record', v_record_id,
-    null, jsonb_build_object('source_format', p_source_format)
+    p_review_id, 'human', auth.uid(), 'dedup_fuzzy_decide', 'dedup_decision', v_id,
+    null,
+    jsonb_build_object('outcome', p_outcome, 'record_a', p_record_a, 'record_b', p_record_b)
   );
 
-  return v_record_id;
+  return v_id;
 end;
 $$;
 
--- ============================================================
--- RLS
--- ============================================================
-alter table public.search   enable row level security;
-alter table public.record   enable row level security;
-alter table public.job      enable row level security;
-alter table public.job_item enable row level security;
-
--- Leitura por membros (escrita via RPC SECURITY DEFINER / service-role).
-create policy search_select   on public.search   for select using (public.is_review_member(review_id));
-create policy record_select   on public.record   for select using (public.is_review_member(review_id));
-create policy job_select      on public.job      for select using (public.is_review_member(review_id));
-create policy job_item_select on public.job_item for select using (public.is_review_member(review_id));
-
--- ============================================================
--- Grants
--- ============================================================
-grant execute on function public.create_import_job(uuid, source_format, jsonb, jsonb) to authenticated;
--- insert_import_record: só o worker (service-role); negado ao authenticated/anon.
-revoke execute on function public.insert_import_record(uuid, uuid, uuid, source_format, jsonb, jsonb, text, text) from authenticated, anon, public;
-grant  execute on function public.insert_import_record(uuid, uuid, uuid, source_format, jsonb, jsonb, text, text) to service_role;
+grant execute on function public.decide_fuzzy(uuid, uuid, uuid, dedup_outcome, real) to authenticated;
 ```
 
-- [ ] **Step 2: Resetar o banco local e aplicar migrations**
+- [ ] **Step 4: Apply migration and run the test**
 
-Run: `npx supabase db reset`
-Expected: aplica `0001`, `0002`, `0003` sem erro; mensagem final de sucesso do reset.
-
-- [ ] **Step 3: Regerar os tipos do banco**
-
-Run: `npm run gen:types`
-Expected: `src/types/database.ts` passa a conter `search`, `record`, `job`, `job_item` e as funções `create_import_job`/`insert_import_record`.
-
-- [ ] **Step 4: Verificar typecheck**
-
-Run: `npm run typecheck`
-Expected: sem saída (limpo).
+Run: `supabase db reset && npm run test -- tests/integration/dedup.test.ts`
+Expected: PASS (todos os blocos de integração de dedup).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add supabase/migrations/0003_search_record_jobs.sql src/types/database.ts
-git commit -m "feat(db): migration 0003 search/record/job/job_item + RLS + import RPCs"
+git add supabase/migrations/0005_dedup.sql tests/integration/dedup.test.ts
+git commit -m "feat(dedup): decide_fuzzy RPC — mesma/distintas reversível (FR-020/021)"
 ```
 
 ---
 
-## Task 3: Migration 0004 — agendamento do worker (pg_cron/pg_net, guardado)
+## Task 6: Camada TS — config + queries de dedup
 
 **Files:**
-- Create: `supabase/migrations/0004_jobs_cron.sql`
+- Create: `src/lib/dedup/config.ts`
+- Create: `src/lib/dedup/queries.ts`
+- Test: `tests/unit/dedup/config.test.ts`
 
-- [ ] **Step 1: Escrever a migration de agendamento (resiliente a extensão ausente)**
+- [ ] **Step 1: Write the failing unit test**
 
-Create `supabase/migrations/0004_jobs_cron.sql`:
-```sql
--- ============================================================
--- Marco 1 / Fatia 3 — Agendamento do worker (D-F3.5).
--- Produção: pg_cron dispara, a cada minuto, um POST (pg_net) na Edge Function
--- jobs-worker. Bloco guardado: se pg_cron/pg_net não estiverem disponíveis
--- (ex.: imagem local sem as extensões), apenas emite NOTICE e segue — o reset
--- local NÃO falha (os testes disparam o worker pelo gatilho server-side).
--- ============================================================
-do $$
-begin
-  create extension if not exists pg_cron;
-  create extension if not exists pg_net;
+`tests/unit/dedup/config.test.ts`:
 
-  perform cron.schedule(
-    'jobs-worker-tick',
-    '* * * * *',
-    $cron$
-    select net.http_post(
-      url := current_setting('app.functions_url', true) || '/functions/v1/jobs-worker',
-      headers := jsonb_build_object(
-        'Content-Type', 'application/json',
-        'x-cron-secret', current_setting('app.cron_secret', true)
-      ),
-      body := '{}'::jsonb
-    );
-    $cron$
-  );
-exception when others then
-  raise notice 'pg_cron/pg_net indisponível — worker será disparado pelo gatilho server-side (D-F3.5). Detalhe: %', sqlerrm;
-end $$;
-```
-Nota de execução: os GUCs `app.functions_url`/`app.cron_secret` são configurados no projeto de produção (`alter database ... set app.functions_url = ...`). Localmente o bloco cai no `exception` e não agenda — esperado.
-
-- [ ] **Step 2: Resetar o banco local (confirmar que não quebra)**
-
-Run: `npx supabase db reset`
-Expected: reset conclui com sucesso. É aceitável ver o `NOTICE` "pg_cron/pg_net indisponível ..." se a imagem local não tiver as extensões — **o reset não pode falhar**.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add supabase/migrations/0004_jobs_cron.sql
-git commit -m "feat(db): migration 0004 guarded pg_cron/pg_net worker schedule"
-```
-
----
-
-## Task 4: Núcleo de import — tipos + normalização (unit)
-
-**Files:**
-- Create: `supabase/functions/_shared/import/types.ts`
-- Create: `supabase/functions/_shared/import/normalize.ts`
-- Test: `tests/unit/import/normalize.test.ts`
-
-- [ ] **Step 1: Escrever os tipos do contrato**
-
-Create `supabase/functions/_shared/import/types.ts`:
-```ts
-export type SourceFormat = "ris" | "bibtex" | "csv";
-
-export interface ParsedRecord {
-  title: string;
-  authors: string[];
-  year: number | null;
-  doi: string | null;
-  abstract: string | null;
-  language: string | null; // original (FR-038)
-  raw: Record<string, unknown>; // campos originais íntegros
-}
-
-export interface ParseError {
-  line: number | null;
-  message: string; // pt-BR, claro (FR-016)
-}
-
-export interface ParseResult {
-  records: ParsedRecord[];
-  errors: ParseError[];
-  format: SourceFormat;
-}
-
-export interface BibliographicParser {
-  format: SourceFormat;
-  parse(
-    content: string,
-    opts?: { fieldMap?: Record<string, string> },
-  ): ParseResult;
-}
-```
-
-- [ ] **Step 2: Escrever o teste de normalização (RED)**
-
-Create `tests/unit/import/normalize.test.ts`:
 ```ts
 import { describe, it, expect } from "vitest";
-import { normalizeDoi, normalizeTitle } from "@shared/import/normalize";
+import { DEDUP_FUZZY_HIGH } from "@/lib/dedup/config";
 
-describe("normalizeDoi", () => {
-  it("remove o prefixo de URL e baixa a caixa", () => {
-    expect(normalizeDoi("https://doi.org/10.1000/ABC.123")).toBe(
-      "10.1000/abc.123",
-    );
-  });
-  it("aceita DOI cru", () => {
-    expect(normalizeDoi("10.1/X")).toBe("10.1/x");
-  });
-  it("retorna null para vazio/nulo", () => {
-    expect(normalizeDoi("")).toBeNull();
-    expect(normalizeDoi(null)).toBeNull();
-  });
-});
-
-describe("normalizeTitle", () => {
-  it("baixa caixa, remove pontuação e colapsa espaços", () => {
-    expect(normalizeTitle("  A  Study, of   Things! ")).toBe(
-      "a study of things",
-    );
-  });
-  it("retorna null para vazio", () => {
-    expect(normalizeTitle("   ")).toBeNull();
+describe("dedup config (R2)", () => {
+  it("limiar forte fuzzy é 0.92", () => {
+    expect(DEDUP_FUZZY_HIGH).toBe(0.92);
   });
 });
 ```
 
-- [ ] **Step 3: Rodar o teste (verificar que falha)**
+- [ ] **Step 2: Run it to confirm it fails**
 
-Run: `npm test -- tests/unit/import/normalize.test.ts`
-Expected: FAIL — `Cannot find module '@shared/import/normalize'`.
+Run: `npm run test -- tests/unit/dedup/config.test.ts`
+Expected: FAIL — cannot find module `@/lib/dedup/config`.
 
-- [ ] **Step 4: Implementar normalização (GREEN)**
+- [ ] **Step 3: Create config + queries**
 
-Create `supabase/functions/_shared/import/normalize.ts`:
+`src/lib/dedup/config.ts`:
+
 ```ts
-/** Normaliza DOI para chave de dedup exata (R2). */
-export function normalizeDoi(doi: string | null | undefined): string | null {
-  if (!doi) return null;
-  const v = doi
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\/(dx\.)?doi\.org\//, "")
-    .replace(/^doi:/, "")
-    .trim();
-  return v.length > 0 ? v : null;
-}
-
-/** Normaliza título para chave de dedup exata/fuzzy (R2). */
-export function normalizeTitle(
-  title: string | null | undefined,
-): string | null {
-  if (!title) return null;
-  const v = title
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/\p{Diacritic}/gu, "") // diacríticos
-    .replace(/[^\p{L}\p{N}\s]/gu, " ") // pontuação → espaço
-    .replace(/\s+/g, " ")
-    .trim();
-  return v.length > 0 ? v : null;
-}
+// Limiares de deduplicação fuzzy (R2). Ajustáveis sem mudança de schema.
+// Banda forte (entra na fila de confirmação): similaridade de título >= HIGH e mesmo ano.
+export const DEDUP_FUZZY_HIGH = 0.92;
 ```
 
-- [ ] **Step 5: Rodar o teste (verificar que passa)**
+`src/lib/dedup/queries.ts`:
 
-Run: `npm test -- tests/unit/import/normalize.test.ts`
-Expected: PASS (5 testes).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add supabase/functions/_shared/import/types.ts supabase/functions/_shared/import/normalize.ts tests/unit/import/normalize.test.ts
-git commit -m "feat(import): ParsedRecord contract + doi/title normalization (R2)"
-```
-
----
-
-## Task 5: Parser CSV (papaparse)
-
-**Files:**
-- Create: `supabase/functions/_shared/import/csv.ts`
-- Create: `tests/fixtures/import/sample.csv`
-- Test: `tests/unit/import/csv.test.ts`
-
-- [ ] **Step 1: Criar a fixture CSV**
-
-Create `tests/fixtures/import/sample.csv`:
-```csv
-title,authors,year,doi,abstract,language
-"Aprendizagem ativa em sala","Silva, A.; Souza, B.",2021,10.1000/abc,"Resumo um.",pt
-"Active learning review","Doe, J.",2019,,"Abstract two.",en
-```
-
-- [ ] **Step 2: Escrever o teste (RED)**
-
-Create `tests/unit/import/csv.test.ts`:
-```ts
-import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { csvParser } from "@shared/import/csv";
-
-const sample = readFileSync("tests/fixtures/import/sample.csv", "utf8");
-
-describe("csvParser", () => {
-  it("parseia linhas válidas com cabeçalho padrão", () => {
-    const res = csvParser.parse(sample);
-    expect(res.errors).toHaveLength(0);
-    expect(res.records).toHaveLength(2);
-    const [a, b] = res.records;
-    expect(a!.title).toBe("Aprendizagem ativa em sala");
-    expect(a!.authors).toEqual(["Silva, A.", "Souza, B."]);
-    expect(a!.year).toBe(2021);
-    expect(a!.doi).toBe("10.1000/abc");
-    expect(a!.language).toBe("pt");
-    expect(b!.doi).toBeNull();
-  });
-
-  it("aceita fieldMap para colunas não-padrão (FR-014)", () => {
-    const custom = 'Título,Ano\n"X",2020\n';
-    const res = csvParser.parse(custom, {
-      fieldMap: { title: "Título", year: "Ano" },
-    });
-    expect(res.records).toHaveLength(1);
-    expect(res.records[0]!.title).toBe("X");
-    expect(res.records[0]!.year).toBe(2020);
-  });
-
-  it("conteúdo sem linhas de dados ⇒ zero records", () => {
-    const res = csvParser.parse("title,year\n");
-    expect(res.records).toHaveLength(0);
-  });
-});
-```
-
-- [ ] **Step 3: Rodar o teste (verificar que falha)**
-
-Run: `npm test -- tests/unit/import/csv.test.ts`
-Expected: FAIL — módulo `@shared/import/csv` inexistente.
-
-- [ ] **Step 4: Implementar o parser CSV (GREEN)**
-
-Create `supabase/functions/_shared/import/csv.ts`:
-```ts
-import Papa from "papaparse";
-import type { BibliographicParser, ParsedRecord, ParseError } from "./types";
-
-const DEFAULT_MAP: Record<string, string> = {
-  title: "title",
-  authors: "authors",
-  year: "year",
-  doi: "doi",
-  abstract: "abstract",
-  language: "language",
-};
-
-function splitAuthors(v: string | undefined): string[] {
-  if (!v) return [];
-  return v
-    .split(/[;]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-function toYear(v: string | undefined): number | null {
-  if (!v) return null;
-  const n = parseInt(v.trim(), 10);
-  return Number.isFinite(n) ? n : null;
-}
-
-export const csvParser: BibliographicParser = {
-  format: "csv",
-  parse(content, opts) {
-    const map = { ...DEFAULT_MAP, ...(opts?.fieldMap ?? {}) };
-    const errors: ParseError[] = [];
-    const parsed = Papa.parse<Record<string, string>>(content, {
-      header: true,
-      skipEmptyLines: true,
-    });
-    for (const e of parsed.errors) {
-      errors.push({ line: e.row ?? null, message: `Erro de CSV: ${e.message}` });
-    }
-    const records: ParsedRecord[] = (parsed.data ?? [])
-      .filter((row) => (row[map.title] ?? "").trim().length > 0)
-      .map((row) => ({
-        title: (row[map.title] ?? "").trim(),
-        authors: splitAuthors(row[map.authors]),
-        year: toYear(row[map.year]),
-        doi: (row[map.doi] ?? "").trim() || null,
-        abstract: (row[map.abstract] ?? "").trim() || null,
-        language: (row[map.language] ?? "").trim() || null,
-        raw: row,
-      }));
-    return { records, errors, format: "csv" };
-  },
-};
-```
-
-- [ ] **Step 5: Rodar o teste (verificar que passa)**
-
-Run: `npm test -- tests/unit/import/csv.test.ts`
-Expected: PASS (3 testes).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add supabase/functions/_shared/import/csv.ts tests/fixtures/import/sample.csv tests/unit/import/csv.test.ts
-git commit -m "feat(import): CSV parser (papaparse) with fieldMap (FR-013/014)"
-```
-
----
-
-## Task 6: Parser RIS (próprio)
-
-**Files:**
-- Create: `supabase/functions/_shared/import/ris.ts`
-- Create: `tests/fixtures/import/sample.ris`
-- Create: `tests/fixtures/import/malformed.ris`
-- Test: `tests/unit/import/ris.test.ts`
-
-- [ ] **Step 1: Criar fixtures RIS (válida e malformada)**
-
-Create `tests/fixtures/import/sample.ris`:
-```ris
-TY  - JOUR
-TI  - Aprendizagem ativa em sala
-AU  - Silva, A.
-AU  - Souza, B.
-PY  - 2021
-DO  - 10.1000/abc
-AB  - Resumo um.
-LA  - pt
-ER  -
-TY  - JOUR
-T1  - Active learning review
-A1  - Doe, J.
-Y1  - 2019///
-N2  - Abstract two.
-LA  - en
-ER  -
-```
-
-Create `tests/fixtures/import/malformed.ris`:
-```ris
-isto não é RIS
-apenas texto solto
-sem tags nem ER
-```
-
-- [ ] **Step 2: Escrever o teste (RED)**
-
-Create `tests/unit/import/ris.test.ts`:
-```ts
-import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { risParser } from "@shared/import/ris";
-
-const sample = readFileSync("tests/fixtures/import/sample.ris", "utf8");
-const malformed = readFileSync("tests/fixtures/import/malformed.ris", "utf8");
-
-describe("risParser", () => {
-  it("parseia dois registros, mapeando tags primárias e alternativas", () => {
-    const res = risParser.parse(sample);
-    expect(res.errors).toHaveLength(0);
-    expect(res.records).toHaveLength(2);
-    const [a, b] = res.records;
-    expect(a!.title).toBe("Aprendizagem ativa em sala");
-    expect(a!.authors).toEqual(["Silva, A.", "Souza, B."]);
-    expect(a!.year).toBe(2021);
-    expect(a!.doi).toBe("10.1000/abc");
-    expect(a!.abstract).toBe("Resumo um.");
-    expect(b!.title).toBe("Active learning review"); // T1
-    expect(b!.authors).toEqual(["Doe, J."]); // A1
-    expect(b!.year).toBe(2019); // Y1 com sufixo ///
-  });
-
-  it("arquivo sem tags/ER ⇒ zero records e erro claro (FR-016)", () => {
-    const res = risParser.parse(malformed);
-    expect(res.records).toHaveLength(0);
-    expect(res.errors.length).toBeGreaterThan(0);
-    expect(res.errors[0]!.message).toMatch(/RIS/i);
-  });
-});
-```
-
-- [ ] **Step 3: Rodar o teste (verificar que falha)**
-
-Run: `npm test -- tests/unit/import/ris.test.ts`
-Expected: FAIL — módulo inexistente.
-
-- [ ] **Step 4: Implementar o parser RIS (GREEN)**
-
-Create `supabase/functions/_shared/import/ris.ts`:
-```ts
-import type { BibliographicParser, ParsedRecord, ParseError } from "./types";
-
-const TAG_RE = /^([A-Z][A-Z0-9])\s{2}-\s?(.*)$/;
-
-const TITLE_TAGS = ["TI", "T1"];
-const AUTHOR_TAGS = ["AU", "A1"];
-const YEAR_TAGS = ["PY", "Y1"];
-const ABSTRACT_TAGS = ["AB", "N2"];
-
-function emptyAccum(): Record<string, string[]> {
-  return {};
-}
-
-function buildRecord(fields: Record<string, string[]>): ParsedRecord {
-  const first = (tags: string[]): string | null => {
-    for (const t of tags) if (fields[t]?.length) return fields[t]![0]!;
-    return null;
-  };
-  const all = (tags: string[]): string[] => {
-    const out: string[] = [];
-    for (const t of tags) if (fields[t]) out.push(...fields[t]!);
-    return out;
-  };
-  const yearRaw = first(YEAR_TAGS);
-  const yearMatch = yearRaw?.match(/\d{4}/);
-  return {
-    title: first(TITLE_TAGS) ?? "",
-    authors: all(AUTHOR_TAGS),
-    year: yearMatch ? parseInt(yearMatch[0], 10) : null,
-    doi: first(["DO"]),
-    abstract: first(ABSTRACT_TAGS),
-    language: first(["LA"]),
-    raw: Object.fromEntries(
-      Object.entries(fields).map(([k, v]) => [k, v.length === 1 ? v[0]! : v]),
-    ),
-  };
-}
-
-export const risParser: BibliographicParser = {
-  format: "ris",
-  parse(content) {
-    const errors: ParseError[] = [];
-    const records: ParsedRecord[] = [];
-    const lines = content.split(/\r\n|\r|\n/);
-
-    let fields = emptyAccum();
-    let lastTag: string | null = null;
-    let sawAnyTag = false;
-    let openRecord = false;
-
-    lines.forEach((line) => {
-      if (line.trim() === "") return;
-      const m = line.match(TAG_RE);
-      if (!m) {
-        // linha de continuação do último campo
-        if (lastTag && fields[lastTag]?.length) {
-          const arr = fields[lastTag]!;
-          arr[arr.length - 1] = `${arr[arr.length - 1]} ${line.trim()}`;
-        }
-        return;
-      }
-      const [, tag, value] = m;
-      sawAnyTag = true;
-      if (tag === "TY") {
-        fields = emptyAccum();
-        openRecord = true;
-        lastTag = null;
-        return;
-      }
-      if (tag === "ER") {
-        if (openRecord) records.push(buildRecord(fields));
-        fields = emptyAccum();
-        openRecord = false;
-        lastTag = null;
-        return;
-      }
-      (fields[tag!] ??= []).push((value ?? "").trim());
-      lastTag = tag!;
-    });
-
-    if (!sawAnyTag) {
-      errors.push({
-        line: 1,
-        message:
-          "Arquivo RIS inválido: nenhuma tag reconhecida (esperado 'TY  - ...').",
-      });
-    } else if (openRecord && records.length === 0) {
-      errors.push({
-        line: lines.length,
-        message: "Arquivo RIS inválido: registro sem marcador de fim 'ER  -'.",
-      });
-    }
-
-    return { records, errors, format: "ris" };
-  },
-};
-```
-
-- [ ] **Step 5: Rodar o teste (verificar que passa)**
-
-Run: `npm test -- tests/unit/import/ris.test.ts`
-Expected: PASS (2 testes).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add supabase/functions/_shared/import/ris.ts tests/fixtures/import/sample.ris tests/fixtures/import/malformed.ris tests/unit/import/ris.test.ts
-git commit -m "feat(import): RIS parser (own, tagged line-oriented) + malformed guard (FR-016)"
-```
-
----
-
-## Task 7: Parser BibTeX (adapter sobre @retorquere/bibtex-parser)
-
-**Files:**
-- Create: `supabase/functions/_shared/import/bibtex.ts`
-- Create: `tests/fixtures/import/sample.bib`
-- Test: `tests/unit/import/bibtex.test.ts`
-
-- [ ] **Step 1: Criar a fixture BibTeX**
-
-Create `tests/fixtures/import/sample.bib`:
-```bibtex
-@article{silva2021,
-  title = {Aprendizagem ativa em sala},
-  author = {Silva, A. and Souza, B.},
-  year = {2021},
-  doi = {10.1000/abc},
-  abstract = {Resumo um.},
-  language = {pt}
-}
-@article{doe2019,
-  title = {Active learning review},
-  author = {Doe, J.},
-  year = {2019}
-}
-```
-
-- [ ] **Step 2: Escrever o teste (RED) — o teste é o contrato de saída**
-
-Create `tests/unit/import/bibtex.test.ts`:
-```ts
-import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { bibtexParser } from "@shared/import/bibtex";
-
-const sample = readFileSync("tests/fixtures/import/sample.bib", "utf8");
-
-describe("bibtexParser", () => {
-  it("parseia dois registros e mapeia campos para ParsedRecord", () => {
-    const res = bibtexParser.parse(sample);
-    expect(res.errors).toHaveLength(0);
-    expect(res.records).toHaveLength(2);
-    const [a, b] = res.records;
-    expect(a!.title).toBe("Aprendizagem ativa em sala");
-    expect(a!.authors).toEqual(["Silva, A.", "Souza, B."]);
-    expect(a!.year).toBe(2021);
-    expect(a!.doi).toBe("10.1000/abc");
-    expect(a!.abstract).toBe("Resumo um.");
-    expect(a!.language).toBe("pt");
-    expect(b!.title).toBe("Active learning review");
-    expect(b!.doi).toBeNull();
-    expect(b!.year).toBe(2019);
-  });
-
-  it("conteúdo sem entradas válidas ⇒ zero records (FR-016)", () => {
-    const res = bibtexParser.parse("isto não é bibtex {{{");
-    expect(res.records).toHaveLength(0);
-  });
-});
-```
-
-- [ ] **Step 3: Rodar o teste (verificar que falha)**
-
-Run: `npm test -- tests/unit/import/bibtex.test.ts`
-Expected: FAIL — módulo inexistente.
-
-- [ ] **Step 4: Implementar o adapter BibTeX (GREEN)**
-
-Create `supabase/functions/_shared/import/bibtex.ts`. As acessoras (`asString`, leitura de `fields`/`creators`) são **defensivas** para tolerar variações de shape entre versões da lib; o teste do Step 2 é o contrato — se o mapeamento divergir, ajustar o acesso a campos (inspecionar `JSON.stringify(parse(sample))` num scratch) até o teste passar, **sem alterar o teste**.
-```ts
-import { parse as parseBibtex } from "@retorquere/bibtex-parser";
-import type { BibliographicParser, ParsedRecord, ParseError } from "./types";
-
-function asString(v: unknown): string | null {
-  if (v == null) return null;
-  if (Array.isArray(v)) return v.length ? asString(v[0]) : null;
-  const s = String(v).trim();
-  return s.length ? s : null;
-}
-
-function authorsFrom(entry: Record<string, unknown>): string[] {
-  // @retorquere expõe nomes em `creators.author` (lista de {firstName,lastName})
-  // ou, conforme a versão, em fields.author. Tratamos ambos.
-  const creators = (entry.creators as Record<string, unknown> | undefined)
-    ?.author;
-  if (Array.isArray(creators)) {
-    return creators
-      .map((c) => {
-        const o = c as { lastName?: string; firstName?: string; name?: string };
-        if (o.name) return o.name.trim();
-        const last = (o.lastName ?? "").trim();
-        const first = (o.firstName ?? "").trim();
-        return [last, first].filter(Boolean).join(", ");
-      })
-      .filter((s) => s.length > 0);
-  }
-  const fields = entry.fields as Record<string, unknown> | undefined;
-  const raw = asString(fields?.author);
-  if (!raw) return [];
-  return raw
-    .split(/\s+and\s+/i)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-export const bibtexParser: BibliographicParser = {
-  format: "bibtex",
-  parse(content) {
-    const errors: ParseError[] = [];
-    let entries: Array<Record<string, unknown>> = [];
-    try {
-      const bib = parseBibtex(content) as { entries?: unknown };
-      entries = Array.isArray(bib.entries)
-        ? (bib.entries as Array<Record<string, unknown>>)
-        : [];
-    } catch (e) {
-      errors.push({
-        line: null,
-        message: `Arquivo BibTeX inválido: ${(e as Error).message}`,
-      });
-      return { records: [], errors, format: "bibtex" };
-    }
-
-    const records: ParsedRecord[] = [];
-    for (const entry of entries) {
-      const fields = (entry.fields ?? {}) as Record<string, unknown>;
-      const title = asString(fields.title);
-      if (!title) continue; // entrada sem título não é registro válido
-      const yearStr = asString(fields.year) ?? asString(fields.date);
-      const yearMatch = yearStr?.match(/\d{4}/);
-      records.push({
-        title,
-        authors: authorsFrom(entry),
-        year: yearMatch ? parseInt(yearMatch[0], 10) : null,
-        doi: asString(fields.doi),
-        abstract: asString(fields.abstract),
-        language: asString(fields.language) ?? asString(fields.langid),
-        raw: { type: entry.type, key: entry.key, fields },
-      });
-    }
-    return { records, errors, format: "bibtex" };
-  },
-};
-```
-
-- [ ] **Step 5: Rodar o teste (verificar que passa)**
-
-Run: `npm test -- tests/unit/import/bibtex.test.ts`
-Expected: PASS (2 testes). Se o primeiro teste falhar por shape da lib, inspecionar a saída de `parseBibtex(sample)` e ajustar `authorsFrom`/acesso a `fields` até passar (não alterar o teste).
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add supabase/functions/_shared/import/bibtex.ts tests/fixtures/import/sample.bib tests/unit/import/bibtex.test.ts
-git commit -m "feat(import): BibTeX parser adapter (@retorquere/bibtex-parser) (FR-013)"
-```
-
----
-
-## Task 8: Roteador de parsers + parseContent
-
-**Files:**
-- Create: `supabase/functions/_shared/import/index.ts`
-- Test: `tests/unit/import/parse-content.test.ts`
-
-- [ ] **Step 1: Escrever o teste (RED)**
-
-Create `tests/unit/import/parse-content.test.ts`:
-```ts
-import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
-import { parseContent, parserFor } from "@shared/import/index";
-
-describe("parseContent", () => {
-  it("roteia por formato", () => {
-    expect(parserFor("ris").format).toBe("ris");
-    expect(parserFor("bibtex").format).toBe("bibtex");
-    expect(parserFor("csv").format).toBe("csv");
-  });
-
-  it("parseia RIS pela fachada única", () => {
-    const ris = readFileSync("tests/fixtures/import/sample.ris", "utf8");
-    const res = parseContent("ris", ris);
-    expect(res.records).toHaveLength(2);
-    expect(res.format).toBe("ris");
-  });
-});
-```
-
-- [ ] **Step 2: Rodar o teste (verificar que falha)**
-
-Run: `npm test -- tests/unit/import/parse-content.test.ts`
-Expected: FAIL — módulo inexistente.
-
-- [ ] **Step 3: Implementar a fachada (GREEN)**
-
-Create `supabase/functions/_shared/import/index.ts`:
-```ts
-import { csvParser } from "./csv";
-import { risParser } from "./ris";
-import { bibtexParser } from "./bibtex";
-import type { BibliographicParser, ParseResult, SourceFormat } from "./types";
-
-const PARSERS: Record<SourceFormat, BibliographicParser> = {
-  csv: csvParser,
-  ris: risParser,
-  bibtex: bibtexParser,
-};
-
-export function parserFor(format: SourceFormat): BibliographicParser {
-  return PARSERS[format];
-}
-
-export function parseContent(
-  format: SourceFormat,
-  content: string,
-  opts?: { fieldMap?: Record<string, string> },
-): ParseResult {
-  return parserFor(format).parse(content, opts);
-}
-
-export type {
-  SourceFormat,
-  ParsedRecord,
-  ParseError,
-  ParseResult,
-  BibliographicParser,
-} from "./types";
-```
-
-- [ ] **Step 4: Rodar o teste + cobertura do diretório import (≥80%, constitution §Testes)**
-
-Run: `npm test -- tests/unit/import/`
-Expected: PASS (todos). Confirmar visualmente que os 4 parsers + normalize estão cobertos pelos casos válidos/malformados/fieldMap.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add supabase/functions/_shared/import/index.ts tests/unit/import/parse-content.test.ts
-git commit -m "feat(import): single parseContent facade + parser router"
-```
-
----
-
-## Task 9: Núcleo de enqueue (valida + cria job/itens)
-
-**Files:**
-- Create: `supabase/functions/_shared/jobs/types.ts`
-- Create: `supabase/functions/_shared/jobs/enqueue.ts`
-- Test: `tests/integration/jobs.import.test.ts` (parte 1 — enqueue)
-
-- [ ] **Step 1: Escrever os tipos de jobs**
-
-Create `supabase/functions/_shared/jobs/types.ts`:
-```ts
-import type { SourceFormat } from "../import/types";
-
-export interface SearchInput {
-  queryString: string;
-  database: string;
-  searchedOn: string; // ISO date (yyyy-mm-dd)
-  hits: number;
-}
-
-export interface EnqueueImportInput {
-  format: SourceFormat;
-  content: string;
-  fieldMap?: Record<string, string>;
-  search: SearchInput;
-}
-
-export interface EnqueueResult {
-  job_id: string;
-  status: "queued";
-  item_count: number;
-  estimated_cost: null; // import_parse não tem custo de IA
-}
-
-export interface WorkerResult {
-  job_id: string;
-  status: "completed" | "completed_with_errors" | "failed";
-  done: number;
-  failed: number;
-}
-
-/** Erro de validação que o shell HTTP mapeia para 400 (FR-016). */
-export class EnqueueValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "EnqueueValidationError";
-  }
-}
-
-/** Dependências injetáveis (mantém o núcleo portátil/testável). */
-export interface JobDeps {
-  // Cliente Supabase tipado (Node nos testes; Deno no shell).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  supabase: any;
-}
-```
-Nota: `supabase: any` está isolado em deps de baixo nível; o ESLint do projeto proíbe `any`, por isso o `eslint-disable-next-line` pontual (não há `SupabaseClient<Database>` disponível no runtime Deno sem acoplar o gerado). O núcleo de domínio permanece tipado.
-
-- [ ] **Step 2: Escrever o teste de integração do enqueue (RED)**
-
-Create `tests/integration/jobs.import.test.ts`:
-```ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { readFileSync } from "node:fs";
-import { signUpUser, serviceClient } from "./helpers/supabase";
-import { enqueueImportJob } from "@shared/jobs/enqueue";
-import { EnqueueValidationError } from "@shared/jobs/types";
-
-const ris = readFileSync("tests/fixtures/import/sample.ris", "utf8");
-const malformed = readFileSync("tests/fixtures/import/malformed.ris", "utf8");
-
-describe("import job — enqueue (§VIII / FR-016)", () => {
-  let userClient: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-
-  beforeAll(async () => {
-    const stamp = Date.now();
-    const u = await signUpUser(`imp_${stamp}@example.com`, "senha-teste-123");
-    userClient = u.client;
-    const { data } = await userClient.rpc("create_review", {
-      p_title: "Importação",
-    });
-    reviewId = data.id;
-  });
-
-  const search = {
-    queryString: "active learning",
-    database: "ERIC",
-    searchedOn: "2026-05-30",
-    hits: 2,
-  };
-
-  it("RIS válido ⇒ cria job + itens, mas NÃO cria records ainda (enqueue não processa)", async () => {
-    const res = await enqueueImportJob({ supabase: userClient }, reviewId, {
-      format: "ris",
-      content: ris,
-      search,
-    });
-    expect(res.status).toBe("queued");
-    expect(res.item_count).toBe(2);
-
-    const { count: itemCount } = await userClient
-      .from("job_item")
-      .select("id", { count: "exact", head: true })
-      .eq("review_id", reviewId);
-    expect(itemCount).toBe(2);
-
-    const { count: recordCount } = await userClient
-      .from("record")
-      .select("id", { count: "exact", head: true })
-      .eq("review_id", reviewId);
-    expect(recordCount).toBe(0); // §VIII: worker ainda não rodou
-  });
-
-  it("arquivo malformado ⇒ EnqueueValidationError e zero persistência (FR-016)", async () => {
-    await expect(
-      enqueueImportJob({ supabase: userClient }, reviewId, {
-        format: "ris",
-        content: malformed,
-        search,
-      }),
-    ).rejects.toBeInstanceOf(EnqueueValidationError);
-
-    // Nada novo persistido por causa do malformado: continua só o search válido anterior.
-    const { count: searchCount } = await serviceClient()
-      .from("search")
-      .select("id", { count: "exact", head: true })
-      .eq("review_id", reviewId);
-    expect(searchCount).toBe(1);
-  });
-});
-```
-
-- [ ] **Step 3: Rodar o teste (verificar que falha)**
-
-Run: `npm test -- tests/integration/jobs.import.test.ts`
-Expected: FAIL — `@shared/jobs/enqueue` inexistente.
-
-- [ ] **Step 4: Implementar o núcleo de enqueue (GREEN)**
-
-Create `supabase/functions/_shared/jobs/enqueue.ts`:
-```ts
-import { parseContent } from "../import/index";
-import {
-  type EnqueueImportInput,
-  type EnqueueResult,
-  type JobDeps,
-  EnqueueValidationError,
-} from "./types";
-
-/**
- * Valida e enfileira uma importação (D-F3.4). Parseia para validar:
- * 0 registros válidos ⇒ EnqueueValidationError (FR-016, zero persistência).
- * Caso contrário, cria search + job + job_items atômicos via RPC create_import_job.
- * NÃO insere records — isso é trabalho do worker (§VIII).
- */
-export async function enqueueImportJob(
-  deps: JobDeps,
-  reviewId: string,
-  input: EnqueueImportInput,
-): Promise<EnqueueResult> {
-  const result = parseContent(input.format, input.content, {
-    fieldMap: input.fieldMap,
-  });
-
-  if (result.records.length === 0) {
-    const detail = result.errors[0]?.message ?? "nenhum registro válido.";
-    throw new EnqueueValidationError(
-      `Importação rejeitada: ${detail} Nenhum registro foi salvo.`,
-    );
-  }
-
-  const { data, error } = await deps.supabase.rpc("create_import_job", {
-    p_review_id: reviewId,
-    p_format: input.format,
-    p_search: input.search,
-    p_items: result.records,
-  });
-  if (error) throw new Error(error.message);
-
-  return {
-    job_id: data.id,
-    status: "queued",
-    item_count: result.records.length,
-    estimated_cost: null,
-  };
-}
-```
-
-- [ ] **Step 5: Rodar o teste (verificar que passa)**
-
-Run: `npm test -- tests/integration/jobs.import.test.ts`
-Expected: PASS (2 testes da suíte de enqueue). Requer `supabase start` ativo e `.env.local` preenchido.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add supabase/functions/_shared/jobs/types.ts supabase/functions/_shared/jobs/enqueue.ts tests/integration/jobs.import.test.ts
-git commit -m "feat(jobs): enqueue core — validate parse, create job/items (§VIII/FR-016)"
-```
-
----
-
-## Task 10: Núcleo do worker (persiste records por item, resiliente)
-
-**Files:**
-- Create: `supabase/functions/_shared/jobs/worker.ts`
-- Modify: `tests/integration/jobs.import.test.ts` (parte 2 — worker)
-
-- [ ] **Step 1: Adicionar o bloco de teste do worker (RED)**
-
-Modify `tests/integration/jobs.import.test.ts` — acrescentar o import e este `describe` ao fim do arquivo:
-```ts
-import { processImportJob } from "@shared/jobs/worker";
-
-describe("import job — worker (§VIII resiliência por-item)", () => {
-  let userClient: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-  let jobId: string;
-
-  beforeAll(async () => {
-    const stamp = Date.now();
-    const u = await signUpUser(`wrk_${stamp}@example.com`, "senha-teste-123");
-    userClient = u.client;
-    const { data: review } = await userClient.rpc("create_review", {
-      p_title: "Worker",
-    });
-    reviewId = review.id;
-    const res = await enqueueImportJob({ supabase: userClient }, reviewId, {
-      format: "ris",
-      content: ris,
-      search: {
-        queryString: "x",
-        database: "ERIC",
-        searchedOn: "2026-05-30",
-        hits: 2,
-      },
-    });
-    jobId = res.job_id;
-  });
-
-  it("processa todos os itens ⇒ records inseridos + job completed", async () => {
-    const out = await processImportJob({ supabase: serviceClient() }, jobId);
-    expect(out.status).toBe("completed");
-    expect(out.done).toBe(2);
-    expect(out.failed).toBe(0);
-
-    const { count } = await userClient
-      .from("record")
-      .select("id", { count: "exact", head: true })
-      .eq("review_id", reviewId);
-    expect(count).toBe(2);
-
-    const { data: rec } = await userClient
-      .from("record")
-      .select("doi_normalized, corpus_state")
-      .eq("review_id", reviewId)
-      .not("doi_normalized", "is", null)
-      .limit(1)
-      .maybeSingle();
-    expect(rec!.doi_normalized).toBe("10.1000/abc"); // normalização aplicada
-    expect(rec!.corpus_state).toBe("imported");
-  });
-
-  it("falha forçada num item ⇒ completed_with_errors, demais done", async () => {
-    const u = await signUpUser(
-      `wrk2_${Date.now()}@example.com`,
-      "senha-teste-123",
-    );
-    const { data: review } = await u.client.rpc("create_review", {
-      p_title: "Worker2",
-    });
-    const res = await enqueueImportJob({ supabase: u.client }, review.id, {
-      format: "ris",
-      content: ris,
-      search: {
-        queryString: "x",
-        database: "ERIC",
-        searchedOn: "2026-05-30",
-        hits: 2,
-      },
-    });
-    let n = 0;
-    const out = await processImportJob(
-      {
-        supabase: serviceClient(),
-        // injeta processamento que falha no 1º item (DI — D-F3.1)
-        processItem: async (item, real) => {
-          n += 1;
-          if (n === 1) throw new Error("falha simulada");
-          return real(item);
-        },
-      },
-      res.job_id,
-    );
-    expect(out.status).toBe("completed_with_errors");
-    expect(out.failed).toBe(1);
-    expect(out.done).toBe(1);
-  });
-});
-```
-
-- [ ] **Step 2: Rodar o teste (verificar que falha)**
-
-Run: `npm test -- tests/integration/jobs.import.test.ts`
-Expected: FAIL — `@shared/jobs/worker` inexistente.
-
-- [ ] **Step 3: Implementar o núcleo do worker (GREEN)**
-
-Create `supabase/functions/_shared/jobs/worker.ts`:
-```ts
-import { normalizeDoi, normalizeTitle } from "../import/normalize";
-import type { ParsedRecord, SourceFormat } from "../import/types";
-import type { JobDeps, WorkerResult } from "./types";
-
-interface ImportItemPayload {
-  record: ParsedRecord;
-  search_id: string;
-  format: SourceFormat;
-}
-
-interface WorkItem {
-  id: string;
-  payload: ImportItemPayload;
-  review_id: string;
-}
-
-interface WorkerDeps extends JobDeps {
-  /** Override de processamento por item (testes — D-F3.1). `real` aplica o default. */
-  processItem?: (
-    item: WorkItem,
-    real: (i: WorkItem) => Promise<void>,
-  ) => Promise<void>;
-}
-
-/**
- * Processa um job de importação item-a-item (§VIII): normaliza (R2) e insere
- * cada record via RPC atômica insert_import_record. Falha de um item ⇒ item
- * 'failed' (não derruba o job). Retomável: só pega itens 'pending'.
- */
-export async function processImportJob(
-  deps: WorkerDeps,
-  jobId: string,
-): Promise<WorkerResult> {
-  const { supabase } = deps;
-
-  await supabase
-    .from("job")
-    .update({ status: "running", started_at: new Date().toISOString() })
-    .eq("id", jobId);
-
-  const { data: items, error } = await supabase
-    .from("job_item")
-    .select("id, payload, review_id")
-    .eq("job_id", jobId)
-    .eq("status", "pending");
-  if (error) throw new Error(error.message);
-
-  const real = async (i: WorkItem) => {
-    const rec = i.payload.record;
-    const { error: rpcErr } = await supabase.rpc("insert_import_record", {
-      p_review_id: i.review_id,
-      p_search_id: i.payload.search_id,
-      p_job_item_id: i.id,
-      p_source_format: i.payload.format,
-      p_raw: rec.raw,
-      p_metadata: {
-        title: rec.title,
-        authors: rec.authors,
-        year: rec.year,
-        doi: rec.doi,
-        abstract: rec.abstract,
-        language: rec.language,
-      },
-      p_doi_normalized: normalizeDoi(rec.doi) ?? "",
-      p_title_norm: normalizeTitle(rec.title) ?? "",
-    });
-    if (rpcErr) throw new Error(rpcErr.message);
-  };
-
-  let done = 0;
-  let failed = 0;
-  for (const item of (items ?? []) as WorkItem[]) {
-    try {
-      if (deps.processItem) await deps.processItem(item, real);
-      else await real(item);
-      done += 1;
-    } catch (e) {
-      failed += 1;
-      await supabase
-        .from("job_item")
-        .update({
-          status: "failed",
-          error: (e as Error).message,
-          attempts: 1,
-        })
-        .eq("id", item.id);
-    }
-  }
-
-  const total = done + failed;
-  const status =
-    failed === 0 ? "completed" : done === 0 ? "failed" : "completed_with_errors";
-  await supabase
-    .from("job")
-    .update({
-      status,
-      progress: total > 0 ? Math.round((done / total) * 100) : 0,
-      finished_at: new Date().toISOString(),
-    })
-    .eq("id", jobId);
-
-  return { job_id: jobId, status, done, failed };
-}
-```
-
-- [ ] **Step 4: Rodar a suíte completa do job (verificar que passa)**
-
-Run: `npm test -- tests/integration/jobs.import.test.ts`
-Expected: PASS (enqueue + worker, 4 testes).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add supabase/functions/_shared/jobs/worker.ts tests/integration/jobs.import.test.ts
-git commit -m "feat(jobs): worker core — per-item record insert, resilient + resumable (§VIII)"
-```
-
----
-
-## Task 11: RLS das tabelas novas (SC-009)
-
-**Files:**
-- Test: `tests/integration/rls.record-search-job.test.ts`
-
-> A RLS já foi escrita na migration 0003; este teste a verifica (vermelho só se a política estiver errada).
-
-- [ ] **Step 1: Escrever o teste de isolamento**
-
-Create `tests/integration/rls.record-search-job.test.ts`:
-```ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { readFileSync } from "node:fs";
-import { signUpUser, serviceClient } from "./helpers/supabase";
-import { enqueueImportJob } from "@shared/jobs/enqueue";
-import { processImportJob } from "@shared/jobs/worker";
-
-const ris = readFileSync("tests/fixtures/import/sample.ris", "utf8");
-
-describe("RLS — record/search/job isolados por Revisão (SC-009)", () => {
-  let aClient: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let bClient: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewIdA: string;
-
-  beforeAll(async () => {
-    const stamp = Date.now();
-    const a = await signUpUser(`rls_a_${stamp}@example.com`, "senha-teste-123");
-    const b = await signUpUser(`rls_b_${stamp}@example.com`, "senha-teste-123");
-    aClient = a.client;
-    bClient = b.client;
-    const { data } = await aClient.rpc("create_review", { p_title: "A" });
-    reviewIdA = data.id;
-    const res = await enqueueImportJob({ supabase: aClient }, reviewIdA, {
-      format: "ris",
-      content: ris,
-      search: {
-        queryString: "x",
-        database: "ERIC",
-        searchedOn: "2026-05-30",
-        hits: 2,
-      },
-    });
-    await processImportJob({ supabase: serviceClient() }, res.job_id);
-  });
-
-  it("A enxerga seus records", async () => {
-    const { data } = await aClient
-      .from("record")
-      .select("id")
-      .eq("review_id", reviewIdA);
-    expect((data ?? []).length).toBe(2);
-  });
-
-  it("B NÃO enxerga record/search/job/job_item de A (0 vazamentos)", async () => {
-    for (const table of ["record", "search", "job", "job_item"] as const) {
-      const { data } = await bClient
-        .from(table)
-        .select("id")
-        .eq("review_id", reviewIdA);
-      expect(data ?? []).toHaveLength(0);
-    }
-  });
-
-  it("B NÃO consegue chamar create_import_job na Revisão de A", async () => {
-    const { error } = await bClient.rpc("create_import_job", {
-      p_review_id: reviewIdA,
-      p_format: "ris",
-      p_search: {
-        queryString: "x",
-        database: "ERIC",
-        searchedOn: "2026-05-30",
-        hits: 1,
-      },
-      p_items: [
-        {
-          title: "intruso",
-          authors: [],
-          year: null,
-          doi: null,
-          abstract: null,
-          language: null,
-          raw: {},
-        },
-      ],
-    });
-    expect(error).not.toBeNull(); // 'not a member'
-  });
-});
-```
-
-- [ ] **Step 2: Rodar o teste (verificar que passa)**
-
-Run: `npm test -- tests/integration/rls.record-search-job.test.ts`
-Expected: PASS (3 testes).
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add tests/integration/rls.record-search-job.test.ts
-git commit -m "test(rls): record/search/job isolation + non-member enqueue denied (SC-009)"
-```
-
----
-
-## Task 12: Edge Functions (cascas Deno) — jobs-enqueue, jobs-worker
-
-**Files:**
-- Create: `supabase/functions/jobs-enqueue/index.ts`
-- Create: `supabase/functions/jobs-worker/index.ts`
-
-> Estes arquivos NÃO são checados pelo `tsc` do host (D-F3.3, excluídos). São cascas finas sobre o núcleo já testado. Validação real: deploy/Deno (fora desta sessão). Mantê-los mínimos.
-
-- [ ] **Step 1: Escrever a Edge Function de enqueue**
-
-Create `supabase/functions/jobs-enqueue/index.ts`:
-```ts
-// Edge Function (Deno) — casca HTTP sobre enqueueImportJob (D-F3.1/contrato async-jobs).
-import { createClient } from "@supabase/supabase-js";
-import { enqueueImportJob } from "../_shared/jobs/enqueue.ts";
-import { EnqueueValidationError } from "../_shared/jobs/types.ts";
-
-Deno.serve(async (req: Request) => {
-  try {
-    const auth = req.headers.get("Authorization") ?? "";
-    const body = await req.json();
-    const { review_id, type, payload } = body;
-    if (type !== "import_parse") {
-      return Response.json({ error: "tipo não suportado" }, { status: 400 });
-    }
-    // Cliente com o JWT do chamador → RLS valida membership.
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: auth } } },
-    );
-    const result = await enqueueImportJob({ supabase }, review_id, payload);
-    return Response.json(result, { status: 202 });
-  } catch (e) {
-    if (e instanceof EnqueueValidationError) {
-      return Response.json({ error: e.message }, { status: 400 }); // FR-016
-    }
-    return Response.json({ error: (e as Error).message }, { status: 500 });
-  }
-});
-```
-
-- [ ] **Step 2: Escrever a Edge Function do worker**
-
-Create `supabase/functions/jobs-worker/index.ts`:
-```ts
-// Edge Function (Deno) agendada por pg_cron (D-F3.5). Processa jobs queued.
-import { createClient } from "@supabase/supabase-js";
-import { processImportJob } from "../_shared/jobs/worker.ts";
-
-Deno.serve(async (req: Request) => {
-  const secret = req.headers.get("x-cron-secret");
-  if (secret !== Deno.env.get("CRON_SECRET")) {
-    return Response.json({ error: "forbidden" }, { status: 403 });
-  }
-  const supabase = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    { auth: { persistSession: false } },
-  );
-  const { data: jobs } = await supabase
-    .from("job")
-    .select("id")
-    .eq("type", "import_parse")
-    .in("status", ["queued", "running"]);
-  const results = [];
-  for (const j of (jobs ?? []) as Array<{ id: string }>) {
-    results.push(await processImportJob({ supabase }, j.id));
-  }
-  return Response.json({ processed: results }, { status: 200 });
-});
-```
-
-- [ ] **Step 3: Confirmar que o host segue limpo (functions excluídas do tsc)**
-
-Run: `npm run typecheck`
-Expected: sem saída — `supabase/functions/*/index.ts` não são checados (D-F3.3). Se aparecerem erros de `Deno`/`npm:`, confirmar o `exclude` da Task 1.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add supabase/functions/jobs-enqueue/index.ts supabase/functions/jobs-worker/index.ts
-git commit -m "feat(edge): jobs-enqueue + jobs-worker HTTP shells over shared core"
-```
-
----
-
-## Task 13: App — QueryProvider, queries de jobs, schema de busca, workbench + ModeBar + actions
-
-**Files:**
-- Create: `src/components/providers/QueryProvider.tsx`
-- Create: `src/lib/jobs/queries.ts`
-- Create: `src/lib/search/schema.ts`
-- Create: `src/components/workbench/ModeBar.tsx`
-- Create: `app/reviews/[reviewId]/workbench/page.tsx`
-- Create: `app/reviews/[reviewId]/workbench/actions.ts`
-- Modify: `app/reviews/[reviewId]/layout.tsx`
-
-> Os gates (typecheck/lint) desta task só fecham junto com a Task 14 (a página importa `ImportPanel`). Rodar os portões ao fim da Task 14.
-
-- [ ] **Step 1: Provider TanStack Query (client)**
-
-Create `src/components/providers/QueryProvider.tsx`:
-```tsx
-"use client";
-
-import { useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-
-export function QueryProvider({ children }: { children: React.ReactNode }) {
-  const [client] = useState(() => new QueryClient());
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-}
-```
-
-- [ ] **Step 2: Queries de jobs + contador de records**
-
-Create `src/lib/jobs/queries.ts`:
 ```ts
 import { createClient } from "@/lib/supabase/server";
 
-export interface JobRow {
-  id: string;
-  type: string;
-  status: string;
-  progress: number;
-  created_at: string;
+export interface ExactRemoval {
+  decisionId: string;
+  removedRecordId: string;
+  keptRecordId: string;
+  removedTitle: string;
+  keptTitle: string;
+  createdAt: string;
 }
 
-export async function listJobs(reviewId: string): Promise<JobRow[]> {
+export interface FuzzyCandidate {
+  recordAId: string;
+  recordBId: string;
+  similarity: number;
+  titleA: string;
+  titleB: string;
+  yearA: string | null;
+  yearB: string | null;
+}
+
+/** Log de exatas removidas e ainda não revertidas, com títulos para exibição. */
+export async function listExactRemovals(reviewId: string): Promise<ExactRemoval[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
-    .from("job")
-    .select("id, type, status, progress, created_at")
+    .from("dedup_decision")
+    .select(
+      "id, record_a_id, record_b_id, created_at, " +
+        "kept:record_a_id(metadata), removed:record_b_id(metadata)",
+    )
     .eq("review_id", reviewId)
+    .eq("kind", "exact_auto")
+    .eq("is_reversed", false)
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
-  return data ?? [];
+  type Row = {
+    id: string;
+    record_a_id: string;
+    record_b_id: string | null;
+    created_at: string;
+    kept: { metadata: { title?: string } } | null;
+    removed: { metadata: { title?: string } } | null;
+  };
+  return ((data ?? []) as unknown as Row[]).map((r) => ({
+    decisionId: r.id,
+    removedRecordId: r.record_b_id ?? "",
+    keptRecordId: r.record_a_id,
+    removedTitle: r.removed?.metadata?.title ?? "(sem título)",
+    keptTitle: r.kept?.metadata?.title ?? "(sem título)",
+    createdAt: r.created_at,
+  }));
 }
 
-export async function countRecords(reviewId: string): Promise<number> {
+/** Pares fuzzy pendentes de confirmação (FR-020). */
+export async function listFuzzyCandidates(reviewId: string): Promise<FuzzyCandidate[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("list_fuzzy_candidates", {
+    p_review_id: reviewId,
+  });
+  if (error) throw new Error(error.message);
+  type Row = {
+    record_a_id: string;
+    record_b_id: string;
+    similarity: number;
+    title_a: string | null;
+    title_b: string | null;
+    year_a: string | null;
+    year_b: string | null;
+  };
+  return ((data ?? []) as Row[]).map((r) => ({
+    recordAId: r.record_a_id,
+    recordBId: r.record_b_id,
+    similarity: r.similarity,
+    titleA: r.title_a ?? "(sem título)",
+    titleB: r.title_b ?? "(sem título)",
+    yearA: r.year_a,
+    yearB: r.year_b,
+  }));
+}
+
+/** Contador PRISMA "duplicados" mínimo (D-F4.7): removidas + mescladas, não revertidas. */
+export async function countDuplicates(reviewId: string): Promise<number> {
   const supabase = await createClient();
   const { count, error } = await supabase
-    .from("record")
+    .from("dedup_decision")
     .select("id", { count: "exact", head: true })
-    .eq("review_id", reviewId);
+    .eq("review_id", reviewId)
+    .eq("is_reversed", false)
+    .in("outcome", ["removed", "merged"]);
   if (error) throw new Error(error.message);
   return count ?? 0;
 }
 ```
 
-- [ ] **Step 3: Schema Zod do registro de busca (FR-015)**
+- [ ] **Step 4: Run the unit test + typecheck**
 
-Create `src/lib/search/schema.ts`:
-```ts
-import { z } from "zod";
+Run: `npm run test -- tests/unit/dedup/config.test.ts && npm run typecheck`
+Expected: unit PASS; typecheck sem saída (limpo). Se o `.select` com embed de FK acusar tipo, refine o cast `as unknown as Row[]` (já previsto).
 
-export const searchSchema = z.object({
-  queryString: z.string().trim().min(1, "Informe a string de busca."),
-  database: z.string().trim().min(1, "Informe a base consultada."),
-  searchedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Data inválida."),
-  hits: z.coerce.number().int().min(0, "Hits não pode ser negativo."),
-});
+- [ ] **Step 5: Commit**
 
-export type SearchInput = z.infer<typeof searchSchema>;
+```bash
+git add src/lib/dedup/config.ts src/lib/dedup/queries.ts tests/unit/dedup/config.test.ts
+git commit -m "feat(dedup): TS config + queries (exact log, fuzzy candidates, counter)"
 ```
 
-- [ ] **Step 4: Server Actions — enqueueImport + runImportWorker (D-F3.5/D-F3.7)**
+---
 
-Create `app/reviews/[reviewId]/workbench/actions.ts`:
+## Task 7: Server Actions — disparo automático + decisões + reversão
+
+**Files:**
+- Modify: `app/reviews/[reviewId]/workbench/actions.ts`
+- Test: `tests/integration/dedup.test.ts` (novo bloco)
+
+> **Skill obrigatória:** consulte `nextjs-best-practices` (Server Actions, `revalidatePath`, fronteiras RSC/Client) ao implementar esta tarefa.
+
+- [ ] **Step 1: Write the failing integration test** (auto-dedup ao concluir importação)
+
+Anexe a `tests/integration/dedup.test.ts`:
+
 ```ts
-"use server";
-
-import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueImportJob } from "@shared/jobs/enqueue";
 import { processImportJob } from "@shared/jobs/worker";
-import { EnqueueValidationError } from "@shared/jobs/types";
-import { searchSchema } from "@/lib/search/schema";
-import type { SourceFormat } from "@shared/import/types";
 
-async function requireMember(reviewId: string) {
-  const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) throw new Error("not authenticated");
-  const { data, error } = await supabase.rpc("is_review_member", {
-    p_review_id: reviewId,
-  });
-  if (error || !data) throw new Error("not a member");
-  return { supabase };
-}
-
-export async function enqueueImport(
-  reviewId: string,
-  input: {
-    format: SourceFormat;
-    content: string;
-    fieldMap?: Record<string, string>;
-    search: unknown;
-  },
-) {
-  const parsedSearch = searchSchema.safeParse(input.search);
-  if (!parsedSearch.success) {
-    return { ok: false as const, error: "Dados da busca inválidos." };
-  }
-  const { supabase } = await requireMember(reviewId);
-  try {
-    const res = await enqueueImportJob({ supabase }, reviewId, {
-      format: input.format,
-      content: input.content,
-      fieldMap: input.fieldMap,
-      search: parsedSearch.data,
+describe("dedup_exact dispara após a importação concluir (D-F4.3)", () => {
+  it("worker insere records; dedup_exact remove a exata e survivors ficam active", async () => {
+    const s = Date.now();
+    const owner = (await signUpUser(`auto_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", { p_title: "Auto dedup" });
+    const reviewId = review.id;
+    // RIS com 2 entradas de MESMO DOI ⇒ exata após import.
+    const ris = [
+      "TY  - JOUR", "TI  - Estudo X", "PY  - 2020", "DO  - 10.5/same", "ER  - ",
+      "TY  - JOUR", "TI  - Estudo X copia", "PY  - 2020", "DO  - 10.5/same", "ER  - ",
+    ].join("\n");
+    const res = await enqueueImportJob({ supabase: owner }, reviewId, {
+      format: "ris", content: ris,
+      search: { queryString: "x", database: "ERIC", searchedOn: "2026-05-30", hits: 2 },
     });
-    revalidatePath(`/reviews/${reviewId}/workbench`);
-    return { ok: true as const, jobId: res.job_id, itemCount: res.item_count };
-  } catch (e) {
-    if (e instanceof EnqueueValidationError) {
-      return { ok: false as const, error: e.message }; // FR-016
-    }
-    throw e;
-  }
-}
+    await processImportJob({ supabase: serviceClient() }, res.job_id);
+    // simula o que runImportWorker fará a seguir:
+    const removed = await owner.rpc("dedup_exact", { p_review_id: reviewId });
+    expect(removed.data).toBe(1);
+    const { count: active } = await owner
+      .from("record").select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId).eq("corpus_state", "active");
+    expect(active).toBe(1);
+  });
+});
+```
 
-/**
- * Gatilho síncrono do worker (Marco 1 / local / e2e — D-F3.5). Em produção o
- * worker é o jobs-worker agendado por pg_cron. Escopado: só processa jobs da
- * Revisão da qual o chamador é membro.
- */
+- [ ] **Step 2: Run it to confirm behavior**
+
+Run: `npm run test -- tests/integration/dedup.test.ts -t "após a importação"`
+Expected: PASS (o RPC já existe). Este teste fixa o contrato que a Server Action automatizará.
+
+- [ ] **Step 3: Extend `runImportWorker` + add dedup Server Actions**
+
+Em `app/reviews/[reviewId]/workbench/actions.ts`:
+
+1. `runImportWorker` já chama `await requireMember(reviewId)` no início, mas descarta o retorno. Capture o client e, **antes** do `revalidatePath` final, dispare o dedup exato:
+
+```ts
 export async function runImportWorker(reviewId: string) {
-  await requireMember(reviewId);
+  const { supabase } = await requireMember(reviewId);
   const admin = createAdminClient();
   const { data: jobs } = await admin
     .from("job")
@@ -1974,541 +1022,524 @@ export async function runImportWorker(reviewId: string) {
   for (const j of (jobs ?? []) as Array<{ id: string }>) {
     await processImportJob({ supabase: admin }, j.id);
   }
+  // Dedup exato automático ao concluir a importação (FR-018 / D-F4.3). Idempotente.
+  await supabase.rpc("dedup_exact", { p_review_id: reviewId });
   revalidatePath(`/reviews/${reviewId}/workbench`);
   return { ok: true as const };
 }
 ```
 
-- [ ] **Step 5: ModeBar — superfície única, modos por searchParam (FR-027/Princípio V)**
+2. Adicione as três Server Actions ao mesmo arquivo:
 
-Create `src/components/workbench/ModeBar.tsx`:
-```tsx
-import Link from "next/link";
+```ts
+export async function runExactDedup(reviewId: string) {
+  const { supabase } = await requireMember(reviewId);
+  const { data, error } = await supabase.rpc("dedup_exact", { p_review_id: reviewId });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const, removed: data ?? 0 };
+}
 
-export type WorkbenchMode =
-  | "import"
-  | "duplicates"
-  | "title_abstract"
-  | "full_text";
+export async function decideFuzzy(
+  reviewId: string,
+  input: { recordA: string; recordB: string; outcome: "merged" | "kept_distinct"; similarity: number },
+) {
+  const { supabase } = await requireMember(reviewId);
+  const { error } = await supabase.rpc("decide_fuzzy", {
+    p_review_id: reviewId,
+    p_record_a: input.recordA,
+    p_record_b: input.recordB,
+    p_outcome: input.outcome,
+    p_similarity: input.similarity,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
+}
 
+export async function reverseDedup(reviewId: string, decisionId: string) {
+  const { supabase } = await requireMember(reviewId);
+  const { error } = await supabase.rpc("reverse_dedup", { p_decision_id: decisionId });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
+}
+```
+
+- [ ] **Step 4: Verify typecheck + full integration suite**
+
+Run: `npm run typecheck && npm run test -- tests/integration/dedup.test.ts`
+Expected: typecheck limpo; integração PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add "app/reviews/[reviewId]/workbench/actions.ts" tests/integration/dedup.test.ts
+git commit -m "feat(dedup): auto dedup_exact pós-import + Server Actions decide/reverse (D-F4.3)"
+```
+
+---
+
+## Task 8: Habilitar o modo Duplicatas na ModeBar
+
+**Files:**
+- Modify: `src/components/workbench/ModeBar.tsx:9-14`
+
+> **Skill obrigatória:** consulte `frontend-design` (barra de modos / superfície única do workbench).
+
+- [ ] **Step 1: Update the MODES table**
+
+Em `src/components/workbench/ModeBar.tsx`, troque a linha do modo `duplicates` para `enabled: true`:
+
+```ts
 const MODES: { key: WorkbenchMode; label: string; enabled: boolean }[] = [
   { key: "import", label: "Importar", enabled: true },
-  { key: "duplicates", label: "Duplicatas", enabled: false },
+  { key: "duplicates", label: "Duplicatas", enabled: true },
   { key: "title_abstract", label: "Título/Resumo", enabled: false },
   { key: "full_text", label: "Texto completo", enabled: false },
 ];
+```
 
-export function ModeBar({
-  reviewId,
-  active,
-}: {
+- [ ] **Step 2: Verify lint + typecheck**
+
+Run: `npm run lint && npm run typecheck`
+Expected: lint ✔ sem avisos; typecheck limpo.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/components/workbench/ModeBar.tsx
+git commit -m "feat(workbench): ativar modo Duplicatas na ModeBar (Princípio V)"
+```
+
+---
+
+## Task 9: `DuplicatesPanel` — UI do modo Duplicatas (client)
+
+**Files:**
+- Create: `src/components/workbench/DuplicatesPanel.tsx`
+- Test: `tests/unit/workbench/duplicates-panel.test.tsx`
+
+> **Skills obrigatórias:** consulte `react-best-practices` (TanStack Query + updates otimistas; este painel espelha o padrão de `ImportPanel`/`JobProgress`) e `frontend-design` (par fuzzy lado a lado, log reversível, vocabulário visual consistente).
+
+- [ ] **Step 1: Write the failing test**
+
+`tests/unit/workbench/duplicates-panel.test.tsx`:
+
+```tsx
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { DuplicatesPanel } from "@/components/workbench/DuplicatesPanel";
+
+function renderPanel(over: Partial<React.ComponentProps<typeof DuplicatesPanel>> = {}) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <DuplicatesPanel
+        reviewId="r1"
+        loadExactRemovals={vi.fn().mockResolvedValue([
+          { decisionId: "d1", removedRecordId: "rb", keptRecordId: "ra",
+            removedTitle: "Estudo X copia", keptTitle: "Estudo X",
+            createdAt: "2026-06-01T00:00:00Z" },
+        ])}
+        loadFuzzyCandidates={vi.fn().mockResolvedValue([
+          { recordAId: "a", recordBId: "b", similarity: 0.95,
+            titleA: "deep learning triage", titleB: "deep learning triages",
+            yearA: "2023", yearB: "2023" },
+        ])}
+        onDecide={vi.fn().mockResolvedValue({ ok: true })}
+        onReverse={vi.fn().mockResolvedValue({ ok: true })}
+        {...over}
+      />
+    </QueryClientProvider>,
+  );
+}
+
+describe("DuplicatesPanel (US3)", () => {
+  it("mostra o par fuzzy lado a lado com ações mesma/distintas", async () => {
+    renderPanel();
+    expect(await screen.findByText("deep learning triage")).toBeInTheDocument();
+    expect(screen.getByText("deep learning triages")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /mesma/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /distintas/i })).toBeInTheDocument();
+  });
+
+  it("lista as exatas removidas com botão desfazer", async () => {
+    renderPanel();
+    expect(await screen.findByText(/Estudo X copia/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /desfazer/i })).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Run it to confirm it fails**
+
+Run: `npm run test -- tests/unit/workbench/duplicates-panel.test.tsx`
+Expected: FAIL — cannot find module `@/components/workbench/DuplicatesPanel`.
+
+- [ ] **Step 3: Implement the component**
+
+`src/components/workbench/DuplicatesPanel.tsx`:
+
+```tsx
+"use client";
+
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ExactRemoval, FuzzyCandidate } from "@/lib/dedup/queries";
+
+export interface DuplicatesPanelProps {
   reviewId: string;
-  active: WorkbenchMode;
-}) {
+  loadExactRemovals: (reviewId: string) => Promise<ExactRemoval[]>;
+  loadFuzzyCandidates: (reviewId: string) => Promise<FuzzyCandidate[]>;
+  onDecide: (input: {
+    recordA: string;
+    recordB: string;
+    outcome: "merged" | "kept_distinct";
+    similarity: number;
+  }) => Promise<{ ok: boolean }>;
+  onReverse: (decisionId: string) => Promise<{ ok: boolean }>;
+}
+
+export function DuplicatesPanel({
+  reviewId,
+  loadExactRemovals,
+  loadFuzzyCandidates,
+  onDecide,
+  onReverse,
+}: DuplicatesPanelProps) {
+  const qc = useQueryClient();
+  const exact = useQuery({
+    queryKey: ["dedup", "exact", reviewId],
+    queryFn: () => loadExactRemovals(reviewId),
+  });
+  const fuzzy = useQuery({
+    queryKey: ["dedup", "fuzzy", reviewId],
+    queryFn: () => loadFuzzyCandidates(reviewId),
+  });
+
+  const refetchAll = () => qc.invalidateQueries({ queryKey: ["dedup"] });
+
+  async function decide(c: FuzzyCandidate, outcome: "merged" | "kept_distinct") {
+    await onDecide({
+      recordA: c.recordAId,
+      recordB: c.recordBId,
+      outcome,
+      similarity: c.similarity,
+    });
+    await refetchAll();
+  }
+
+  async function reverse(decisionId: string) {
+    await onReverse(decisionId);
+    await refetchAll();
+  }
+
   return (
-    <nav
-      aria-label="Modos do workbench"
-      className="flex gap-1 border-b pb-2"
-      role="tablist"
-    >
-      {MODES.map((m) =>
-        m.enabled ? (
-          <Link
-            key={m.key}
-            href={`/reviews/${reviewId}/workbench?mode=${m.key}`}
-            role="tab"
-            aria-selected={active === m.key}
-            className={`rounded px-3 py-1 text-sm ${
-              active === m.key ? "bg-black text-white" : "hover:bg-gray-100"
-            }`}
-          >
-            {m.label}
-          </Link>
+    <div className="flex flex-col gap-6">
+      <section aria-labelledby="fuzzy-h">
+        <h2 id="fuzzy-h" className="mb-2 text-sm font-semibold">
+          Pares prováveis para confirmar
+        </h2>
+        {fuzzy.isLoading ? (
+          <p className="text-sm text-gray-500">Carregando…</p>
+        ) : (fuzzy.data?.length ?? 0) === 0 ? (
+          <p className="text-sm text-gray-500">Nenhum par pendente.</p>
         ) : (
-          <span
-            key={m.key}
-            role="tab"
-            aria-disabled="true"
-            title="Disponível em uma etapa seguinte"
-            className="cursor-not-allowed rounded px-3 py-1 text-sm text-gray-400"
-          >
-            {m.label}
-          </span>
-        ),
-      )}
-    </nav>
+          <ul className="flex flex-col gap-3">
+            {fuzzy.data!.map((c) => (
+              <li key={`${c.recordAId}:${c.recordBId}`} className="rounded border p-3">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm font-medium">{c.titleA}</p>
+                    <p className="text-xs text-gray-500">Ano: {c.yearA ?? "—"}</p>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">{c.titleB}</p>
+                    <p className="text-xs text-gray-500">Ano: {c.yearB ?? "—"}</p>
+                  </div>
+                </div>
+                <p className="mt-1 text-xs text-gray-500">
+                  Similaridade: {(c.similarity * 100).toFixed(0)}%
+                </p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    type="button"
+                    className="rounded bg-black px-3 py-1 text-sm text-white"
+                    onClick={() => decide(c, "merged")}
+                  >
+                    Mesma (mesclar)
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border px-3 py-1 text-sm"
+                    onClick={() => decide(c, "kept_distinct")}
+                  >
+                    Distintas
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section aria-labelledby="exact-h">
+        <h2 id="exact-h" className="mb-2 text-sm font-semibold">
+          Exatas removidas automaticamente
+        </h2>
+        {(exact.data?.length ?? 0) === 0 ? (
+          <p className="text-sm text-gray-500">Nenhuma remoção registrada.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {exact.data!.map((r) => (
+              <li
+                key={r.decisionId}
+                className="flex items-center justify-between rounded border p-2 text-sm"
+              >
+                <span>
+                  Removido: <strong>{r.removedTitle}</strong> (mantido: {r.keptTitle})
+                </span>
+                <button
+                  type="button"
+                  className="rounded border px-2 py-1 text-xs"
+                  onClick={() => reverse(r.decisionId)}
+                >
+                  Desfazer
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
   );
 }
 ```
 
-- [ ] **Step 6: Página do workbench (RSC) — superfície única**
+- [ ] **Step 4: Run test + lint + typecheck**
 
-Create `app/reviews/[reviewId]/workbench/page.tsx`:
+Run: `npm run test -- tests/unit/workbench/duplicates-panel.test.tsx && npm run lint && npm run typecheck`
+Expected: unit PASS; lint ✔; typecheck limpo.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/components/workbench/DuplicatesPanel.tsx tests/unit/workbench/duplicates-panel.test.tsx
+git commit -m "feat(workbench): DuplicatesPanel — par fuzzy lado a lado + log reversível (US3)"
+```
+
+---
+
+## Task 10: Ligar o modo Duplicatas + contador na página do workbench
+
+**Files:**
+- Modify: `app/reviews/[reviewId]/workbench/page.tsx`
+- Modify: `app/reviews/[reviewId]/workbench/actions.ts` (Server Actions de leitura)
+
+> **Skill obrigatória:** consulte `nextjs-best-practices` (RSC + fronteira `'use client'`; o painel é client e recebe Server Actions como props).
+
+- [ ] **Step 1: Add read Server Actions** (fronteira server→client serializável)
+
+Em `app/reviews/[reviewId]/workbench/actions.ts`, importe as queries e exponha-as como Server Actions com guarda de membro:
+
+```ts
+import { listExactRemovals, listFuzzyCandidates } from "@/lib/dedup/queries";
+
+export async function fetchExactRemovals(reviewId: string) {
+  await requireMember(reviewId);
+  return listExactRemovals(reviewId);
+}
+
+export async function fetchFuzzyCandidates(reviewId: string) {
+  await requireMember(reviewId);
+  return listFuzzyCandidates(reviewId);
+}
+```
+
+- [ ] **Step 2: Wire the panel and counter into the page**
+
+Em `app/reviews/[reviewId]/workbench/page.tsx`:
+
+1. Imports no topo:
+
+```ts
+import { DuplicatesPanel } from "@/components/workbench/DuplicatesPanel";
+import { countDuplicates } from "@/lib/dedup/queries";
+import {
+  decideFuzzy,
+  reverseDedup,
+  fetchExactRemovals,
+  fetchFuzzyCandidates,
+} from "./actions";
+```
+
+2. Após `const identified = await countRecords(reviewId);`:
+
+```ts
+  const duplicates = active === "duplicates" ? await countDuplicates(reviewId) : null;
+```
+
+3. No cabeçalho, ao lado do contador de identificados:
+
 ```tsx
-import { ModeBar, type WorkbenchMode } from "@/components/workbench/ModeBar";
-import { ImportPanel } from "@/components/workbench/ImportPanel";
-import { QueryProvider } from "@/components/providers/QueryProvider";
-import { countRecords } from "@/lib/jobs/queries";
+        {duplicates !== null && (
+          <span className="text-sm text-gray-600" aria-live="polite">
+            Duplicados (PRISMA): <strong>{duplicates}</strong>
+          </span>
+        )}
+```
 
-export const dynamic = "force-dynamic";
+4. No bloco de modos, ramo `duplicates` antes do fallback:
 
-const VALID: WorkbenchMode[] = [
-  "import",
-  "duplicates",
-  "title_abstract",
-  "full_text",
-];
-
-export default async function WorkbenchPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ reviewId: string }>;
-  searchParams: Promise<{ mode?: string }>;
-}) {
-  const { reviewId } = await params;
-  const { mode } = await searchParams;
-  const active: WorkbenchMode = VALID.includes(mode as WorkbenchMode)
-    ? (mode as WorkbenchMode)
-    : "import";
-  const identified = await countRecords(reviewId);
-
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Workbench</h1>
-        <span className="text-sm text-gray-600" aria-live="polite">
-          Identificados (PRISMA): <strong>{identified}</strong>
-        </span>
-      </div>
-      <ModeBar reviewId={reviewId} active={active} />
-      <QueryProvider>
+```tsx
         {active === "import" ? (
           <ImportPanel reviewId={reviewId} />
+        ) : active === "duplicates" ? (
+          <DuplicatesPanel
+            reviewId={reviewId}
+            loadExactRemovals={fetchExactRemovals}
+            loadFuzzyCandidates={fetchFuzzyCandidates}
+            onDecide={(input) => decideFuzzy(reviewId, input)}
+            onReverse={(decisionId) => reverseDedup(reviewId, decisionId)}
+          />
         ) : (
           <p className="text-sm text-gray-500">
             Este modo é habilitado em uma etapa seguinte do Marco.
           </p>
         )}
-      </QueryProvider>
-    </div>
-  );
-}
 ```
 
-- [ ] **Step 7: Link "Workbench" no shell da Revisão**
+- [ ] **Step 3: Verify build boundary + lint + typecheck**
 
-Modify `app/reviews/[reviewId]/layout.tsx` — dentro do `<nav className="flex gap-3 text-sm">`, acrescentar após o link "Protocolo":
-```tsx
-          <a href={`/reviews/${active.id}/workbench`} className="underline">
-            Workbench
-          </a>
-```
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add src/components/providers/QueryProvider.tsx src/lib/jobs/queries.ts src/lib/search/schema.ts src/components/workbench/ModeBar.tsx "app/reviews/[reviewId]/workbench/page.tsx" "app/reviews/[reviewId]/workbench/actions.ts" "app/reviews/[reviewId]/layout.tsx"
-git commit -m "feat(workbench): single-surface shell + mode bar + import actions (US2/FR-027)"
-```
-
----
-
-## Task 14: App — ImportPanel (preview + busca + confirmar + progresso)
-
-**Files:**
-- Create: `src/components/workbench/ImportPreview.tsx`
-- Create: `src/components/workbench/JobProgress.tsx`
-- Create: `src/components/workbench/ImportPanel.tsx`
-- Test: `tests/unit/workbench/import-preview.test.tsx`
-
-- [ ] **Step 1: Tabela de preview (FR-014)**
-
-Create `src/components/workbench/ImportPreview.tsx`:
-```tsx
-"use client";
-
-import type { ParsedRecord } from "@shared/import/types";
-
-export function ImportPreview({ records }: { records: ParsedRecord[] }) {
-  if (records.length === 0) return null;
-  return (
-    <div className="overflow-x-auto rounded border">
-      <table className="min-w-full text-sm">
-        <caption className="sr-only">Pré-visualização dos registros</caption>
-        <thead className="bg-gray-50 text-left">
-          <tr>
-            <th className="p-2">Título</th>
-            <th className="p-2">Autores</th>
-            <th className="p-2">Ano</th>
-            <th className="p-2">DOI</th>
-          </tr>
-        </thead>
-        <tbody>
-          {records.slice(0, 20).map((r, i) => (
-            <tr key={i} className="border-t">
-              <td className="p-2">{r.title}</td>
-              <td className="p-2">{r.authors.join("; ")}</td>
-              <td className="p-2">{r.year ?? "—"}</td>
-              <td className="p-2">{r.doi ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="p-2 text-xs text-gray-500">
-        {records.length} registro(s) — exibindo até 20 na prévia.
-      </p>
-    </div>
-  );
-}
-```
-
-- [ ] **Step 2: Progresso do job por polling (FR-017)**
-
-Create `src/components/workbench/JobProgress.tsx`:
-```tsx
-"use client";
-
-import { useQuery } from "@tanstack/react-query";
-import { createClient } from "@/lib/supabase/client";
-
-const TERMINAL = ["completed", "completed_with_errors", "failed"];
-
-export function JobProgress({ jobId }: { jobId: string }) {
-  const { data } = useQuery({
-    queryKey: ["job", jobId],
-    queryFn: async () => {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from("job")
-        .select("status, progress")
-        .eq("id", jobId)
-        .single();
-      if (error) throw new Error(error.message);
-      return data;
-    },
-    refetchInterval: (q) =>
-      q.state.data && TERMINAL.includes(q.state.data.status) ? false : 800,
-  });
-
-  if (!data) return null;
-  return (
-    <div aria-live="polite" className="text-sm">
-      Processamento: <strong>{data.status}</strong> ({data.progress}%)
-    </div>
-  );
-}
-```
-
-- [ ] **Step 3: Painel de importação (orquestra tudo)**
-
-Create `src/components/workbench/ImportPanel.tsx`:
-```tsx
-"use client";
-
-import { useState } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { parseContent } from "@shared/import/index";
-import type { ParsedRecord, SourceFormat } from "@shared/import/types";
-import { searchSchema, type SearchInput } from "@/lib/search/schema";
-import {
-  enqueueImport,
-  runImportWorker,
-} from "@/app/reviews/[reviewId]/workbench/actions";
-import { ImportPreview } from "./ImportPreview";
-import { JobProgress } from "./JobProgress";
-
-function formatFromName(name: string): SourceFormat | null {
-  if (name.endsWith(".ris")) return "ris";
-  if (name.endsWith(".bib") || name.endsWith(".bibtex")) return "bibtex";
-  if (name.endsWith(".csv")) return "csv";
-  return null;
-}
-
-export function ImportPanel({ reviewId }: { reviewId: string }) {
-  const [content, setContent] = useState("");
-  const [format, setFormat] = useState<SourceFormat | null>(null);
-  const [preview, setPreview] = useState<ParsedRecord[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-
-  const { register, handleSubmit, formState } = useForm<SearchInput>({
-    resolver: zodResolver(searchSchema),
-    defaultValues: { queryString: "", database: "", searchedOn: "", hits: 0 },
-  });
-
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    setError(null);
-    setJobId(null);
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const fmt = formatFromName(file.name.toLowerCase());
-    if (!fmt) {
-      setError("Formato não suportado. Use .ris, .bib ou .csv.");
-      setPreview([]);
-      setFormat(null);
-      return;
-    }
-    const text = await file.text();
-    setContent(text);
-    setFormat(fmt);
-    const result = parseContent(fmt, text); // preview client-side (FR-014)
-    setPreview(result.records);
-    if (result.records.length === 0) {
-      setError(
-        result.errors[0]?.message ??
-          "Nenhum registro reconhecido neste arquivo.",
-      );
-    }
-  }
-
-  async function onConfirm(search: SearchInput) {
-    if (!format || preview.length === 0) return;
-    setPending(true);
-    setError(null);
-    const res = await enqueueImport(reviewId, { format, content, search });
-    if (!res.ok) {
-      setError(res.error);
-      setPending(false);
-      return;
-    }
-    setJobId(res.jobId);
-    // Marco 1: dispara o worker (stand-in do pg_cron — D-F3.5).
-    await runImportWorker(reviewId);
-    setPending(false);
-  }
-
-  return (
-    <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <label htmlFor="import-file" className="text-sm font-medium">
-          Arquivo de referências (RIS, BibTeX ou CSV)
-        </label>
-        <input
-          id="import-file"
-          type="file"
-          accept=".ris,.bib,.bibtex,.csv"
-          onChange={onFile}
-        />
-      </div>
-
-      <ImportPreview records={preview} />
-
-      <form onSubmit={handleSubmit(onConfirm)} className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">Registro da busca</h2>
-        <input
-          {...register("queryString")}
-          placeholder="String de busca"
-          className="rounded border p-2"
-        />
-        <input
-          {...register("database")}
-          placeholder="Base consultada"
-          className="rounded border p-2"
-        />
-        <input {...register("searchedOn")} type="date" className="rounded border p-2" />
-        <input
-          {...register("hits")}
-          type="number"
-          placeholder="Nº de hits"
-          className="rounded border p-2"
-        />
-        {formState.errors.queryString && (
-          <p className="text-sm text-red-600">
-            {formState.errors.queryString.message}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={pending || preview.length === 0}
-          className="self-start rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
-        >
-          Confirmar importação
-        </button>
-      </form>
-
-      {error && (
-        <p role="alert" className="text-sm text-red-600">
-          {error}
-        </p>
-      )}
-      {jobId && <JobProgress jobId={jobId} />}
-    </section>
-  );
-}
-```
-
-- [ ] **Step 4: Teste de unidade do preview (render)**
-
-Create `tests/unit/workbench/import-preview.test.tsx`:
-```tsx
-import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { ImportPreview } from "@/components/workbench/ImportPreview";
-
-describe("ImportPreview", () => {
-  it("renderiza títulos dos registros", () => {
-    render(
-      <ImportPreview
-        records={[
-          {
-            title: "Estudo X",
-            authors: ["A"],
-            year: 2020,
-            doi: null,
-            abstract: null,
-            language: null,
-            raw: {},
-          },
-        ]}
-      />,
-    );
-    expect(screen.getByText("Estudo X")).toBeInTheDocument();
-  });
-
-  it("não renderiza nada sem registros", () => {
-    const { container } = render(<ImportPreview records={[]} />);
-    expect(container).toBeEmptyDOMElement();
-  });
-});
-```
-
-- [ ] **Step 5: Rodar testes de unidade + gates**
-
-Run: `npm test -- tests/unit/workbench/ && npm run typecheck && npm run lint`
-Expected: testes PASS; `tsc` limpo; ESLint sem erros.
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add src/components/workbench/ImportPreview.tsx src/components/workbench/JobProgress.tsx src/components/workbench/ImportPanel.tsx tests/unit/workbench/import-preview.test.tsx
-git commit -m "feat(workbench): ImportPanel — preview, search form, confirm + job polling (FR-014/017)"
-```
-
----
-
-## Task 15: e2e — fluxo "importar" + invariante de superfície única
-
-**Files:**
-- Test: `tests/e2e/import.spec.ts`
-
-- [ ] **Step 1: Conferir os seletores reais de cadastro/criação**
-
-Antes de escrever o spec, abrir `app/(auth)/signup/page.tsx`, `app/reviews/new/page.tsx` e `tests/e2e/review-switch.spec.ts` e copiar os seletores reais (labels/botões) para o helper abaixo — ajustar se divergirem.
-
-- [ ] **Step 2: Escrever o e2e**
-
-Create `tests/e2e/import.spec.ts`:
-```ts
-import { test, expect, type Page } from "@playwright/test";
-import path from "node:path";
-
-// Ajustar os seletores ao padrão de tests/e2e/review-switch.spec.ts (Step 1).
-async function signupAndCreateReview(page: Page) {
-  const email = `e2e_imp_${Date.now()}@example.com`;
-  await page.goto("/signup");
-  await page.getByLabel(/e-mail/i).fill(email);
-  await page.getByLabel(/senha/i).fill("senha-teste-123");
-  await page.getByRole("button", { name: /cadastrar|entrar/i }).click();
-  await page.waitForURL("**/reviews");
-  await page.goto("/reviews/new");
-  await page.getByLabel(/título/i).fill("Revisão e2e import");
-  await page.getByRole("button", { name: /criar/i }).click();
-  await page.waitForURL("**/reviews/**");
-}
-
-test("importar RIS: preview, registrar busca, confirmar, identificados sobem", async ({
-  page,
-}) => {
-  await signupAndCreateReview(page);
-  await page.getByRole("link", { name: "Workbench" }).click();
-  await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
-
-  // Invariante Princípio V: os outros modos NÃO são links de navegação.
-  await expect(page.getByRole("tab", { name: "Duplicatas" })).toHaveAttribute(
-    "aria-disabled",
-    "true",
-  );
-
-  // Upload da fixture RIS → preview.
-  await page.setInputFiles(
-    "#import-file",
-    path.resolve("tests/fixtures/import/sample.ris"),
-  );
-  await expect(page.getByText("Aprendizagem ativa em sala")).toBeVisible();
-
-  // Registrar busca + confirmar.
-  await page.getByPlaceholder("String de busca").fill("active learning");
-  await page.getByPlaceholder("Base consultada").fill("ERIC");
-  await page.locator('input[type="date"]').fill("2026-05-30");
-  await page.getByPlaceholder("Nº de hits").fill("2");
-  await page.getByRole("button", { name: /confirmar importação/i }).click();
-
-  // O worker (stand-in) roda e o contador de identificados reflete o corpus.
-  await expect(page.getByText(/Identificados \(PRISMA\):/)).toContainText("2", {
-    timeout: 15_000,
-  });
-});
-```
-
-- [ ] **Step 3: Rodar o e2e (build de produção)**
-
-Run: `npm run test:e2e -- import.spec.ts`
-Expected: PASS — preview visível, identificados = 2 após confirmar.
+Run: `npm run lint && npm run typecheck && npm run build`
+Expected: lint ✔; typecheck limpo; build conclui sem erro de fronteira server/client (Server Actions são serializáveis cruzando para o client component).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add tests/e2e/import.spec.ts
-git commit -m "test(e2e): import flow + single-surface invariant (US2/FR-027)"
+git add "app/reviews/[reviewId]/workbench/page.tsx" "app/reviews/[reviewId]/workbench/actions.ts"
+git commit -m "feat(workbench): renderizar modo Duplicatas + contador duplicados (US3/D-F4.7)"
 ```
 
 ---
 
-## Task 16: Self-review + portões de qualidade da fatia
+## Task 11: e2e — fluxo de deduplicação no workbench
 
-- [ ] **Step 1: Suíte completa de testes**
+**Files:**
+- Create: `tests/e2e/dedup.spec.ts`
 
-Run: `npm test`
-Expected: todas as suítes unit + integração PASS (incluindo as herdadas das Fatias 1–2).
+> **Referência:** espelhe o padrão de `tests/e2e/import.spec.ts` (login, criar Revisão, registrar busca, importar, aguardar job). NÃO deixar placeholders no commit final — derive o boilerplate do `import.spec.ts` real.
 
-- [ ] **Step 2: e2e completo**
+- [ ] **Step 1: Write the e2e test**
 
-Run: `npm run test:e2e`
-Expected: specs herdados (auth, review-switch, smoke) + `import.spec.ts` PASS.
+`tests/e2e/dedup.spec.ts`:
 
-- [ ] **Step 3: Lint + typecheck (portões obrigatórios — constitution §Portões)**
+```ts
+import { test, expect } from "@playwright/test";
 
-Run: `npm run lint && npm run typecheck`
-Expected: ESLint "No ESLint warnings or errors"; `tsc` sem saída.
+test("importar corpus com exatas+fuzzy ⇒ exatas auto-removidas, par fuzzy confirmável, contador sobe", async ({ page }) => {
+  // 1. Login + criar Revisão (replicar o fluxo real de import.spec.ts).
+  // 2. Modo Importar: registrar busca + colar RIS contendo:
+  //    - 2 entradas mesmo DOI (exatas)
+  //    - 2 entradas títulos quase iguais, mesmo ano, sem DOI (par fuzzy)
+  //    confirmar importação e aguardar o job concluir (JobProgress 100%).
+  //    (runImportWorker já dispara dedup_exact ao concluir — D-F4.3.)
 
-- [ ] **Step 4: Conferência manual de invariantes**
+  // 3. Ir ao modo Duplicatas:
+  await page.getByRole("tab", { name: "Duplicatas" }).click();
 
-Relendo o diff, confirmar:
-- Princípio V: existe **uma** rota `app/reviews/[reviewId]/workbench/` — nenhuma rota separada para Duplicatas/T-R/Texto completo.
-- §VIII: nenhum `record` é inserido no caminho de enqueue; só no worker.
-- Sem `any` fora do ponto isolado e justificado em `jobs/types.ts`.
-- Datas: `searched_on` é `DATE` no banco; UI usa input `type="date"` (yyyy-mm-dd).
-- Dependências novas (papaparse, @retorquere/bibtex-parser, @tanstack/react-query) entraram via Task 1 (tarefa explícita).
+  // 4. Exatas: aparecem no log "Exatas removidas automaticamente" com "Desfazer".
+  await expect(page.getByText(/Exatas removidas automaticamente/)).toBeVisible();
+  await expect(page.getByRole("button", { name: /desfazer/i }).first()).toBeVisible();
 
-- [ ] **Step 5: Escrever o COMPLETION da fatia**
+  // 5. Fuzzy: par lado a lado; clicar "Mesma (mesclar)".
+  await page.getByRole("button", { name: /mesma/i }).first().click();
 
-Create `specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-3.md` com: US/FR cobertas, decisões D-F3.\*, saída literal dos portões, e o que foi diferido (cron real exercitado só no deploy; Edge Functions verificadas no deploy). Atualizar `slicing.md` §"Estado das fatias" marcando a Fatia 3.
+  // 6. Par some da fila.
+  await expect(page.getByText(/Nenhum par pendente/)).toBeVisible();
 
-- [ ] **Step 6: Parar no CHECKPOINT 3 (não mergear)**
+  // 7. Contador "Duplicados (PRISMA)" visível e > 0.
+  await expect(page.getByText(/Duplicados \(PRISMA\)/)).toBeVisible();
+});
+```
 
-Apresentar ao desenvolvedor: branch da fatia, diff, e a saída de `npm test` + `npm run lint` + `npm run typecheck` + `npm run test:e2e`. **Aguardar o merge manual** (CLAUDE.md §5). Não iniciar a Fatia 4.
+- [ ] **Step 2: Run the e2e suite (prod build)**
+
+Run: `npm run build && npm run test:e2e -- dedup.spec.ts`
+Expected: PASS (import → exatas removidas → fuzzy confirmado → contador).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add tests/e2e/dedup.spec.ts
+git commit -m "test(e2e): deduplicação — exatas auto + fuzzy confirmável + contador (US3)"
+```
 
 ---
 
-## Self-Review (autor do plano)
+## Task 12: Verificação final + COMPLETION (CHECKPOINT 3)
 
-**Cobertura da spec/slicing:** US2, FR-013/014/015/016/017/027 e A3 mapeados (tabela "Escopo coberto"). §VIII coberto por enqueue/worker separados + teste "enqueue não processa". SC-009 por Task 11. Princípio V por Task 13/15 (uma rota, modos inertes). FR-038 (idioma original) preservado em `metadata.language`/`raw`.
+**Files:**
+- Create: `specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-4.md`
+- Modify: `specs/001-marco1-nucleo-fluxo/.superpowers/slicing.md` (marcar Fatia 4)
 
-**Placeholders:** nenhum "TBD"/"etc." — todo passo tem código ou comando concreto. As notas de ajuste (shape do BibTeX na Task 7; seletores e2e na Task 15) apontam para o **teste como contrato** e o arquivo-padrão a conferir, não são lacunas de implementação.
+> **Skill obrigatória:** use `superpowers:verification-before-completion` — rode todos os portões e cole a saída literal antes de qualquer afirmação de "pronto".
 
-**Consistência de tipos:** `ParsedRecord`/`ParseResult`/`BibliographicParser` definidos na Task 4 e usados igualmente em 5–10/13/14. `EnqueueResult`/`WorkerResult`/`EnqueueValidationError` definidos na Task 9 e reusados em 10/12/13. RPCs `create_import_job`/`insert_import_record` definidas na Task 2 e chamadas com a mesma assinatura em 9/10. Alias `@shared` definido na Task 1 e usado em todo o núcleo.
+- [ ] **Step 1: Run the full quality gate (capture literal output)**
 
-**Riscos conhecidos (sinalizar no CHECKPOINT 2):** (1) shape exato do `@retorquere/bibtex-parser` pode exigir ajuste do mapeamento (mitigado por TDD); (2) `pg_cron`/`pg_net` podem não existir na imagem local (mitigado pelo bloco guardado da Task 3 — reset não falha; worker roda pelo gatilho); (3) Edge Functions Deno não são exercitadas no host (mitigado: núcleo 100% testado; cascas finas verificadas no deploy).
+```bash
+npm run test
+npm run typecheck
+npm run lint
+npm run build && npm run test:e2e
+```
+
+Expected: todos os testes verdes (unit+integration incl. dedup ≥80% nas funções de dedup), `tsc` limpo, lint ✔, e2e (auth, review-switch, smoke, import, **dedup**) passam.
+
+- [ ] **Step 2: Write COMPLETION-fatia-4.md**
+
+Documente, espelhando `COMPLETION-fatia-3.md`: US3 entregue; tabela FR→onde (FR-018–021/026); decisões D-F4.*; saída literal dos portões; itens diferidos (modos T/R e Texto completo → Fatia 5; view `prisma_counter` completa, trilho e export de auditoria → Fatia 6); achados de review resolvidos.
+
+- [ ] **Step 3: Update slicing state**
+
+Em `specs/001-marco1-nucleo-fluxo/.superpowers/slicing.md`, marque:
+
+```
+- [x] Fatia 4 — Deduplicação (CHECKPOINT 3 — aguardando merge)
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-4.md specs/001-marco1-nucleo-fluxo/.superpowers/slicing.md
+git commit -m "docs(fatia4): completion report + slicing state"
+```
+
+- [ ] **Step 5: PARAR — CHECKPOINT 3**
+
+Apresente ao desenvolvedor: branch `build/001-marco1-nucleo-fluxo/4-deduplicacao`, o diff, e a saída literal de testes + `tsc --noEmit` + `npm run lint`. **NÃO** fazer merge/push. Aguardar o merge manual antes da Fatia 5.
+
+---
+
+## Self-Review (verificação do plano contra o spec/slicing)
+
+**Cobertura de requisitos (US3 / FR-018–021, 026):**
+- FR-018 (remover exatas auto; DOI senão title_norm+ano) → Task 2 (`dedup_exact`, D-F4.4).
+- FR-019 (remoção automática reversível) → Task 2 (decisão `exact_auto`) + Task 3 (`reverse_dedup`).
+- FR-020 (pares fuzzy lado a lado, mesma/distintas) → Task 4 (`list_fuzzy_candidates`) + Task 5 (`decide_fuzzy`) + Task 9 (UI lado a lado).
+- FR-021 (mesclagem fuzzy registrada + reversível) → Task 5 (`decide_fuzzy merged`) + Task 3 (`reverse_dedup`).
+- FR-026 (desfazer por item, a qualquer momento, nova `audit_entry`) → Task 3 (D-F4.6).
+- Modo Duplicatas na superfície única (Princípio V) → Tasks 8/10 (sem rota nova).
+- PRISMA "duplicados" → Task 6 (`countDuplicates`) + Task 10 (cabeçalho).
+- Disparo automático ao concluir importação → Task 7 (D-F4.3).
+- Testes-chave do slicing (≥80% dedup; exatas auto+reversão; fila fuzzy; contadores; estado órfão impedido) → Tasks 2/3/4/5 (integração) + Task 3 (dupla-reversão bloqueada = guarda contra estado órfão) + Task 11 (e2e).
+- RLS das tabelas novas (SC-009) → Task 1 (`rls.dedup.test.ts`).
+
+**Dependências de schema:** migration 0005 precede todo o código que a consome (Tasks 1–5 antes de 6–11); tipos regenerados (Task 1/Step 5) antes do uso TS. ✔
+
+**Sem dependência nova:** `pg_trgm` (0003) e `@tanstack/react-query` já presentes — nenhuma tarefa de pin necessária. ✔
+
+**Consistência de tipos/nomes:** `dedup_decision(record_a_id=mantido, record_b_id=removido)`, enums `dedup_kind/outcome/actor`, RPCs `dedup_exact/reverse_dedup/list_fuzzy_candidates/decide_fuzzy`, queries `listExactRemovals/listFuzzyCandidates/countDuplicates`, actions `runExactDedup/decideFuzzy/reverseDedup/fetchExactRemovals/fetchFuzzyCandidates` — usados de forma idêntica em todas as tasks. ✔
+
+**Placeholders:** o único conteúdo deixado ao executor é o boilerplate de login/import do e2e (Task 11), explicitamente derivado de `import.spec.ts` existente — não pode ir com TODO ao commit final.
