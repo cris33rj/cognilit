@@ -22,7 +22,7 @@ test("dedup: exatas auto-removidas, par fuzzy confirmável, contador sobe", asyn
   await signupAndCreateReview(page);
 
   // 2. Navegar ao Workbench (modo Importar por padrão).
-  await page.getByRole("link", { name: "Workbench" }).click();
+  await page.getByRole("link", { name: "Importar" }).click();
   await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
 
   // 3. Upload do corpus com exata + par fuzzy (4 entradas: 1 exata × 2 + 2 fuzzy).
@@ -45,9 +45,9 @@ test("dedup: exatas auto-removidas, par fuzzy confirmável, contador sobe", asyn
   await page.getByRole("button", { name: /confirmar importação/i }).click();
 
   // 5. Aguardar o worker processar: contador de identificados deve subir.
-  // "Identificados (PRISMA)" conta TODOS os records (estado flip, não deleção) — dedup não baixa esse número; "Duplicados" é o contador separado.
-  await expect(page.getByText(/Identificados \(PRISMA\):/)).toContainText(
-    /[1-9]/,
+  // "Identificados" conta TODOS os records (estado flip, não deleção) — dedup não baixa esse número; "Duplicados" é o contador separado.
+  await expect(page.getByLabel("Contadores PRISMA")).toContainText(
+    /Identificados: [1-9]/,
     { timeout: 20_000 },
   );
 
@@ -84,6 +84,8 @@ test("dedup: exatas auto-removidas, par fuzzy confirmável, contador sobe", asyn
     timeout: 10_000,
   });
 
-  // 11. Contador "Duplicados (PRISMA)" deve estar visível (> 0 implícito pelo render condicional).
-  await expect(page.getByText(/Duplicados \(PRISMA\):/)).toBeVisible();
+  // 11. Contador "Duplicados" da barra PRISMA deve estar visível.
+  await expect(page.getByLabel("Contadores PRISMA")).toContainText(
+    /Duplicados:/,
+  );
 });

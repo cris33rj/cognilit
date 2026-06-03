@@ -19,21 +19,15 @@ test("importar RIS: preview, registrar busca, confirmar, identificados sobem", a
   page,
 }) => {
   await signupAndCreateReview(page);
-  await page.getByRole("link", { name: "Workbench" }).click();
+  await page.getByRole("link", { name: "Importar" }).click();
   await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
 
-  // Invariante Princípio V: modos ainda não habilitados NÃO são links navegáveis.
-  // Duplicatas foi habilitado na Fatia 4 — agora é link navegável.
+  // A partir da Fatia 6 o shell expõe todas as fases do pipeline como abas
+  // navegáveis (o trilho de fases é a fonte única da navegação por etapa);
+  // Duplicatas, Título/Resumo e Texto completo já são links habilitados.
   await expect(
     page.getByRole("tab", { name: "Duplicatas" }),
   ).not.toHaveAttribute("aria-disabled", "true");
-  // Título/Resumo e Texto completo permanecem desabilitados.
-  await expect(
-    page.getByRole("tab", { name: "Título/Resumo" }),
-  ).toHaveAttribute("aria-disabled", "true");
-  await expect(
-    page.getByRole("tab", { name: "Texto completo" }),
-  ).toHaveAttribute("aria-disabled", "true");
 
   // Upload da fixture RIS → preview client-side.
   await page.setInputFiles(
@@ -51,8 +45,9 @@ test("importar RIS: preview, registrar busca, confirmar, identificados sobem", a
   // Confirmar importação (dispara enqueue + runImportWorker).
   await page.getByRole("button", { name: /confirmar importação/i }).click();
 
-  // O worker roda e o contador de identificados (PRISMA) reflete o corpus.
-  await expect(page.getByText(/Identificados \(PRISMA\):/)).toContainText("2", {
-    timeout: 15_000,
-  });
+  // O worker roda e o contador "Identificados" da barra PRISMA reflete o corpus.
+  await expect(page.getByLabel("Contadores PRISMA")).toContainText(
+    "Identificados: 2",
+    { timeout: 15_000 },
+  );
 });
