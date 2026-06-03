@@ -30,6 +30,29 @@ const FIELD_LABEL: Record<string, string> = {
   context: "Contexto",
 };
 
+const FIELD_GLYPH: Record<string, string> = {
+  sample: "S",
+  phenomenon: "PI",
+  design: "D",
+  evaluation: "E",
+  researchType: "R",
+  population: "P",
+  intervention: "I",
+  comparison: "C",
+  outcome: "O",
+  exposure: "E",
+  concept: "C",
+  context: "C",
+};
+
+const FRAMEWORK_ACRONYM: Partial<Record<Framework, string>> = {
+  spider:
+    "Sample · Phenomenon of Interest · Design · Evaluation · Research type",
+  pico: "Population · Intervention · Comparison · Outcome",
+  peo: "Population · Exposure · Outcome",
+  pcc: "Population · Concept · Context",
+};
+
 export function QuestionForm({
   reviewId,
   initial,
@@ -61,31 +84,54 @@ export function QuestionForm({
     >
       <label className="flex flex-col gap-1 text-sm">
         Framework
-        <select
-          value={framework}
-          onChange={(e) => setFramework(e.target.value as Framework)}
-          className="border p-2"
-        >
-          {FRAMEWORKS.map((f) => (
-            <option key={f} value={f}>
-              {FRAMEWORK_LABEL[f]}
-            </option>
-          ))}
-        </select>
+        <span className="select-wrap">
+          <select
+            value={framework}
+            onChange={(e) => setFramework(e.target.value as Framework)}
+            className="control appearance-none pr-8 font-semibold"
+          >
+            {FRAMEWORKS.map((f) => (
+              <option key={f} value={f}>
+                {FRAMEWORK_LABEL[f]}
+              </option>
+            ))}
+          </select>
+        </span>
       </label>
+      {FRAMEWORK_ACRONYM[framework] && (
+        <p
+          data-testid="framework-acronym"
+          className="font-mono text-xs text-ink-faint"
+        >
+          {FRAMEWORK_ACRONYM[framework]}
+        </p>
+      )}
 
-      {FRAMEWORK_FIELDS[framework].map((key) => (
-        <label key={key} className="flex flex-col gap-1 text-sm">
-          {FIELD_LABEL[key] ?? key}
-          <input
-            value={fields[key] ?? ""}
-            onChange={(e) =>
-              setFields((p) => ({ ...p, [key]: e.target.value }))
-            }
-            className="border p-2"
-          />
-        </label>
-      ))}
+      {FRAMEWORK_FIELDS[framework].map((key) => {
+        const g = FIELD_GLYPH[key] ?? "";
+        return (
+          <label key={key} className="field flex flex-col gap-1 text-sm">
+            <span data-testid="field-glyph" className="field-glyph" aria-hidden>
+              {g.length > 1 ? (
+                <>
+                  {g[0]}
+                  <small>{g.slice(1)}</small>
+                </>
+              ) : (
+                g
+              )}
+            </span>
+            {FIELD_LABEL[key] ?? key}
+            <input
+              value={fields[key] ?? ""}
+              onChange={(e) =>
+                setFields((p) => ({ ...p, [key]: e.target.value }))
+              }
+              className="control"
+            />
+          </label>
+        );
+      })}
 
       <label className="flex flex-col gap-1 text-sm">
         Pergunta
@@ -93,15 +139,12 @@ export function QuestionForm({
           name="questionText"
           defaultValue={initial?.question_text ?? ""}
           required
-          className="border p-2"
+          className="control"
           rows={3}
         />
       </label>
 
-      <button
-        type="submit"
-        className="self-start bg-black px-3 py-1 text-sm text-white"
-      >
+      <button type="submit" className="btn-primary self-start">
         Salvar pergunta
       </button>
       {msg && <p className="text-xs text-zinc-600">{msg}</p>}
