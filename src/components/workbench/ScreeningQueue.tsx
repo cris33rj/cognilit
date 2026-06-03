@@ -236,7 +236,7 @@ export function ScreeningQueue({
                     filter: e.target.value as QueueViewState["filter"],
                   })
                 }
-                className="rounded border px-2 py-1"
+                className="control"
               >
                 <option value="all">Todos</option>
                 <option value="undecided">Sem decisão</option>
@@ -257,7 +257,7 @@ export function ScreeningQueue({
                     sort: e.target.value as QueueViewState["sort"],
                   })
                 }
-                className="rounded border px-2 py-1"
+                className="control"
               >
                 <option value="default">Padrão</option>
                 <option value="title">Título</option>
@@ -272,7 +272,7 @@ export function ScreeningQueue({
               aria-label="Densidade da fila"
               value={density}
               onChange={(e) => setDensity(e.target.value as Density)}
-              className="rounded border px-2 py-1"
+              className="control"
             >
               {DENSITIES.map((d) => (
                 <option key={d.key} value={d.key}>
@@ -286,18 +286,18 @@ export function ScreeningQueue({
 
       {/* Barra de ações em lote (FR-039) */}
       {selected.size > 0 && (
-        <div className="flex items-center gap-2 rounded border bg-gray-50 p-2 text-sm">
+        <div className="flex items-center gap-2 rounded border bg-paper-2 p-2 text-sm">
           <span>{selected.size} selecionado(s):</span>
           <button
             type="button"
-            className="rounded bg-black px-2 py-1 text-white"
+            className="btn-primary"
             onClick={() => void decideBatch("include")}
           >
             Incluir selecionados
           </button>
           <button
             type="button"
-            className="rounded border px-2 py-1"
+            className="rounded border border-line px-2 py-1 text-ink-soft"
             onClick={() => void decideBatch("exclude")}
           >
             Excluir selecionados
@@ -305,7 +305,7 @@ export function ScreeningQueue({
           {stage === "title_abstract" && (
             <button
               type="button"
-              className="rounded border px-2 py-1"
+              className="rounded border border-line px-2 py-1 text-ink-soft"
               onClick={() => void decideBatch("maybe")}
             >
               Dúvida em lote
@@ -322,7 +322,7 @@ export function ScreeningQueue({
 
       {/* Seletor de motivo de exclusão — obrigatório no Texto completo (FR-025) */}
       {stage === "full_text" && pendingExclude && (
-        <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm">
+        <div className="rounded border border-warn bg-accent-wash p-2 text-sm">
           <div className="flex items-center gap-2">
             <label className="flex items-center gap-2">
               <span>Motivo da exclusão</span>
@@ -330,7 +330,7 @@ export function ScreeningQueue({
                 aria-label="Motivo da exclusão"
                 value={reasonId}
                 onChange={(e) => setReasonId(e.target.value)}
-                className="rounded border px-2 py-1"
+                className="control"
               >
                 <option value="">Selecione…</option>
                 {(reasons.data ?? []).map((r) => (
@@ -361,12 +361,12 @@ export function ScreeningQueue({
         role="grid"
         aria-label="Fila de triagem"
         tabIndex={0}
-        className="h-[60vh] overflow-auto rounded border focus:outline focus:outline-2 focus:outline-blue-500"
+        className="h-[60vh] overflow-auto rounded border focus:outline focus:outline-2 focus:outline-accent"
       >
         {queue.isLoading ? (
-          <p className="p-3 text-sm text-gray-500">Carregando…</p>
+          <p className="p-3 text-sm text-ink-faint">Carregando…</p>
         ) : visibleRows.length === 0 ? (
-          <p className="p-3 text-sm text-gray-500">
+          <p className="p-3 text-sm text-ink-faint">
             Nenhum registro nesta fila.
           </p>
         ) : (
@@ -388,7 +388,7 @@ export function ScreeningQueue({
                   onClick={() => setFocusIdx(v.index)}
                   className={`absolute left-0 top-0 flex w-full items-center gap-3 border-b px-3 ${
                     focused
-                      ? "bg-blue-50 outline outline-2 outline-blue-400"
+                      ? "bg-accent-wash outline outline-2 outline-accent"
                       : ""
                   }`}
                   style={{
@@ -408,13 +408,13 @@ export function ScreeningQueue({
                   {/* Título e ano */}
                   <span role="gridcell" className="flex-1 truncate text-sm">
                     {row.title}{" "}
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-ink-faint">
                       ({row.year ?? "—"})
                     </span>
                   </span>
 
                   {/* Decisão / estado atual */}
-                  <span role="gridcell" className="text-xs text-gray-600">
+                  <span role="gridcell" className="text-xs text-ink-soft">
                     {row.tsDecision ?? row.ftDecision ?? row.corpusState}
                   </span>
 
@@ -428,7 +428,7 @@ export function ScreeningQueue({
                       title={row.ai.reason ?? undefined}
                     >
                       <SuggestionChip state={row.ai.state} />
-                      <span className="text-xs text-gray-700">
+                      <span className="text-xs text-ink-soft">
                         {row.ai.recommendation === "include"
                           ? "incluir"
                           : "excluir"}
@@ -442,7 +442,7 @@ export function ScreeningQueue({
                     <span role="gridcell">
                       <button
                         type="button"
-                        className="rounded border px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100"
+                        className="rounded border px-2 py-0.5 text-xs text-ink-soft hover:bg-paper-2"
                         onClick={(e) => {
                           e.stopPropagation();
                           void handleReverse(row.decisionId!);

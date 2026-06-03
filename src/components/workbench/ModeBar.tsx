@@ -34,7 +34,7 @@ export function ModeBar({
             role="tab"
             aria-selected={active === m.key}
             className={`rounded px-3 py-1 text-sm ${
-              active === m.key ? "bg-black text-white" : "hover:bg-gray-100"
+              active === m.key ? "bg-ink text-paper" : "hover:bg-paper-2"
             }`}
           >
             {m.label}
@@ -45,7 +45,7 @@ export function ModeBar({
             role="tab"
             aria-disabled="true"
             title="Disponível em uma etapa seguinte"
-            className="cursor-not-allowed rounded px-3 py-1 text-sm text-gray-400"
+            className="cursor-not-allowed rounded px-3 py-1 text-sm text-ink-faint"
           >
             {m.label}
           </span>

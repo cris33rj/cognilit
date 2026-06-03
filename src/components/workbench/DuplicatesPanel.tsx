@@ -89,9 +89,9 @@ export function DuplicatesPanel({
           Pares prováveis para confirmar
         </h2>
         {fuzzy.isLoading ? (
-          <p className="text-sm text-gray-500">Carregando…</p>
+          <p className="text-sm text-ink-faint">Carregando…</p>
         ) : (fuzzy.data?.length ?? 0) === 0 ? (
-          <p className="text-sm text-gray-500">Nenhum par pendente.</p>
+          <p className="text-sm text-ink-faint">Nenhum par pendente.</p>
         ) : (
           <ul className="flex flex-col gap-3">
             {fuzzy.data!.map((c) => (
@@ -102,24 +102,24 @@ export function DuplicatesPanel({
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <p className="text-sm font-medium">{c.titleA}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-ink-faint">
                       Ano: {c.yearA ?? "—"}
                     </p>
                   </div>
                   <div>
                     <p className="text-sm font-medium">{c.titleB}</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs text-ink-faint">
                       Ano: {c.yearB ?? "—"}
                     </p>
                   </div>
                 </div>
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-ink-faint">
                   Similaridade: {(c.similarity * 100).toFixed(0)}%
                 </p>
                 <div className="mt-2 flex gap-2">
                   <button
                     type="button"
-                    className="rounded bg-black px-3 py-1 text-sm text-white disabled:opacity-50"
+                    className="btn-primary disabled:opacity-50"
                     disabled={acting}
                     onClick={() => decide(c, "merged")}
                   >
@@ -145,9 +145,9 @@ export function DuplicatesPanel({
           Exatas removidas automaticamente
         </h2>
         {exact.isLoading ? (
-          <p className="text-sm text-gray-500">Carregando…</p>
+          <p className="text-sm text-ink-faint">Carregando…</p>
         ) : (exact.data?.length ?? 0) === 0 ? (
-          <p className="text-sm text-gray-500">Nenhuma remoção registrada.</p>
+          <p className="text-sm text-ink-faint">Nenhuma remoção registrada.</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {exact.data!.map((r) => (
