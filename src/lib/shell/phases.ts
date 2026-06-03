@@ -1,0 +1,156 @@
+import { createClient } from "@/lib/supabase/server";
+import { getPrismaCounters } from "@/lib/prisma/queries";
+
+export type PhaseStatus =
+  | "done"
+  | "current"
+  | "pending"
+  | "locked"
+  | "optional_off";
+
+export type PhaseKey =
+  | "question"
+  | "protocol"
+  | "import"
+  | "duplicates"
+  | "screening_ts"
+  | "screening_ft"
+  | "risk_of_bias"
+  | "certainty";
+
+export interface Phase {
+  key: PhaseKey;
+  label: string;
+  href: string | null;
+  status: PhaseStatus;
+}
+
+export interface PhaseInput {
+  hasQuestion: boolean;
+  protocolStatus: "none" | "draft" | "locked";
+  identified: number;
+  duplicates: number;
+  screenedTs: number;
+  includedTs: number;
+  includedFt: number;
+  excludedFt: number;
+}
+
+interface PhaseDef {
+  key: PhaseKey;
+  label: string;
+  href: (reviewId: string) => string | null;
+  completed: (i: PhaseInput) => boolean;
+}
+
+const PIPELINE: PhaseDef[] = [
+  {
+    key: "question",
+    label: "Pergunta",
+    href: (r) => `/reviews/${r}/question`,
+    completed: (i) => i.hasQuestion,
+  },
+  {
+    key: "protocol",
+    label: "Protocolo",
+    href: (r) => `/reviews/${r}/protocol`,
+    completed: (i) => i.protocolStatus === "locked",
+  },
+  {
+    key: "import",
+    label: "Importar",
+    href: (r) => `/reviews/${r}/workbench?mode=import`,
+    completed: (i) => i.identified > 0,
+  },
+  {
+    key: "duplicates",
+    label: "Duplicatas",
+    href: (r) => `/reviews/${r}/workbench?mode=duplicates`,
+    completed: (i) =>
+      i.identified > 0 && (i.screenedTs > 0 || i.duplicates > 0),
+  },
+  {
+    key: "screening_ts",
+    label: "Triagem T/R",
+    href: (r) => `/reviews/${r}/workbench?mode=title_abstract`,
+    completed: (i) =>
+      i.identified > 0 &&
+      i.screenedTs >= Math.max(1, i.identified - i.duplicates),
+  },
+  {
+    key: "screening_ft",
+    label: "Triagem TC",
+    href: (r) => `/reviews/${r}/workbench?mode=full_text`,
+    completed: (i) =>
+      i.includedTs > 0 && i.includedFt + i.excludedFt >= i.includedTs,
+  },
+];
+
+const OPTIONAL: { key: PhaseKey; label: string }[] = [
+  { key: "risk_of_bias", label: "Risco de Viés" },
+  { key: "certainty", label: "Certeza (CERQual)" },
+];
+
+/** Deriva o estado de cada fase a partir dos contadores e do protocolo (pura). */
+export function computePhaseStates(
+  reviewId: string,
+  input: PhaseInput,
+): Phase[] {
+  let frontierTaken = false;
+  const pipeline = PIPELINE.map((def): Phase => {
+    const done = def.completed(input);
+    let status: PhaseStatus;
+    if (def.key === "protocol" && input.protocolStatus === "locked") {
+      status = "locked";
+    } else if (done) {
+      status = "done";
+    } else if (!frontierTaken) {
+      status = "current";
+      frontierTaken = true;
+    } else {
+      status = "pending";
+    }
+    return { key: def.key, label: def.label, href: def.href(reviewId), status };
+  });
+
+  const optional = OPTIONAL.map(
+    (o): Phase => ({
+      key: o.key,
+      label: o.label,
+      href: null,
+      status: "optional_off",
+    }),
+  );
+
+  return [...pipeline, ...optional];
+}
+
+/** Junta os insumos (contadores + protocolo + pergunta) e deriva o trilho. */
+export async function loadPhaseStates(reviewId: string): Promise<Phase[]> {
+  const supabase = await createClient();
+  const counters = await getPrismaCounters(reviewId);
+
+  const { count: questionCount } = await supabase
+    .from("question")
+    .select("id", { count: "exact", head: true })
+    .eq("review_id", reviewId);
+
+  const { data: protocol } = await supabase
+    .from("protocol")
+    .select("state")
+    .eq("review_id", reviewId)
+    .maybeSingle();
+  const protocolStatus =
+    protocol?.state === "locked" ? "locked" : protocol ? "draft" : "none";
+
+  return computePhaseStates(reviewId, {
+    hasQuestion: (questionCount ?? 0) > 0,
+    protocolStatus,
+    identified: counters.identified,
+    duplicates: counters.duplicates,
+    screenedTs: counters.screened,
+    includedTs: counters.includedTs,
+    includedFt: counters.includedFt,
+    excludedFt: counters.excludedFt,
+  });
+}

@@ -218,4 +218,4 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 3 — Workbench shell + Importação (mergeada — commit `114da4f`)
 - [x] Fatia 4 — Deduplicação (mergeada — merge `82dcab5`)
 - [x] Fatia 5 — Triagem 2 etapas + IA-no-laço (CHECKPOINT 3 — mergeada)
-- [ ] Fatia 6 — Shell, trilho & PRISMA vivo + export de auditoria
+- [x] Fatia 6 — Shell, trilho & PRISMA vivo + export de auditoria (CHECKPOINT 3 — aguardando merge)

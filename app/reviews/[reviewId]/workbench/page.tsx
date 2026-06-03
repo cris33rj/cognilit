@@ -3,9 +3,6 @@ import { ImportPanel } from "@/components/workbench/ImportPanel";
 import { DuplicatesPanel } from "@/components/workbench/DuplicatesPanel";
 import { ScreeningQueue } from "@/components/workbench/ScreeningQueue";
 import { QueryProvider } from "@/components/providers/QueryProvider";
-import { countRecords } from "@/lib/jobs/queries";
-import { countDuplicates } from "@/lib/dedup/queries";
-import { countScreened, countIncludedFullText } from "@/lib/screening/queries";
 import {
   decideFuzzy,
   reverseDedup,
@@ -38,38 +35,11 @@ export default async function WorkbenchPage({
   const active: WorkbenchMode = VALID.includes(mode as WorkbenchMode)
     ? (mode as WorkbenchMode)
     : "import";
-  const identified = await countRecords(reviewId);
-  const duplicates =
-    active === "duplicates" ? await countDuplicates(reviewId) : null;
-  const screened =
-    active === "title_abstract" || active === "full_text"
-      ? await countScreened(reviewId)
-      : null;
-  const includedFullText =
-    active === "full_text" ? await countIncludedFullText(reviewId) : null;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Workbench</h1>
-        <span className="text-sm text-gray-600" aria-live="polite">
-          Identificados (PRISMA): <strong>{identified}</strong>
-        </span>
-        {duplicates !== null && (
-          <span className="text-sm text-gray-600" aria-live="polite">
-            Duplicados (PRISMA): <strong>{duplicates}</strong>
-          </span>
-        )}
-        {screened !== null && (
-          <span className="text-sm text-gray-600" aria-live="polite">
-            Triados (PRISMA): <strong>{screened}</strong>
-          </span>
-        )}
-        {includedFullText !== null && (
-          <span className="text-sm text-gray-600" aria-live="polite">
-            Incluídos (texto completo): <strong>{includedFullText}</strong>
-          </span>
-        )}
       </div>
       <ModeBar reviewId={reviewId} active={active} />
       <QueryProvider>

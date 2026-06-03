@@ -24,7 +24,7 @@ async function setupScreeningCorpus(page: Page): Promise<string> {
   if (!reviewId) throw new Error("reviewId não encontrado na URL");
 
   // Navigate to Workbench (import mode).
-  await page.getByRole("link", { name: "Workbench" }).click();
+  await page.getByRole("link", { name: "Importar" }).click();
   await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
 
   // Upload sample.ris (2 records, no duplicates).
@@ -44,10 +44,11 @@ async function setupScreeningCorpus(page: Page): Promise<string> {
   // Confirm import — triggers enqueue + runImportWorker.
   await page.getByRole("button", { name: /confirmar importação/i }).click();
 
-  // Wait for worker to finish: "Identificados (PRISMA)" shows 2.
-  await expect(page.getByText(/Identificados \(PRISMA\):/)).toContainText("2", {
-    timeout: 20_000,
-  });
+  // Wait for worker to finish: PRISMA bar "Identificados" shows 2.
+  await expect(page.getByLabel("Contadores PRISMA")).toContainText(
+    "Identificados: 2",
+    { timeout: 20_000 },
+  );
 
   return reviewId;
 }
@@ -82,10 +83,11 @@ test("triagem T/R: incluir por teclado e ver contador subir", async ({
   await page.goto(`/reviews/${reviewId}/workbench?mode=import`);
   await page.goto(`/reviews/${reviewId}/workbench?mode=title_abstract`);
 
-  // "Triados (PRISMA)" counter must now show ≥1.
-  await expect(page.getByText(/Triados \(PRISMA\):/)).toContainText(/[1-9]/, {
-    timeout: 10_000,
-  });
+  // PRISMA bar "Triados" counter must now show ≥1.
+  await expect(page.getByLabel("Contadores PRISMA")).toContainText(
+    /Triados: [1-9]/,
+    { timeout: 10_000 },
+  );
 });
 
 test("Texto completo: excluir exige motivo (FR-025)", async ({ page }) => {

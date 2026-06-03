@@ -5,6 +5,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ScreeningQueue } from "@/components/workbench/ScreeningQueue";
 import type { QueueRow } from "@/lib/screening/queries";
 
+// O componente lê/escreve o estado de fila na URL (FR-037); em jsdom não há
+// router de App Router, então mockamos next/navigation.
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn() }),
+  usePathname: () => "/reviews/rev1/workbench",
+  useSearchParams: () => new URLSearchParams("mode=title_abstract"),
+}));
+
 // useVirtualizer returns no items in jsdom (no scrollable dimensions).
 // Mock it to render all rows at fixed offsets so UI assertions work.
 vi.mock("@tanstack/react-virtual", () => ({

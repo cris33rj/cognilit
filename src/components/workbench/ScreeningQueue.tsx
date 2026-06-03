@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SuggestionChip } from "@/components/ai/SuggestionChip";
 import { ShortcutLegend } from "@/components/workbench/ShortcutLegend";
 import { DENSITIES, type Density } from "@/lib/screening/config";
+import {
+  applyQueueView,
+  parseQueueState,
+  serializeQueueState,
+  type QueueViewState,
+} from "@/lib/screening/queue-url";
 import type {
   ExclusionReason,
   QueueRow,
@@ -38,6 +45,24 @@ export function ScreeningQueue({
   onReverse,
 }: ScreeningQueueProps) {
   const qc = useQueryClient();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const view = useMemo(
+    () => parseQueueState(new URLSearchParams(searchParams.toString())),
+    [searchParams],
+  );
+
+  function setView(next: QueueViewState) {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("qfilter");
+    params.delete("qsort");
+    for (const [k, v] of Object.entries(serializeQueueState(next)))
+      params.set(k, v);
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  }
+
   const [density, setDensity] = useState<Density>("comfortable");
   const [focusIdx, setFocusIdx] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -57,10 +82,28 @@ export function ScreeningQueue({
   });
 
   const rows = useMemo(() => queue.data ?? [], [queue.data]);
+
+  // Filtro + ordenação reabríveis pela URL (FR-037); a decisão considerada
+  // depende do estágio (título/resumo ⇒ tsDecision; texto completo ⇒ ftDecision).
+  const visibleRows = useMemo(
+    () =>
+      applyQueueView(
+        rows,
+        view,
+        (r) => ({
+          decision:
+            (stage === "full_text" ? r.ftDecision : r.tsDecision) ?? null,
+          aiConfidence: r.ai?.confidence ?? null,
+        }),
+        (r) => ({ title: r.title, year: r.year }),
+      ),
+    [rows, view, stage],
+  );
+
   const rowHeight = DENSITIES.find((d) => d.key === density)?.rowHeight ?? 56;
 
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: visibleRows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => rowHeight,
     overscan: 12,
@@ -106,7 +149,7 @@ export function ScreeningQueue({
   async function decideBatch(decision: Decision) {
     setError(null);
     try {
-      for (const row of rows.filter((r) => selected.has(r.recordId))) {
+      for (const row of visibleRows.filter((r) => selected.has(r.recordId))) {
         const ok = await decideOne(row, decision);
         if (!ok) return; // abre seletor de motivo; usuário reexecuta
       }
@@ -139,13 +182,20 @@ export function ScreeningQueue({
     });
   }
 
+  // Mantém o foco dentro dos limites quando o filtro/ordenação muda a lista.
+  useEffect(() => {
+    setFocusIdx((i) => Math.min(i, Math.max(0, visibleRows.length - 1)));
+  }, [visibleRows.length]);
+
   // Teclado-first (FR-023/028): navegação + decisão + seleção sem mouse.
+  // Opera sobre a lista visível (filtrada/ordenada) para manter coerência.
   useEffect(() => {
     function onKey(ev: KeyboardEvent) {
-      if (rows.length === 0) return;
-      const row = rows[focusIdx];
+      if (visibleRows.length === 0) return;
+      const row = visibleRows[focusIdx];
       if (!row) return;
-      if (ev.key === "j") setFocusIdx((i) => Math.min(i + 1, rows.length - 1));
+      if (ev.key === "j")
+        setFocusIdx((i) => Math.min(i + 1, visibleRows.length - 1));
       else if (ev.key === "k") setFocusIdx((i) => Math.max(i - 1, 0));
       else if (ev.key === "x") toggleSelect(row.recordId);
       else if (ev.key === "i") void decide(row, "include");
@@ -156,10 +206,11 @@ export function ScreeningQueue({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, focusIdx, stage, reasonId]);
+  }, [visibleRows, focusIdx, stage, reasonId]);
 
   useEffect(() => {
-    if (rows.length) virtualizer.scrollToIndex(focusIdx, { align: "auto" });
+    if (visibleRows.length)
+      virtualizer.scrollToIndex(focusIdx, { align: "auto" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusIdx]);
 
@@ -167,21 +218,70 @@ export function ScreeningQueue({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-4">
         <ShortcutLegend />
-        <label className="text-sm">
-          Densidade{" "}
-          <select
-            aria-label="Densidade da fila"
-            value={density}
-            onChange={(e) => setDensity(e.target.value as Density)}
-            className="rounded border px-2 py-1"
+        <div className="flex items-center gap-3">
+          {/* Filtro + ordenação reabríveis pela URL (FR-037) */}
+          <div
+            className="flex items-center gap-2 text-sm"
+            role="group"
+            aria-label="Filtro e ordenação da fila"
           >
-            {DENSITIES.map((d) => (
-              <option key={d.key} value={d.key}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            <label>
+              Filtrar{" "}
+              <select
+                aria-label="Filtrar a fila"
+                value={view.filter}
+                onChange={(e) =>
+                  setView({
+                    ...view,
+                    filter: e.target.value as QueueViewState["filter"],
+                  })
+                }
+                className="rounded border px-2 py-1"
+              >
+                <option value="all">Todos</option>
+                <option value="undecided">Sem decisão</option>
+                <option value="included">Incluídos</option>
+                <option value="excluded">Excluídos</option>
+                <option value="maybe">Em dúvida</option>
+                <option value="ai_suggested">Com sugestão de IA</option>
+              </select>
+            </label>
+            <label>
+              Ordenar{" "}
+              <select
+                aria-label="Ordenar a fila"
+                value={view.sort}
+                onChange={(e) =>
+                  setView({
+                    ...view,
+                    sort: e.target.value as QueueViewState["sort"],
+                  })
+                }
+                className="rounded border px-2 py-1"
+              >
+                <option value="default">Padrão</option>
+                <option value="title">Título</option>
+                <option value="year">Ano</option>
+                <option value="ai_confidence">Confiança da IA</option>
+              </select>
+            </label>
+          </div>
+          <label className="text-sm">
+            Densidade{" "}
+            <select
+              aria-label="Densidade da fila"
+              value={density}
+              onChange={(e) => setDensity(e.target.value as Density)}
+              className="rounded border px-2 py-1"
+            >
+              {DENSITIES.map((d) => (
+                <option key={d.key} value={d.key}>
+                  {d.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
       </div>
 
       {/* Barra de ações em lote (FR-039) */}
@@ -265,7 +365,7 @@ export function ScreeningQueue({
       >
         {queue.isLoading ? (
           <p className="p-3 text-sm text-gray-500">Carregando…</p>
-        ) : rows.length === 0 ? (
+        ) : visibleRows.length === 0 ? (
           <p className="p-3 text-sm text-gray-500">
             Nenhum registro nesta fila.
           </p>
@@ -275,7 +375,7 @@ export function ScreeningQueue({
             style={{ height: virtualizer.getTotalSize(), position: "relative" }}
           >
             {virtualizer.getVirtualItems().map((v) => {
-              const row = rows[v.index];
+              const row = visibleRows[v.index];
               if (!row) return null;
               const focused = v.index === focusIdx;
               const isSelected = selected.has(row.recordId);
