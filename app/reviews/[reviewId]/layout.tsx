@@ -31,16 +31,20 @@ export default async function ReviewLayout({
 
   return (
     <div className="min-h-screen">
-      <header className="flex items-center gap-4 border-b p-4">
-        <a href="/reviews" className="text-sm underline">
+      <header className="sticky top-0 z-20 flex items-center gap-6 border-b border-line bg-paper-card/70 px-6 py-4 backdrop-blur">
+        <span className="title-serif text-xl">Cognilit</span>
+        <a href="/reviews" className="text-sm text-ink-soft hover:text-ink">
           Minhas Revisões
         </a>
-        <a href="/reviews/new" className="text-sm underline">
+        <a href="/reviews/new" className="text-sm text-ink-soft hover:text-ink">
           Nova Revisão
         </a>
         <ReviewSwitcher reviews={reviews} activeId={active.id} />
         <form action="/auth/signout" method="post" className="ml-auto">
-          <button type="submit" className="text-sm underline">
+          <button
+            type="submit"
+            className="text-sm text-ink-soft hover:text-ink"
+          >
             Sair
           </button>
         </form>
@@ -48,9 +52,9 @@ export default async function ReviewLayout({
 
       <PrismaBar counters={counters} />
 
-      <div className="flex gap-6 p-6">
+      <div className="mx-auto grid max-w-[1320px] grid-cols-[248px_minmax(0,1fr)_268px] items-start">
         <PhaseRail phases={phases} />
-        <main className="min-w-0 flex-1">{children}</main>
+        <main className="min-w-0 p-8">{children}</main>
         <QueryProvider>
           <JobsPanel reviewId={reviewId} data={jobsUsage} />
         </QueryProvider>
