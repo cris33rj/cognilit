@@ -76,6 +76,13 @@ export type Database = {
             foreignKeyName: "ai_suggestion_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "ai_suggestion_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -113,6 +120,13 @@ export type Database = {
           tokens_out?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "ai_usage_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
           {
             foreignKeyName: "ai_usage_review_id_fkey"
             columns: ["review_id"]
@@ -164,6 +178,13 @@ export type Database = {
             foreignKeyName: "audit_entry_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "audit_entry_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -192,6 +213,13 @@ export type Database = {
           vault_secret_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "byok_key_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
           {
             foreignKeyName: "byok_key_review_id_fkey"
             columns: ["review_id"]
@@ -260,6 +288,13 @@ export type Database = {
             foreignKeyName: "dedup_decision_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "dedup_decision_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -318,6 +353,13 @@ export type Database = {
             foreignKeyName: "eligibility_criterion_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "eligibility_criterion_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -349,6 +391,13 @@ export type Database = {
           sort_order?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "exclusion_reason_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
           {
             foreignKeyName: "exclusion_reason_review_id_fkey"
             columns: ["review_id"]
@@ -396,6 +445,13 @@ export type Database = {
           type?: Database["public"]["Enums"]["job_type"]
         }
         Relationships: [
+          {
+            foreignKeyName: "job_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
           {
             foreignKeyName: "job_review_id_fkey"
             columns: ["review_id"]
@@ -448,6 +504,13 @@ export type Database = {
             foreignKeyName: "job_item_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "job_item_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -476,6 +539,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "member_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
           {
             foreignKeyName: "member_review_id_fkey"
             columns: ["review_id"]
@@ -556,6 +626,13 @@ export type Database = {
             foreignKeyName: "protocol_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: true
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "protocol_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -601,6 +678,13 @@ export type Database = {
             foreignKeyName: "protocol_amendment_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "protocol_amendment_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -635,6 +719,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "question_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
           {
             foreignKeyName: "question_review_id_fkey"
             columns: ["review_id"]
@@ -705,11 +796,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "record_ft_exclusion_reason_fk"
+            columns: ["ft_exclusion_reason_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_exclusion_breakdown"
+            referencedColumns: ["reason_id"]
+          },
+          {
             foreignKeyName: "record_job_item_fk"
             columns: ["job_item_id"]
             isOneToOne: false
             referencedRelation: "job_item"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "record_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
           },
           {
             foreignKeyName: "record_review_id_fkey"
@@ -818,11 +923,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "screening_decision_exclusion_reason_id_fkey"
+            columns: ["exclusion_reason_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_exclusion_breakdown"
+            referencedColumns: ["reason_id"]
+          },
+          {
             foreignKeyName: "screening_decision_record_id_fkey"
             columns: ["record_id"]
             isOneToOne: false
             referencedRelation: "record"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "screening_decision_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
           },
           {
             foreignKeyName: "screening_decision_review_id_fkey"
@@ -866,6 +985,13 @@ export type Database = {
             foreignKeyName: "search_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "search_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -873,7 +999,44 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      prisma_counter: {
+        Row: {
+          duplicates: number | null
+          excluded_ft: number | null
+          excluded_ts: number | null
+          identified: number | null
+          included_ft: number | null
+          included_ts: number | null
+          maybe_ts: number | null
+          review_id: string | null
+          screened: number | null
+        }
+        Relationships: []
+      }
+      prisma_exclusion_breakdown: {
+        Row: {
+          n: number | null
+          reason_id: string | null
+          reason_label: string | null
+          review_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "record_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "record_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       add_protocol_amendment: {
