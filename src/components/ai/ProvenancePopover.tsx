@@ -12,7 +12,7 @@ export function ProvenancePopover({ provenance }: { provenance: Provenance }) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-label="Ver proveniência da sugestão de IA"
-        className="rounded border px-1 text-xs underline focus:outline-none focus-visible:ring"
+        className="rounded border border-line px-1 text-xs text-ink-soft underline focus:outline-none focus-visible:ring"
       >
         proveniência
       </button>
@@ -20,7 +20,7 @@ export function ProvenancePopover({ provenance }: { provenance: Provenance }) {
         <div
           role="dialog"
           aria-label="Proveniência"
-          className="absolute z-10 mt-1 w-72 rounded border bg-white p-2 text-xs shadow dark:bg-zinc-900"
+          className="panel absolute z-10 mt-1 w-72 text-xs"
         >
           <dl className="grid grid-cols-[auto_1fr] gap-x-2">
             <dt className="font-semibold">Modelo</dt>
