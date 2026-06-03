@@ -22,7 +22,9 @@ function csvCell(value: unknown): string {
     value === null || value === undefined
       ? ""
       : typeof value === "object"
-        ? JSON.stringify(value).replace(/\\"/g, '"')
+        ? // JSON.stringify escapa aspas internas como \"; removemos a barra antes
+          // para que o doubling RFC-4180 abaixo atue sobre os caracteres crus.
+          JSON.stringify(value).replace(/\\"/g, '"')
         : String(value);
   return `"${s.replace(/"/g, '""')}"`;
 }
