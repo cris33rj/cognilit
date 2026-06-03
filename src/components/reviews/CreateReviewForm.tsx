@@ -8,9 +8,9 @@ export function CreateReviewForm({ error }: { error?: string }) {
       {error && <p className="text-sm text-red-600">{error}</p>}
       <label className="flex flex-col gap-1">
         Título da Revisão
-        <input name="title" type="text" required className="border p-2" />
+        <input name="title" type="text" required className="control" />
       </label>
-      <button type="submit" className="bg-black p-2 text-white">
+      <button type="submit" className="btn-primary">
         Criar Revisão
       </button>
     </form>
