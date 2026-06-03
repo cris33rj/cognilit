@@ -31,7 +31,7 @@ export function CriteriaPanel({
   return (
     <section className="flex flex-col gap-3">
       <div className="flex items-center gap-3">
-        <h2 className="text-lg font-medium">
+        <h2 className="text-lg font-medium text-ink">
           Critérios e termos (sugeridos pela IA)
         </h2>
         <button
@@ -45,23 +45,20 @@ export function CriteriaPanel({
               r.ok ? "Sugestões geradas." : "error" in r ? r.error : "Erro",
             );
           }}
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+          className="btn-primary disabled:opacity-50"
         >
           Derivar por IA
         </button>
-        {msg && <span className="text-xs text-zinc-600">{msg}</span>}
+        {msg && <span className="text-xs text-ink-soft">{msg}</span>}
       </div>
 
       {notFound && <NotFound what="Sugestões de critérios" />}
 
       <ul className="flex flex-col gap-2">
         {criteria.map((c) => (
-          <li
-            key={c.id}
-            className="flex flex-wrap items-center gap-2 rounded border p-2"
-          >
-            <span className="text-xs font-semibold">{KIND_LABEL[c.kind]}</span>
-            <span className="flex-1">{c.text}</span>
+          <li key={c.id} className="panel flex flex-wrap items-center gap-2">
+            <span className="panel-title">{KIND_LABEL[c.kind]}</span>
+            <span className="flex-1 text-ink">{c.text}</span>
             {c.origin === "ai" && (
               <SuggestionChip state={c.ratification_state} />
             )}
@@ -82,7 +79,7 @@ export function CriteriaPanel({
           </li>
         ))}
         {criteria.length === 0 && (
-          <li className="text-sm text-zinc-500">Nenhum critério ainda.</li>
+          <li className="text-sm text-ink-soft">Nenhum critério ainda.</li>
         )}
       </ul>
     </section>

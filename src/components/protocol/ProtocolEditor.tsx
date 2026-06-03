@@ -32,7 +32,7 @@ export function ProtocolEditor({
             const r = await draftProtocol(reviewId);
             setMsg(r.ok ? "Rascunho gerado pela IA." : (r.error ?? "Erro"));
           }}
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+          className="btn-primary disabled:opacity-50"
         >
           Rascunhar por IA
         </button>
@@ -43,7 +43,7 @@ export function ProtocolEditor({
             const r = await saveProtocolDraft(reviewId, md);
             setMsg(r.ok ? "Rascunho salvo." : (r.error ?? "Erro"));
           }}
-          className="rounded border px-3 py-1 text-sm disabled:opacity-50"
+          className="btn-primary disabled:opacity-50"
         >
           Salvar rascunho
         </button>
@@ -60,7 +60,7 @@ export function ProtocolEditor({
             const r = await lockProtocol(reviewId);
             setMsg(r.ok ? "Protocolo travado." : (r.error ?? "Erro"));
           }}
-          className="rounded border border-zinc-700 px-3 py-1 text-sm disabled:opacity-50"
+          className="btn-primary disabled:opacity-50"
         >
           Travar protocolo
         </button>
@@ -72,15 +72,15 @@ export function ProtocolEditor({
         readOnly={locked}
         rows={16}
         aria-label="Conteúdo do protocolo (Markdown)"
-        className="border p-2 font-mono text-sm read-only:bg-zinc-50 dark:read-only:bg-zinc-900"
+        className="control font-mono text-sm read-only:bg-paper-2"
       />
       {locked && (
-        <p className="text-xs text-zinc-600">
+        <p className="text-xs text-ink-soft">
           Protocolo travado: o conteúdo é imutável; registre mudanças como
           emendas abaixo.
         </p>
       )}
-      {msg && <p className="text-xs text-zinc-600">{msg}</p>}
+      {msg && <p className="text-xs text-ink-soft">{msg}</p>}
     </section>
   );
 }

@@ -20,10 +20,10 @@ export default async function QuestionPage({
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-xl font-semibold">Pergunta da Revisão</h1>
+      <h1 className="title-serif">Pergunta da Revisão</h1>
       <QuestionForm reviewId={reviewId} initial={question} />
-      <section className="flex flex-col gap-2">
-        <h2 className="text-lg font-medium">Chave de IA (BYOK)</h2>
+      <section className="panel flex flex-col gap-2">
+        <p className="panel-title">Chave de IA (BYOK)</p>
         <ByokKeyForm reviewId={reviewId} present={byok.present} />
       </section>
       <CriteriaPanel
