@@ -9,6 +9,16 @@ import { EnqueueValidationError } from "@shared/jobs/types";
 import { searchSchema } from "@/lib/search/schema";
 import type { SourceFormat } from "@shared/import/types";
 import { listExactRemovals, listFuzzyCandidates } from "@/lib/dedup/queries";
+import {
+  listScreeningQueue,
+  listExclusionReasons,
+  type ScreeningStage,
+} from "@/lib/screening/queries";
+import { enqueueScreeningJob } from "@/lib/screening/enqueue";
+import { runScreeningWorkerWith } from "@/lib/screening/run";
+import { getLLMProvider } from "@/lib/ai/llm";
+import { MockLLMProvider } from "@/lib/ai/llm/mock";
+import { MissingByokError } from "@/lib/ai/llm/types";
 
 async function requireMember(reviewId: string) {
   const supabase = await createClient();
@@ -128,4 +138,90 @@ export async function fetchExactRemovals(reviewId: string) {
 export async function fetchFuzzyCandidates(reviewId: string) {
   await requireMember(reviewId);
   return listFuzzyCandidates(reviewId);
+}
+
+// ---- Fetchers (passados como props server-action aos componentes client) ----
+export async function fetchScreeningQueue(
+  reviewId: string,
+  stage: ScreeningStage,
+) {
+  await requireMember(reviewId);
+  return listScreeningQueue(reviewId, stage);
+}
+
+export async function fetchExclusionReasons(reviewId: string) {
+  const { supabase } = await requireMember(reviewId);
+  await supabase.rpc("seed_default_exclusion_reasons", {
+    p_review_id: reviewId,
+  }); // idempotente (D-F5.4)
+  return listExclusionReasons(reviewId);
+}
+
+// ---- Mutações de triagem (decisões HUMANAS — FR-024) ----
+export async function decideScreening(
+  reviewId: string,
+  input: {
+    recordId: string;
+    stage: ScreeningStage;
+    decision: "include" | "exclude" | "maybe";
+    exclusionReasonId?: string | null;
+    aiSuggestionId?: string | null;
+  },
+) {
+  const { supabase } = await requireMember(reviewId);
+  const { error } = await supabase.rpc("decide_screening", {
+    p_review_id: reviewId,
+    p_record_id: input.recordId,
+    p_stage: input.stage,
+    p_decision: input.decision,
+    p_exclusion_reason_id: input.exclusionReasonId ?? null,
+    p_ai_suggestion_id: input.aiSuggestionId ?? null,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
+}
+
+export async function reverseScreening(reviewId: string, decisionId: string) {
+  const { supabase } = await requireMember(reviewId);
+  const { error } = await supabase.rpc("reverse_screening", {
+    p_decision_id: decisionId,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
+}
+
+// ---- IA em lote: estimativa + enfileiramento + worker síncrono (D-F5.5/FR-033) ----
+export async function enqueueScreeningBatch(
+  reviewId: string,
+  recordIds: string[] | null,
+) {
+  const { supabase } = await requireMember(reviewId);
+  const res = await enqueueScreeningJob({ supabase }, reviewId, recordIds);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const, ...res };
+}
+
+export async function runScreeningWorker(reviewId: string) {
+  const { supabase } = await requireMember(reviewId);
+  const admin = createAdminClient();
+  // Provider: BYOK quando há chave; senão Mock determinístico (local/e2e — D-F5.5).
+  let provider;
+  try {
+    provider = await getLLMProvider(reviewId);
+  } catch (e) {
+    if (e instanceof MissingByokError) provider = new MockLLMProvider();
+    else throw e;
+  }
+  // Critérios de elegibilidade (Fatia 2) alimentam a pré-classificação.
+  // DEVIATION: plan uses select("label") but real column is "text" (verified in database.ts)
+  const { data: crit } = await supabase
+    .from("eligibility_criterion")
+    .select("text")
+    .eq("review_id", reviewId);
+  const criteria = ((crit ?? []) as Array<{ text: string }>).map((c) => c.text);
+  await runScreeningWorkerWith(admin, provider, reviewId, criteria);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
 }

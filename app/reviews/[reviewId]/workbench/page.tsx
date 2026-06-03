@@ -1,14 +1,20 @@
 import { ModeBar, type WorkbenchMode } from "@/components/workbench/ModeBar";
 import { ImportPanel } from "@/components/workbench/ImportPanel";
 import { DuplicatesPanel } from "@/components/workbench/DuplicatesPanel";
+import { ScreeningQueue } from "@/components/workbench/ScreeningQueue";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 import { countRecords } from "@/lib/jobs/queries";
 import { countDuplicates } from "@/lib/dedup/queries";
+import { countScreened, countIncludedFullText } from "@/lib/screening/queries";
 import {
   decideFuzzy,
   reverseDedup,
   fetchExactRemovals,
   fetchFuzzyCandidates,
+  fetchScreeningQueue,
+  fetchExclusionReasons,
+  decideScreening,
+  reverseScreening,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -35,6 +41,12 @@ export default async function WorkbenchPage({
   const identified = await countRecords(reviewId);
   const duplicates =
     active === "duplicates" ? await countDuplicates(reviewId) : null;
+  const screened =
+    active === "title_abstract" || active === "full_text"
+      ? await countScreened(reviewId)
+      : null;
+  const includedFullText =
+    active === "full_text" ? await countIncludedFullText(reviewId) : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -46,6 +58,16 @@ export default async function WorkbenchPage({
         {duplicates !== null && (
           <span className="text-sm text-gray-600" aria-live="polite">
             Duplicados (PRISMA): <strong>{duplicates}</strong>
+          </span>
+        )}
+        {screened !== null && (
+          <span className="text-sm text-gray-600" aria-live="polite">
+            Triados (PRISMA): <strong>{screened}</strong>
+          </span>
+        )}
+        {includedFullText !== null && (
+          <span className="text-sm text-gray-600" aria-live="polite">
+            Incluídos (texto completo): <strong>{includedFullText}</strong>
           </span>
         )}
       </div>
@@ -60,6 +82,15 @@ export default async function WorkbenchPage({
             loadFuzzyCandidates={fetchFuzzyCandidates}
             onDecide={decideFuzzy.bind(null, reviewId)}
             onReverse={reverseDedup.bind(null, reviewId)}
+          />
+        ) : active === "title_abstract" || active === "full_text" ? (
+          <ScreeningQueue
+            reviewId={reviewId}
+            stage={active}
+            loadQueue={fetchScreeningQueue}
+            loadReasons={fetchExclusionReasons}
+            onDecide={decideScreening.bind(null, reviewId)}
+            onReverse={reverseScreening.bind(null, reviewId)}
           />
         ) : (
           <p className="text-sm text-gray-500">
