@@ -69,4 +69,24 @@ describe("queue-url (FR-037) — preservar/reabrir estado de fila", () => {
     );
     expect(byYear.map((r) => r.year)).toEqual(["2019", "2020", "2022"]);
   });
+
+  it("applyQueueView ordena por ai_confidence (desc, nulls por último)", () => {
+    const out = applyQueueView(
+      rows,
+      { filter: "all", sort: "ai_confidence" },
+      sel,
+      sortKey,
+    );
+    expect(out.map((r) => r.recordId)).toEqual(["b", "a", "c"]);
+  });
+
+  it("applyQueueView filtra por 'ai_suggested' (com sugestão da IA)", () => {
+    const out = applyQueueView(
+      rows,
+      { filter: "ai_suggested", sort: "default" },
+      sel,
+      sortKey,
+    );
+    expect(out.map((r) => r.recordId)).toEqual(["a", "b"]);
+  });
 });
