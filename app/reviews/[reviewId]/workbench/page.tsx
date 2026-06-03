@@ -39,7 +39,7 @@ export default async function WorkbenchPage({
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Workbench</h1>
+        <h1 className="title-serif">Workbench</h1>
       </div>
       <ModeBar reviewId={reviewId} active={active} />
       <QueryProvider>
@@ -63,7 +63,7 @@ export default async function WorkbenchPage({
             onReverse={reverseScreening.bind(null, reviewId)}
           />
         ) : (
-          <p className="text-sm text-gray-500">
+          <p className="text-sm text-ink-soft">
             Este modo é habilitado em uma etapa seguinte do Marco.
           </p>
         )}

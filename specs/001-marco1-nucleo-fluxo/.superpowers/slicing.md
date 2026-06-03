@@ -13,6 +13,12 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 
 **Formato escolhido:** 6 fatias, **ordem-pipeline** (D19), greenfield.
 
+> **Adendo (2026-06-03):** **Fatia 7 — Design System + Polish Visual** acrescentada
+> após o Marco funcional, aprovada pelo desenvolvedor a partir de protótipo visual
+> ([docs/prototypes/protocolo-spider.html](../../../docs/prototypes/protocolo-spider.html)).
+> É uma fatia **transversal de UI** (não pipeline): não adiciona FR de produto,
+> repagina o que já existe. CHECKPOINT 1 desta fatia: aprovado nesta sessão.
+
 ---
 
 ## Decisões de implementação resolvidas (A1/A2/A3)
@@ -190,6 +196,33 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   reabertura de estado de fila por URL; export de auditoria JSON+CSV
   (reversões aparecem, SC-006).
 
+### Fatia 7 — Design System + Polish Visual
+- **Branch:** `build/001-marco1-nucleo-fluxo/7-design-system-polish`
+- **Natureza:** fatia **transversal de UI** (pós-Marco funcional). **Não** adiciona
+  FR de produto; repagina o que já existe sob uma identidade visual única.
+- **Entra:**
+  - **Design system** em `app/globals.css` (Tailwind 4): tokens `@theme` (paleta
+    papel-quente + tinta + acento vermillion/verde-petróleo; fontes serif/sans/mono)
+    + `@layer components` (`.btn-primary`, `.control`, `.panel`, `.field`/`.glyph`,
+    `.metric`, trilho/readout) espelhando o protótipo aprovado. Tema **claro**; tokens
+    estruturados para dark futuro (não implementado nesta fatia).
+  - **Fontes** Fraunces + Hanken Grotesk + IBM Plex Mono via `next/font` (self-hosted,
+    sem CDN) em `app/layout.tsx`. **Sem novas deps de runtime.**
+  - **Iniciais marginais + expansão de acrônimo por framework** em `QuestionForm`
+    (mapas `FIELD_GLYPH`/`FRAMEWORK_ACRONYM`): spider/pico/peo/pcc cada um expande o
+    **seu** acrônimo; `free` (Livre) sem iniciais.
+  - **Aplicação uniforme** a TODAS as páginas/componentes existentes: shell
+    (`layout`, `PhaseRail`, `PrismaBar`, `JobsPanel`, `ReviewSwitcher`), formulários
+    (pergunta/protocolo/auth/listas), vocabulário visual de IA (`src/components/ai/`)
+    e workbench (`ModeBar` + painéis).
+- **Não entra:** dark mode; mudança de comportamento, copy ou rotas; novas FR;
+  fluxograma PRISMA/exports DOCX-PDF-MD (Marco 3).
+- **Depende de:** Fatias 1–6 mergeadas (repagina a superfície inteira).
+- **Skills:** `frontend-design`, `react-best-practices`, `nextjs-best-practices`.
+- **Testes-chave (gate):** **suites e2e/unit das Fatias 3–6 verdes e inalteradas**
+  (repaginação preserva textos/atributos/`data-*`/`aria-*` — invariante central);
+  contraste **WCAG AA**; `prefers-reduced-motion` desliga animações; teclado preservado.
+
 ---
 
 ## Gate de cobertura (verificação — PROTOCOLS §Sessão B)
@@ -218,4 +251,5 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 3 — Workbench shell + Importação (mergeada — commit `114da4f`)
 - [x] Fatia 4 — Deduplicação (mergeada — merge `82dcab5`)
 - [x] Fatia 5 — Triagem 2 etapas + IA-no-laço (CHECKPOINT 3 — mergeada)
-- [x] Fatia 6 — Shell, trilho & PRISMA vivo + export de auditoria (CHECKPOINT 3 — aguardando merge)
+- [x] Fatia 6 — Shell, trilho & PRISMA vivo + export de auditoria (CHECKPOINT 3 — mergeada)
+- [ ] Fatia 7 — Design System + Polish Visual (CHECKPOINT 1 aprovado — `writing-plans` em curso)

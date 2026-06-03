@@ -25,22 +25,22 @@ export default async function ProtocolPage({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center gap-3">
-        <h1 className="text-xl font-semibold">Protocolo PRISMA-P</h1>
+        <h1 className="title-serif">Protocolo PRISMA-P</h1>
         {protocol?.state === "locked" ? (
-          <span className="rounded-full border border-zinc-500 bg-zinc-100 px-2 py-0.5 text-xs dark:bg-zinc-800">
+          <span className="rounded-full border border-line-strong bg-paper-2 px-2 py-0.5 text-xs text-ink-soft">
             🔒 Travado
             {protocol.locked_at
               ? ` em ${new Date(protocol.locked_at).toLocaleDateString("pt-BR")}`
               : ""}
           </span>
         ) : (
-          <span className="rounded-full border border-violet-400 bg-violet-50 px-2 py-0.5 text-xs dark:bg-violet-950">
+          <span className="rounded-full border border-accent bg-accent-wash px-2 py-0.5 text-xs text-accent-deep">
             Rascunho
           </span>
         )}
         <a
           href={`/reviews/${reviewId}/protocol/export`}
-          className="ml-auto text-sm underline"
+          className="ml-auto text-sm underline text-ink-soft"
         >
           Exportar (.md)
         </a>

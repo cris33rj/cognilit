@@ -15,8 +15,8 @@ export default async function ReviewHomePage({
   }
   return (
     <section>
-      <h1 className="text-2xl font-semibold">{review.title}</h1>
-      <p className="mt-2 text-gray-600">
+      <h1 className="title-serif">{review.title}</h1>
+      <p className="mt-2 text-ink-soft">
         Contexto da Revisão ativa. As fases (Pergunta, Protocolo, Workbench)
         entram nas próximas fatias.
       </p>

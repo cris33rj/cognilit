@@ -21,7 +21,7 @@ export function SuggestionActions({
         type="button"
         onClick={onAccept}
         disabled={disabled}
-        className="rounded border border-green-600 px-2 py-0.5 text-xs text-green-700 focus-visible:ring"
+        className="rounded border border-done px-2 py-0.5 text-xs text-done focus-visible:ring"
       >
         Aceitar
       </button>
@@ -29,7 +29,7 @@ export function SuggestionActions({
         type="button"
         onClick={onEdit}
         disabled={disabled}
-        className="rounded border border-amber-600 px-2 py-0.5 text-xs text-amber-700 focus-visible:ring"
+        className="rounded border border-warn px-2 py-0.5 text-xs text-warn focus-visible:ring"
       >
         Editar
       </button>
@@ -37,7 +37,7 @@ export function SuggestionActions({
         type="button"
         onClick={onReject}
         disabled={disabled}
-        className="rounded border border-red-500 px-2 py-0.5 text-xs text-red-600 focus-visible:ring"
+        className="rounded border border-line px-2 py-0.5 text-xs text-ink-faint focus-visible:ring"
       >
         Rejeitar
       </button>

@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cognilit · Protocolo — protótipo visual</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..600&family=Hanken+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* Papel quente + tinta quente — instrumento editorial */
+    --paper:       #F4F1E9;
+    --paper-2:     #EDE8DB;
+    --paper-card:  #FBF9F4;
+    --ink:         #1A1A17;
+    --ink-soft:    #4A463D;
+    --ink-faint:   #8C8676;
+    --line:        #D8D2C3;
+    --line-strong: #C3BCA8;
+
+    /* Acentos */
+    --accent:      #C2461E;   /* vermillion / ativo / IA */
+    --accent-deep: #9E3414;
+    --accent-wash: #F4E3D7;
+    --done:        #2C4A47;   /* verde-petróleo / feito */
+    --done-wash:   #DFE7E1;
+    --warn:        #B07A12;
+
+    --serif: "Fraunces", Georgia, serif;
+    --sans:  "Hanken Grotesk", system-ui, sans-serif;
+    --mono:  "IBM Plex Mono", ui-monospace, monospace;
+
+    --r: 3px;
+    --shadow: 0 1px 0 rgba(26,26,23,.04), 0 12px 32px -18px rgba(26,26,23,.28);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+  body {
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--paper);
+    /* textura de grão sutil + halo de luz */
+    background-image:
+      radial-gradient(120% 80% at 80% -10%, rgba(194,70,30,.06), transparent 60%),
+      radial-gradient(90% 70% at -10% 110%, rgba(44,74,71,.05), transparent 55%),
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.025'/%3E%3C/svg%3E");
+    min-height: 100vh;
+    line-height: 1.45;
+  }
+
+  /* ============ TOP BAR ============ */
+  .topbar {
+    display: flex; align-items: center; gap: 2rem;
+    padding: 1.1rem 2.2rem;
+    border-bottom: 1px solid var(--line);
+    background: rgba(251,249,244,.7);
+    backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .brand {
+    font-family: var(--serif);
+    font-weight: 600;
+    font-size: 1.5rem;
+    letter-spacing: -.02em;
+    line-height: 1;
+    display: flex; align-items: baseline; gap: .5rem;
+  }
+  .brand b { font-style: italic; font-weight: 600; }
+  .brand .dot { color: var(--accent); font-size: 1.7rem; line-height: 0; }
+  .nav { display: flex; gap: 1.4rem; margin-left: .5rem; }
+  .nav a {
+    color: var(--ink-soft); text-decoration: none; font-weight: 500; font-size: .9rem;
+    padding-bottom: 2px; border-bottom: 1.5px solid transparent; transition: .18s;
+  }
+  .nav a:hover { color: var(--ink); border-color: var(--line-strong); }
+  .nav a.active { color: var(--ink); border-color: var(--accent); }
+  .selector {
+    margin-left: auto; display: flex; align-items: center; gap: .9rem;
+  }
+  .review-pill {
+    display: inline-flex; align-items: center; gap: .55rem;
+    border: 1px solid var(--line-strong); border-radius: 999px;
+    padding: .4rem .85rem; font-size: .85rem; font-weight: 600;
+    background: var(--paper-card); cursor: pointer; transition: .18s;
+  }
+  .review-pill:hover { border-color: var(--ink-soft); }
+  .review-pill .chev { color: var(--ink-faint); font-size: .7rem; }
+  .review-pill .swatch { width:.55rem; height:.55rem; border-radius:50%; background:var(--accent); }
+  .exit { color: var(--ink-soft); text-decoration: none; font-size: .85rem; font-weight: 500; }
+  .exit:hover { color: var(--accent-deep); }
+
+  /* ============ PRISMA READOUT ============ */
+  .readout {
+    display: flex; align-items: stretch;
+    padding: .65rem 2.2rem;
+    border-bottom: 1px solid var(--line);
+    background:
+      linear-gradient(180deg, var(--paper-2), var(--paper));
+    overflow-x: auto;
+  }
+  .metric {
+    display: flex; flex-direction: column; gap: .15rem;
+    padding: .25rem 1.5rem .25rem 0; position: relative;
+    flex: 0 0 auto;
+  }
+  .metric + .metric { padding-left: 1.5rem; }
+  /* seta de vazão do funil */
+  .metric + .metric::before {
+    content: "→"; position: absolute; left: -.15rem; top: 50%; transform: translateY(-50%);
+    color: var(--ink-faint); font-family: var(--mono); font-size: .8rem; opacity: .55;
+  }
+  .metric .lbl {
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .12em;
+    color: var(--ink-faint); font-weight: 600; white-space: nowrap;
+  }
+  .metric .val {
+    font-family: var(--mono); font-size: 1.45rem; font-weight: 600; line-height: 1;
+    color: var(--ink); font-variant-numeric: tabular-nums;
+  }
+  .metric.is-accent .val { color: var(--accent); }
+  .metric.is-done   .val { color: var(--done); }
+  .metric.is-muted  .val { color: var(--ink-faint); }
+
+  /* ============ LAYOUT ============ */
+  .shell {
+    display: grid;
+    grid-template-columns: 248px minmax(0,1fr) 268px;
+    gap: 0;
+    max-width: 1320px; margin: 0 auto;
+    align-items: start;
+  }
+
+  /* ---- TRILHO (stepper) ---- */
+  .rail {
+    padding: 2.2rem 1.6rem 2.2rem 2.2rem;
+    border-right: 1px solid var(--line);
+    min-height: calc(100vh - 140px);
+    position: sticky; top: 140px;
+  }
+  .rail h3 {
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .16em;
+    color: var(--ink-faint); font-weight: 700; margin-bottom: 1.4rem;
+  }
+  .steps { list-style: none; position: relative; }
+  .steps::before {
+    content:""; position:absolute; left: 7px; top: 8px; bottom: 28px;
+    width: 1.5px; background: var(--line-strong);
+  }
+  .step {
+    display: flex; align-items: flex-start; gap: .8rem;
+    padding: .55rem 0; position: relative; cursor: pointer;
+  }
+  .step .node {
+    flex: 0 0 auto; width: 15px; height: 15px; border-radius: 50%;
+    border: 1.5px solid var(--line-strong); background: var(--paper);
+    margin-top: 2px; z-index: 1; transition: .18s;
+  }
+  .step .meta { display: flex; flex-direction: column; gap: .1rem; }
+  .step .name { font-weight: 600; font-size: .92rem; color: var(--ink-soft); transition:.18s; }
+  .step .tag { font-size: .68rem; color: var(--ink-faint); font-weight: 500; }
+
+  .step.done .node   { background: var(--done); border-color: var(--done); }
+  .step.done .name   { color: var(--ink); }
+  .step.done .tag    { color: var(--done); }
+
+  .step.current .node {
+    background: var(--accent); border-color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-wash);
+    animation: pulse 2.4s ease-in-out infinite;
+  }
+  .step.current { background: linear-gradient(90deg, var(--accent-wash), transparent); border-radius: var(--r); margin: 0 -.5rem; padding: .55rem .5rem; }
+  .step.current .name { color: var(--accent-deep); font-weight: 700; }
+  .step.current .tag  { color: var(--accent); }
+
+  .step.pending .name { color: var(--ink-faint); }
+  .step.off { opacity: .5; }
+  .step.off .node { border-style: dashed; }
+  .step.off .name { text-decoration: line-through; text-decoration-color: var(--line-strong); color: var(--ink-faint); }
+
+  @keyframes pulse {
+    0%,100% { box-shadow: 0 0 0 4px var(--accent-wash); }
+    50%     { box-shadow: 0 0 0 7px rgba(194,70,30,.08); }
+  }
+
+  /* ---- FORM (centro) ---- */
+  .main { padding: 2.4rem 2.6rem 4rem; }
+  .eyebrow {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--accent); font-weight: 600;
+    display:flex; align-items:center; gap:.6rem;
+  }
+  .eyebrow::after { content:""; height:1px; flex:1; background: linear-gradient(90deg, var(--line-strong), transparent); }
+  .title {
+    font-family: var(--serif); font-weight: 600; letter-spacing: -.02em;
+    font-size: 2.4rem; line-height: 1.05; margin: .5rem 0 .35rem;
+  }
+  .title em { font-style: italic; color: var(--accent-deep); }
+  .subtitle { color: var(--ink-soft); font-size: .95rem; max-width: 48ch; margin-bottom: 2.2rem; }
+
+  .field { position: relative; margin-bottom: 1.5rem; padding-left: 3.4rem; }
+  /* inicial marginal do SPIDER */
+  .field .glyph {
+    position: absolute; left: 0; top: -.15rem; width: 2.6rem;
+    font-family: var(--serif); font-weight: 600; font-size: 2rem; line-height: 1;
+    color: var(--line-strong); text-align: center; user-select: none;
+    transition: .2s;
+  }
+  .field .glyph small { font-size: 1.15rem; }
+  .field:focus-within .glyph { color: var(--accent); transform: translateY(-1px); }
+  .field > label {
+    display: block; font-weight: 600; font-size: .82rem; color: var(--ink);
+    margin-bottom: .4rem; letter-spacing: .01em;
+  }
+  .field > label .en { color: var(--ink-faint); font-weight: 500; font-style: italic; }
+
+  .control {
+    width: 100%; font-family: var(--sans); font-size: .95rem; color: var(--ink);
+    background: var(--paper-card); border: 1px solid var(--line-strong);
+    border-radius: var(--r); padding: .7rem .85rem; transition: .18s;
+  }
+  .control::placeholder { color: var(--ink-faint); }
+  .control:hover { border-color: var(--line-strong); background: #fff; }
+  .control:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-wash); background: #fff;
+  }
+  textarea.control { resize: vertical; min-height: 5.5rem; line-height: 1.55; }
+
+  /* select estilizado */
+  .select-wrap { position: relative; }
+  .select-wrap::after {
+    content:"▾"; position:absolute; right: .9rem; top: 50%; transform: translateY(-50%);
+    color: var(--ink-faint); pointer-events: none; font-size: .8rem;
+  }
+  select.control { appearance: none; cursor: pointer; padding-right: 2.2rem; font-weight: 600; }
+
+  .framework-field { padding-left: 0; margin-bottom: 2rem; }
+  .framework-field .hint {
+    font-size: .75rem; color: var(--ink-faint); margin-top: .45rem;
+    font-family: var(--mono); letter-spacing: .02em;
+  }
+  .framework-field .hint b { color: var(--accent); font-weight: 600; }
+
+  .synth { padding-left: 3.4rem; }
+  .synth .glyph { color: var(--accent); }
+
+  .actions { display: flex; align-items: center; gap: 1rem; margin-top: 2rem; padding-left: 3.4rem; }
+  .btn-primary {
+    font-family: var(--sans); font-weight: 600; font-size: .92rem;
+    color: var(--paper); background: var(--ink); border: 1px solid var(--ink);
+    padding: .72rem 1.5rem; border-radius: var(--r); cursor: pointer;
+    display: inline-flex; align-items: center; gap: .55rem; transition: .18s;
+    box-shadow: var(--shadow);
+  }
+  .btn-primary:hover { background: var(--accent-deep); border-color: var(--accent-deep); transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-primary .arr { transition: .2s; }
+  .btn-primary:hover .arr { transform: translateX(3px); }
+  .saved-note { font-size: .8rem; color: var(--ink-faint); font-family: var(--mono); }
+
+  /* ---- PAINEL DIREITO (IA) ---- */
+  .aside {
+    padding: 2.4rem 2.2rem; border-left: 1px solid var(--line);
+    position: sticky; top: 140px; min-height: calc(100vh - 140px);
+  }
+  .panel {
+    background: var(--paper-card); border: 1px solid var(--line);
+    border-radius: var(--r); padding: 1.2rem 1.25rem; margin-bottom: 1.2rem;
+    box-shadow: var(--shadow);
+  }
+  .panel h4 {
+    font-size: .62rem; text-transform: uppercase; letter-spacing: .14em;
+    color: var(--ink-faint); font-weight: 700; margin-bottom: 1rem;
+    display:flex; align-items:center; gap:.5rem;
+  }
+  .panel h4 .ai-dot {
+    width:.5rem; height:.5rem; border-radius:50%; background:var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-wash);
+  }
+  .token-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: .7rem; }
+  .token-row .k { font-size: .8rem; color: var(--ink-soft); }
+  .token-row .v { font-family: var(--mono); font-weight: 600; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+  .meter { height: 5px; background: var(--paper-2); border-radius: 999px; overflow: hidden; margin-top: .3rem; border:1px solid var(--line); }
+  .meter span { display:block; height:100%; width: 4%; background: linear-gradient(90deg, var(--accent), var(--accent-deep)); }
+
+  .job-status {
+    font-size: .82rem; color: var(--ink-soft); display:flex; align-items:center; gap:.55rem;
+  }
+  .job-status .idle { width:.55rem; height:.55rem; border-radius:50%; border:1.5px solid var(--line-strong); }
+
+  .export-list { display: flex; flex-direction: column; gap: .55rem; }
+  .export-list a {
+    display: flex; align-items: center; justify-content: space-between;
+    text-decoration: none; color: var(--ink); font-weight: 600; font-size: .86rem;
+    padding: .6rem .8rem; border: 1px solid var(--line); border-radius: var(--r);
+    background: var(--paper); transition: .18s;
+  }
+  .export-list a:hover { border-color: var(--accent); color: var(--accent-deep); background:#fff; }
+  .export-list a .fmt { font-family: var(--mono); font-size: .68rem; color: var(--ink-faint); }
+  .export-list a:hover .fmt { color: var(--accent); }
+
+  /* ============ entrada animada ============ */
+  [data-rise] { opacity: 0; transform: translateY(10px); animation: rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
+  @keyframes rise { to { opacity: 1; transform: none; } }
+
+  @media (max-width: 1080px) {
+    .shell { grid-template-columns: 1fr; }
+    .rail, .aside { position: static; min-height: 0; border: none; border-bottom: 1px solid var(--line); }
+    .steps::before { display: none; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- TOP BAR -->
+  <header class="topbar" data-rise style="animation-delay:.02s">
+    <div class="brand">Cognil<b>it</b><span class="dot">.</span></div>
+    <nav class="nav">
+      <a href="#">Minhas Revisões</a>
+      <a href="#">Nova Revisão</a>
+    </nav>
+    <div class="selector">
+      <span class="review-pill"><span class="swatch"></span> Teste <span class="chev">▾</span></span>
+      <a href="#" class="exit">Sair ↗</a>
+    </div>
+  </header>
+
+  <!-- PRISMA READOUT -->
+  <div class="readout" data-rise style="animation-delay:.08s">
+    <div class="metric"><span class="lbl">Identificados</span><span class="val">20</span></div>
+    <div class="metric is-muted"><span class="lbl">Duplicados</span><span class="val">2</span></div>
+    <div class="metric"><span class="lbl">Triados</span><span class="val">16</span></div>
+    <div class="metric is-accent"><span class="lbl">Incluídos · T/R</span><span class="val">0</span></div>
+    <div class="metric is-done"><span class="lbl">Incluídos · TC</span><span class="val">14</span></div>
+    <div class="metric is-muted"><span class="lbl">Excluídos · TC</span><span class="val">1</span></div>
+  </div>
+
+  <div class="shell">
+
+    <!-- TRILHO -->
+    <aside class="rail" data-rise style="animation-delay:.14s">
+      <h3>Trilho da revisão</h3>
+      <ul class="steps">
+        <li class="step done"><span class="node"></span><span class="meta"><span class="name">Pergunta</span><span class="tag">feito</span></span></li>
+        <li class="step current"><span class="node"></span><span class="meta"><span class="name">Protocolo</span><span class="tag">em curso</span></span></li>
+        <li class="step done"><span class="node"></span><span class="meta"><span class="name">Importar</span><span class="tag">feito</span></span></li>
+        <li class="step done"><span class="node"></span><span class="meta"><span class="name">Duplicatas</span><span class="tag">feito</span></span></li>
+        <li class="step pending"><span class="node"></span><span class="meta"><span class="name">Triagem T/R</span><span class="tag">pendente</span></span></li>
+        <li class="step pending"><span class="node"></span><span class="meta"><span class="name">Triagem TC</span><span class="tag">pendente</span></span></li>
+        <li class="step off"><span class="node"></span><span class="meta"><span class="name">Risco de Viés</span><span class="tag">opcional · desligado</span></span></li>
+        <li class="step off"><span class="node"></span><span class="meta"><span class="name">Certeza (CERQual)</span><span class="tag">opcional · desligado</span></span></li>
+      </ul>
+    </aside>
+
+    <!-- FORM -->
+    <main class="main">
+      <p class="eyebrow" data-rise style="animation-delay:.18s">Protocolo · etapa 02</p>
+      <h1 class="title" data-rise style="animation-delay:.22s">Pergunta da <em>Revisão</em></h1>
+      <p class="subtitle" data-rise style="animation-delay:.26s">
+        Estruture a pergunta com o framework <strong>SPIDER</strong> — desenhado para
+        sínteses qualitativas. Cada dimensão abaixo é uma letra do acrônimo.
+      </p>
+
+      <div class="framework-field field" data-rise style="animation-delay:.30s" style="padding-left:0">
+        <label for="fw">Framework</label>
+        <div class="select-wrap">
+          <select id="fw" class="control">
+            <option>SPIDER — síntese qualitativa</option>
+            <option>PICO — eficácia / quantitativo</option>
+            <option>PICOS</option>
+            <option>SPICE</option>
+          </select>
+        </div>
+        <p class="hint"><b>S</b>ample · <b>P</b>henomenon of <b>I</b>nterest · <b>D</b>esign · <b>E</b>valuation · <b>R</b>esearch type</p>
+      </div>
+
+      <div class="field" data-rise style="animation-delay:.34s">
+        <span class="glyph">S</span>
+        <label>Amostra <span class="en">— Sample</span></label>
+        <input class="control" value="Adultos jovens (20 a 35 anos) que utilizam aplicativos de controle financeiro." />
+      </div>
+
+      <div class="field" data-rise style="animation-delay:.38s">
+        <span class="glyph">P<small>I</small></span>
+        <label>Fenômeno de interesse <span class="en">— Phenomenon of Interest</span></label>
+        <input class="control" value="Uso diário de aplicativos de finanças pessoais para controle de gastos" />
+      </div>
+
+      <div class="field" data-rise style="animation-delay:.42s">
+        <span class="glyph">D</span>
+        <label>Desenho <span class="en">— Design</span></label>
+        <input class="control" value="Entrevistas semiestruturadas e grupos focais." />
+      </div>
+
+      <div class="field" data-rise style="animation-delay:.46s">
+        <span class="glyph">E</span>
+        <label>Avaliação <span class="en">— Evaluation</span></label>
+        <input class="control" value="Barreiras de engajamento, facilidade de uso percebida e mudanças no comportamento financeiro." />
+      </div>
+
+      <div class="field" data-rise style="animation-delay:.50s">
+        <span class="glyph">R</span>
+        <label>Tipo de pesquisa <span class="en">— Research type</span></label>
+        <input class="control" value="Qualitativa" />
+      </div>
+
+      <div class="field synth" data-rise style="animation-delay:.54s">
+        <span class="glyph">✦</span>
+        <label>Pergunta sintetizada</label>
+        <textarea class="control" rows="3">Quais são as percepções, barreiras de engajamento e mudanças de comportamento de adultos jovens (20 a 35 anos) ao utilizarem diariamente aplicativos de finanças pessoais, conforme evidenciado por estudos qualitativos baseados em entrevistas e grupos focais?</textarea>
+      </div>
+
+      <div class="actions" data-rise style="animation-delay:.58s">
+        <button class="btn-primary">Salvar pergunta <span class="arr">→</span></button>
+        <span class="saved-note">salvo automaticamente · 14:32</span>
+      </div>
+    </main>
+
+    <!-- PAINEL IA -->
+    <aside class="aside" data-rise style="animation-delay:.20s">
+      <div class="panel">
+        <h4><span class="ai-dot"></span> Consumo de IA</h4>
+        <div class="token-row"><span class="k">Entrada</span><span class="v">0</span></div>
+        <div class="meter"><span></span></div>
+        <div class="token-row" style="margin-top:.9rem"><span class="k">Saída</span><span class="v">0</span></div>
+        <div class="meter"><span style="width:2%"></span></div>
+      </div>
+
+      <div class="panel">
+        <h4>Processamento</h4>
+        <div class="job-status"><span class="idle"></span> Nenhum job em andamento</div>
+      </div>
+
+      <div class="panel">
+        <h4>Auditoria</h4>
+        <div class="export-list">
+          <a href="#">Exportar auditoria <span class="fmt">JSON</span></a>
+          <a href="#">Planilha completa <span class="fmt">CSV</span></a>
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</body>
+</html>

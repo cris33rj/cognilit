@@ -95,23 +95,19 @@ export function ImportPanel({ reviewId }: { reviewId: string }) {
         <input
           {...register("queryString")}
           placeholder="String de busca"
-          className="rounded border p-2"
+          className="control"
         />
         <input
           {...register("database")}
           placeholder="Base consultada"
-          className="rounded border p-2"
+          className="control"
         />
-        <input
-          {...register("searchedOn")}
-          type="date"
-          className="rounded border p-2"
-        />
+        <input {...register("searchedOn")} type="date" className="control" />
         <input
           {...register("hits")}
           type="number"
           placeholder="Nº de hits"
-          className="rounded border p-2"
+          className="control"
         />
         {formState.errors.queryString && (
           <p className="text-sm text-red-600">
@@ -121,7 +117,7 @@ export function ImportPanel({ reviewId }: { reviewId: string }) {
         <button
           type="submit"
           disabled={pending || preview.length === 0}
-          className="self-start rounded bg-black px-4 py-2 text-sm text-white disabled:opacity-50"
+          className="btn-primary self-start disabled:opacity-50"
         >
           Confirmar importação
         </button>

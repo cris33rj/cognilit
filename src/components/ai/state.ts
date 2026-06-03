@@ -8,16 +8,11 @@ export const SUGGESTION_STATE_LABEL: Record<SuggestionState, string> = {
   inferred: "Inferida",
 };
 
-// Borda/cor distinta de dado humano (Princípio I). Suporta dark mode.
+// Borda/cor distinta de dado humano (Princípio I). Tokens do design system.
 export const SUGGESTION_STATE_CLASS: Record<SuggestionState, string> = {
-  pending:
-    "border-violet-400 bg-violet-50 text-violet-900 dark:bg-violet-950 dark:text-violet-100",
-  accepted:
-    "border-green-500 bg-green-50 text-green-900 dark:bg-green-950 dark:text-green-100",
-  edited:
-    "border-amber-500 bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100",
-  rejected:
-    "border-red-400 bg-red-50 text-red-900 line-through dark:bg-red-950 dark:text-red-100",
-  inferred:
-    "border-sky-400 bg-sky-50 text-sky-900 dark:bg-sky-950 dark:text-sky-100",
+  pending: "border-accent text-accent-deep bg-accent-wash",
+  accepted: "border-done text-done bg-done-wash",
+  edited: "border-warn text-warn bg-accent-wash",
+  rejected: "border-line text-ink-faint line-through",
+  inferred: "border-accent text-accent-deep bg-accent-wash",
 };

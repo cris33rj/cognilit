@@ -23,7 +23,7 @@ export function ByokKeyForm({
               : "Erro",
         );
       }}
-      className="flex flex-col gap-2 rounded border p-3"
+      className="panel flex flex-col gap-2"
     >
       <label className="flex flex-col gap-1 text-sm">
         Chave do provedor de IA (Anthropic){present ? " — já cadastrada" : ""}
@@ -32,16 +32,13 @@ export function ByokKeyForm({
           type="password"
           autoComplete="off"
           placeholder={present ? "•••• (substituir)" : "sk-ant-..."}
-          className="border p-2"
+          className="control"
         />
       </label>
-      <button
-        type="submit"
-        className="self-start bg-black px-3 py-1 text-sm text-white"
-      >
+      <button type="submit" className="btn-primary self-start">
         Salvar chave
       </button>
-      {msg && <p className="text-xs text-zinc-600">{msg}</p>}
+      {msg && <p className="text-xs text-ink-soft">{msg}</p>}
     </form>
   );
 }

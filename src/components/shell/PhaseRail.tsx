@@ -10,23 +10,34 @@ const STATUS_LABEL: Record<PhaseStatus, string> = {
 };
 
 const STATUS_CLASS: Record<PhaseStatus, string> = {
-  done: "text-green-700",
-  current: "font-semibold text-black",
-  pending: "text-gray-400",
-  locked: "text-amber-700",
-  optional_off: "text-gray-300 line-through",
+  done: "text-ink",
+  current: "font-semibold text-accent-deep",
+  pending: "text-ink-faint",
+  locked: "text-warn",
+  optional_off: "text-ink-faint line-through opacity-60",
+};
+
+const NODE_CLASS: Record<PhaseStatus, string> = {
+  done: "rail-node rail-node-done",
+  current: "rail-node rail-node-current",
+  pending: "rail-node",
+  locked: "rail-node",
+  optional_off: "rail-node rail-node-off",
 };
 
 export function PhaseRail({ phases }: { phases: Phase[] }) {
   return (
-    <nav aria-label="Trilho de fases" className="w-48 shrink-0 border-r pr-4">
+    <nav aria-label="Trilho de fases" className="border-r border-line p-6">
       <ol className="flex flex-col gap-1">
         {phases.map((p) => {
           const content = (
-            <span className={`text-sm ${STATUS_CLASS[p.status]}`}>
-              {p.label}
-              <span className="ml-1 text-xs text-gray-400">
-                ({STATUS_LABEL[p.status]})
+            <span className="flex items-start gap-3">
+              <span className={NODE_CLASS[p.status]} aria-hidden />
+              <span className={`text-sm ${STATUS_CLASS[p.status]}`}>
+                {p.label}
+                <span className="ml-1 text-xs text-gray-400">
+                  ({STATUS_LABEL[p.status]})
+                </span>
               </span>
             </span>
           );

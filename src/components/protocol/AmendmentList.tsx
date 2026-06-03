@@ -16,21 +16,21 @@ export function AmendmentList({
   const [msg, setMsg] = useState<string | null>(null);
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-lg font-medium">Emendas versionadas</h2>
+      <h2 className="text-lg font-medium text-ink">Emendas versionadas</h2>
       <ul className="flex flex-col gap-1">
         {amendments.map((a) => (
-          <li key={a.id} className="rounded border p-2 text-sm">
-            <span className="font-semibold">v{a.version}</span>{" "}
-            <span className="text-zinc-500">
+          <li key={a.id} className="panel text-sm">
+            <span className="font-semibold text-ink">v{a.version}</span>{" "}
+            <span className="text-ink-faint">
               ({new Date(a.dated_at).toLocaleDateString("pt-BR")})
             </span>
-            <div>
+            <div className="mt-1 text-ink-soft">
               {(a.change as { text?: string }).text ?? JSON.stringify(a.change)}
             </div>
           </li>
         ))}
         {amendments.length === 0 && (
-          <li className="text-sm text-zinc-500">Sem emendas.</li>
+          <li className="text-sm text-ink-soft">Sem emendas.</li>
         )}
       </ul>
 
@@ -46,16 +46,13 @@ export function AmendmentList({
             name="change"
             rows={2}
             required
-            className="border p-2 text-sm"
+            className="control text-sm"
             placeholder="Descreva a mudança (emenda datada)"
           />
-          <button
-            type="submit"
-            className="self-start rounded border px-3 py-1 text-sm"
-          >
+          <button type="submit" className="btn-primary self-start">
             Adicionar emenda
           </button>
-          {msg && <p className="text-xs text-zinc-600">{msg}</p>}
+          {msg && <p className="text-xs text-ink-soft">{msg}</p>}
         </form>
       )}
     </section>
