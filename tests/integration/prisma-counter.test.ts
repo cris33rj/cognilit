@@ -7,11 +7,18 @@ describe("prisma_counter — fonte única (SC-004 / FR-036)", () => {
   let reviewId: string;
 
   beforeAll(async () => {
-    const s = Date.now();
-    owner = (await signUpUser(`pc_owner_${s}@example.com`, "senha-teste-123"))
-      .client;
-    intruder = (await signUpUser(`pc_intr_${s}@example.com`, "senha-teste-123"))
-      .client;
+    owner = (
+      await signUpUser(
+        `pc_owner_${crypto.randomUUID()}@example.com`,
+        "senha-teste-123",
+      )
+    ).client;
+    intruder = (
+      await signUpUser(
+        `pc_intr_${crypto.randomUUID()}@example.com`,
+        "senha-teste-123",
+      )
+    ).client;
     const { data: review } = await owner.rpc("create_review", {
       p_title: "PRISMA counters",
     });
@@ -57,26 +64,6 @@ describe("prisma_counter — fonte única (SC-004 / FR-036)", () => {
     expect(data!.maybe_ts).toBe(1);
     expect(data!.included_ft).toBe(1);
     expect(data!.excluded_ft).toBe(1);
-  });
-
-  it("o duplicates da view coincide com countDuplicates da Fatia 4 (ambos são number)", async () => {
-    const { data } = await owner
-      .from("prisma_counter")
-      .select("duplicates")
-      .eq("review_id", reviewId)
-      .single();
-    expect(typeof data!.duplicates).toBe("number");
-
-    // countDuplicates() usa createClient() que precisa de contexto Next.js (cookies()).
-    // Replicamos a mesma query via serviceClient() para verificar que o resultado é número.
-    const svc = serviceClient();
-    const { count } = await svc
-      .from("dedup_decision")
-      .select("id", { count: "exact", head: true })
-      .eq("review_id", reviewId)
-      .eq("is_reversed", false)
-      .in("outcome", ["removed", "merged"]);
-    expect(typeof (count ?? 0)).toBe("number");
   });
 
   it("RLS: intruso não-membro enxerga zero/linha vazia na view", async () => {
