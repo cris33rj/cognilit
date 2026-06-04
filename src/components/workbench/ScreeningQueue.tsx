@@ -26,6 +26,8 @@ export interface ScreeningQueueProps {
   stage: ScreeningStage;
   loadQueue: (reviewId: string, stage: ScreeningStage) => Promise<QueueRow[]>;
   loadReasons: (reviewId: string) => Promise<ExclusionReason[]>;
+  onAddReason: (label: string) => Promise<{ ok: boolean; id?: string }>;
+  onRemoveReason: (reasonId: string) => Promise<{ ok: boolean }>;
   onDecide: (input: {
     recordId: string;
     stage: ScreeningStage;
@@ -41,6 +43,8 @@ export function ScreeningQueue({
   stage,
   loadQueue,
   loadReasons,
+  onAddReason,
+  onRemoveReason,
   onDecide,
   onReverse,
 }: ScreeningQueueProps) {
@@ -66,8 +70,11 @@ export function ScreeningQueue({
   const [density, setDensity] = useState<Density>("comfortable");
   const [focusIdx, setFocusIdx] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [pendingExclude, setPendingExclude] = useState<string | null>(null);
+  // Registros aguardando motivo de exclusão (1 no atalho 'e'; N no lote). O portão
+  // de motivo aplica o mesmo motivo a todos os ids da lista.
+  const [pendingExclude, setPendingExclude] = useState<string[] | null>(null);
   const [reasonId, setReasonId] = useState<string>("");
+  const [newReason, setNewReason] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -80,6 +87,14 @@ export function ScreeningQueue({
     queryFn: () => loadReasons(reviewId),
     enabled: stage === "full_text",
   });
+
+  // Se o motivo selecionado no portão de exclusão for removido (soft-delete) da
+  // lista, descarta a seleção defasada para não enviar um id inativo ao decidir.
+  useEffect(() => {
+    if (reasonId && !(reasons.data ?? []).some((r) => r.id === reasonId)) {
+      setReasonId("");
+    }
+  }, [reasons.data, reasonId]);
 
   const rows = useMemo(() => queue.data ?? [], [queue.data]);
 
@@ -113,9 +128,10 @@ export function ScreeningQueue({
     row: QueueRow,
     decision: Decision,
   ): Promise<boolean> {
-    // Texto completo + excluir ⇒ exige motivo antes de confirmar (FR-025).
+    // Texto completo + excluir ⇒ exige motivo antes de confirmar (FR-025):
+    // abre o portão de motivo para este registro.
     if (stage === "full_text" && decision === "exclude" && !reasonId) {
-      setPendingExclude(row.recordId);
+      setPendingExclude([row.recordId]);
       return false;
     }
     await onDecide({
@@ -145,18 +161,61 @@ export function ScreeningQueue({
     }
   }
 
-  // Ações em lote (FR-039): mesma regra por item.
+  // Ações em lote (FR-039). Incluir/dúvida decidem item a item. Excluir no Texto
+  // completo abre UM portão de motivo para TODOS os selecionados (FR-025).
   async function decideBatch(decision: Decision) {
     setError(null);
+    const ids = visibleRows
+      .filter((r) => selected.has(r.recordId))
+      .map((r) => r.recordId);
+    if (ids.length === 0) return;
+    if (stage === "full_text" && decision === "exclude") {
+      setPendingExclude(ids);
+      return;
+    }
     try {
-      for (const row of visibleRows.filter((r) => selected.has(r.recordId))) {
-        const ok = await decideOne(row, decision);
-        if (!ok) return; // abre seletor de motivo; usuário reexecuta
+      for (const id of ids) {
+        const row = rows.find((r) => r.recordId === id);
+        await onDecide({
+          recordId: id,
+          stage,
+          decision,
+          exclusionReasonId: null,
+          aiSuggestionId: row?.ai?.suggestionId ?? null,
+        });
       }
       setSelected(new Set());
+      setPendingExclude(null);
       await qc.invalidateQueries({ queryKey: ["screening"] });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha na ação em lote.");
+    }
+  }
+
+  // Confirma a exclusão (1 ou N registros) com o motivo escolhido no portão.
+  async function confirmExclude() {
+    if (!reasonId || !pendingExclude || pendingExclude.length === 0) return;
+    setError(null);
+    try {
+      for (const id of pendingExclude) {
+        const row = rows.find((r) => r.recordId === id);
+        if (!row) continue;
+        await onDecide({
+          recordId: id,
+          stage: "full_text",
+          decision: "exclude",
+          exclusionReasonId: reasonId,
+          aiSuggestionId: row.ai?.suggestionId ?? null,
+        });
+      }
+      setPendingExclude(null);
+      setReasonId("");
+      setSelected(new Set());
+      await qc.invalidateQueries({ queryKey: ["screening"] });
+    } catch (e) {
+      setError(
+        e instanceof Error ? e.message : "Falha ao registrar a decisão.",
+      );
     }
   }
 
@@ -167,6 +226,34 @@ export function ScreeningQueue({
       await qc.invalidateQueries({ queryKey: ["screening"] });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao desfazer a decisão.");
+    }
+  }
+
+  // Gestão de motivos de exclusão derivados/genéricos/manuais (Fatia 8).
+  async function handleAddReason() {
+    const label = newReason.trim();
+    if (!label) return;
+    setError(null);
+    try {
+      await onAddReason(label);
+      setNewReason("");
+      await qc.invalidateQueries({
+        queryKey: ["screening", "reasons", reviewId],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao adicionar o motivo.");
+    }
+  }
+
+  async function handleRemoveReason(reasonToRemove: string) {
+    setError(null);
+    try {
+      await onRemoveReason(reasonToRemove);
+      await qc.invalidateQueries({
+        queryKey: ["screening", "reasons", reviewId],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao remover o motivo.");
     }
   }
 
@@ -297,7 +384,7 @@ export function ScreeningQueue({
           </button>
           <button
             type="button"
-            className="rounded border border-line px-2 py-1 text-ink-soft"
+            className="rounded border border-line bg-paper px-3 py-1 font-medium text-ink hover:bg-paper-2"
             onClick={() => void decideBatch("exclude")}
           >
             Excluir selecionados
@@ -305,7 +392,7 @@ export function ScreeningQueue({
           {stage === "title_abstract" && (
             <button
               type="button"
-              className="rounded border border-line px-2 py-1 text-ink-soft"
+              className="rounded border border-line bg-paper px-3 py-1 font-medium text-ink hover:bg-paper-2"
               onClick={() => void decideBatch("maybe")}
             >
               Dúvida em lote
@@ -320,12 +407,84 @@ export function ScreeningQueue({
         </p>
       )}
 
-      {/* Seletor de motivo de exclusão — obrigatório no Texto completo (FR-025) */}
-      {stage === "full_text" && pendingExclude && (
+      {/* Gestão de motivos de exclusão — só no Texto completo (Fatia 8).
+          Motivos derivados de critérios trazem marcador discreto de origem,
+          reusando o vocabulário visual de IA (SC-005). */}
+      {stage === "full_text" && (
+        <section className="panel text-sm" aria-label="Motivos de exclusão">
+          <h3 className="panel-title">Motivos de exclusão</h3>
+          <ul
+            className="flex flex-col gap-1"
+            aria-label="Lista de motivos de exclusão"
+          >
+            {(reasons.data ?? []).map((r) => (
+              <li
+                key={r.id}
+                className="flex items-center justify-between gap-2"
+              >
+                <span className="flex items-center gap-1">
+                  <span>{r.label}</span>
+                  {r.origin === "criterion" && (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full border border-accent bg-accent-wash px-2 py-0.5 text-xs font-medium text-accent-deep"
+                      data-ai-state="inferred"
+                      title="Derivado de um critério de elegibilidade"
+                    >
+                      <span aria-hidden>✦</span>
+                      do critério
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="rounded border px-2 py-0.5 text-xs text-ink-soft hover:bg-paper-2"
+                  aria-label={`Remover motivo ${r.label}`}
+                  onClick={() => void handleRemoveReason(r.id)}
+                >
+                  Remover
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              type="text"
+              className="control flex-1"
+              aria-label="Novo motivo de exclusão"
+              placeholder="Adicionar motivo…"
+              value={newReason}
+              onChange={(e) => setNewReason(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleAddReason();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!newReason.trim()}
+              onClick={() => void handleAddReason()}
+            >
+              Adicionar
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Seletor de motivo de exclusão — obrigatório no Texto completo (FR-025).
+          Aplica o motivo escolhido a 1 (atalho) ou N (lote) registros. */}
+      {stage === "full_text" && pendingExclude && pendingExclude.length > 0 && (
         <div className="rounded border border-warn bg-accent-wash p-2 text-sm">
           <div className="flex items-center gap-2">
             <label className="flex items-center gap-2">
-              <span>Motivo da exclusão</span>
+              <span>
+                Motivo da exclusão
+                {pendingExclude.length > 1
+                  ? ` (${pendingExclude.length} selecionados)`
+                  : ""}
+              </span>
               <select
                 aria-label="Motivo da exclusão"
                 value={reasonId}
@@ -343,13 +502,20 @@ export function ScreeningQueue({
             <button
               type="button"
               disabled={!reasonId}
-              onClick={() => {
-                const row = rows.find((r) => r.recordId === pendingExclude);
-                if (row && reasonId) void decide(row, "exclude");
-              }}
+              onClick={() => void confirmExclude()}
               className="rounded bg-red-600 px-3 py-1 text-white disabled:opacity-40"
             >
               Confirmar exclusão
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPendingExclude(null);
+                setReasonId("");
+              }}
+              className="rounded border border-line px-3 py-1 text-ink-soft hover:bg-paper-2"
+            >
+              Cancelar
             </button>
           </div>
         </div>
@@ -413,9 +579,14 @@ export function ScreeningQueue({
                     </span>
                   </span>
 
-                  {/* Decisão / estado atual */}
+                  {/* Decisão / estado atual — depende do estágio: no Texto completo
+                      todo registro já tem tsDecision='included', então mostrar
+                      tsDecision aqui mascararia a decisão de TC (sempre 'included').
+                      Por isso exibimos a decisão da etapa corrente. */}
                   <span role="gridcell" className="text-xs text-ink-soft">
-                    {row.tsDecision ?? row.ftDecision ?? row.corpusState}
+                    {stage === "full_text"
+                      ? (row.ftDecision ?? row.corpusState)
+                      : (row.tsDecision ?? row.corpusState)}
                   </span>
 
                   {/* Sugestão de IA — visualmente distinta de dado humano (SC-005).

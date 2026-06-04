@@ -151,10 +151,38 @@ export async function fetchScreeningQueue(
 
 export async function fetchExclusionReasons(reviewId: string) {
   const { supabase } = await requireMember(reviewId);
-  await supabase.rpc("seed_default_exclusion_reasons", {
+  // Deriva dos critérios de exclusão ratificados + semeia genéricos (Fatia 8).
+  await supabase.rpc("ensure_exclusion_reasons", {
     p_review_id: reviewId,
   }); // idempotente (D-F5.4)
   return listExclusionReasons(reviewId);
+}
+
+/** Adiciona um motivo de exclusão manual (dedup por label normalizado). */
+export async function addExclusionReason(reviewId: string, label: string) {
+  const { supabase } = await requireMember(reviewId);
+  const { data, error } = await supabase.rpc("add_exclusion_reason", {
+    p_review_id: reviewId,
+    p_label: label,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const, id: data as string };
+}
+
+/** Soft delete de um motivo de exclusão (preserva PRISMA). */
+export async function removeExclusionReason(
+  reviewId: string,
+  reasonId: string,
+) {
+  const { supabase } = await requireMember(reviewId);
+  const { error } = await supabase.rpc("set_exclusion_reason_active", {
+    p_reason_id: reasonId,
+    p_active: false,
+  });
+  if (error) throw new Error(error.message);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
 }
 
 // ---- Mutações de triagem (decisões HUMANAS — FR-024) ----

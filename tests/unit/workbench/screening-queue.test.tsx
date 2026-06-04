@@ -79,9 +79,16 @@ function renderQueue(
         reviewId="rev1"
         stage="title_abstract"
         loadQueue={vi.fn().mockResolvedValue(ROWS)}
-        loadReasons={vi
-          .fn()
-          .mockResolvedValue([{ id: "x1", label: "Fora do escopo" }])}
+        loadReasons={vi.fn().mockResolvedValue([
+          {
+            id: "x1",
+            label: "Fora do escopo",
+            origin: "seed",
+            sourceCriterionId: null,
+          },
+        ])}
+        onAddReason={vi.fn().mockResolvedValue({ ok: true, id: "new1" })}
+        onRemoveReason={vi.fn().mockResolvedValue({ ok: true })}
         onDecide={vi.fn().mockResolvedValue({ ok: true })}
         onReverse={vi.fn().mockResolvedValue({ ok: true })}
         {...over}
@@ -166,6 +173,116 @@ describe("ScreeningQueue (US4)", () => {
         decision: "exclude",
         exclusionReasonId: "x1",
       }),
+    );
+  });
+
+  it("Fatia 8 — painel de motivos NÃO aparece no modo título/resumo", async () => {
+    renderQueue();
+    await screen.findByText("Estudo Alpha");
+    expect(
+      screen.queryByRole("region", { name: /motivos de exclusão/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Fatia 8 — no Texto completo, o painel lista os motivos com marcador 'do critério' só nos derivados", async () => {
+    const loadReasons = vi.fn().mockResolvedValue([
+      {
+        id: "c1",
+        label: "Idioma não elegível",
+        origin: "criterion",
+        sourceCriterionId: "crit1",
+      },
+      {
+        id: "s1",
+        label: "Fora do escopo",
+        origin: "seed",
+        sourceCriterionId: null,
+      },
+      {
+        id: "m1",
+        label: "Motivo manual",
+        origin: "manual",
+        sourceCriterionId: null,
+      },
+    ]);
+    renderQueue({ stage: "full_text", loadReasons });
+    // Espera os motivos resolverem (reasons.data) dentro do painel.
+    await screen.findByText("Idioma não elegível");
+    expect(
+      screen.getByRole("region", { name: /motivos de exclusão/i }),
+    ).toBeInTheDocument();
+    // O marcador "do critério" aparece exatamente uma vez (só o origin=criterion).
+    const markers = screen.getAllByText(/do critério/i);
+    expect(markers).toHaveLength(1);
+    // E está associado ao motivo derivado, não aos demais.
+    expect(screen.getByText("Idioma não elegível")).toBeInTheDocument();
+    expect(screen.getByText("Fora do escopo")).toBeInTheDocument();
+    expect(screen.getByText("Motivo manual")).toBeInTheDocument();
+  });
+
+  it("Fatia 8 — adicionar motivo chama onAddReason com o label digitado", async () => {
+    const onAddReason = vi.fn().mockResolvedValue({ ok: true, id: "new1" });
+    renderQueue({ stage: "full_text", onAddReason });
+    await screen.findByRole("region", { name: /motivos de exclusão/i });
+    const input = screen.getByRole("textbox", {
+      name: /novo motivo de exclusão/i,
+    });
+    await userEvent.type(input, "Sem grupo controle");
+    await userEvent.click(screen.getByRole("button", { name: /adicionar/i }));
+    expect(onAddReason).toHaveBeenCalledWith("Sem grupo controle");
+  });
+
+  it("Fatia 8 — remover motivo chama onRemoveReason com o id", async () => {
+    const onRemoveReason = vi.fn().mockResolvedValue({ ok: true });
+    renderQueue({ stage: "full_text", onRemoveReason });
+    await screen.findByText("Fora do escopo");
+    await userEvent.click(
+      screen.getByRole("button", { name: /remover motivo fora do escopo/i }),
+    );
+    expect(onRemoveReason).toHaveBeenCalledWith("x1");
+  });
+
+  it("Bug 2 — no Texto completo a célula de status mostra a decisão de TC, não tsDecision", async () => {
+    // No TC, tsDecision é sempre 'included' (só chega quem foi incluído no T/R).
+    // A célula deve refletir ftDecision ('excluded'), não 'included'.
+    const rows: QueueRow[] = [
+      {
+        ...ROWS[0]!,
+        ai: null,
+        decisionId: null,
+        tsDecision: "included",
+        ftDecision: "excluded",
+      },
+    ];
+    renderQueue({
+      stage: "full_text",
+      loadQueue: vi.fn().mockResolvedValue(rows),
+    });
+    await screen.findByText("Estudo Alpha");
+    expect(screen.getByText("excluded")).toBeInTheDocument();
+    expect(screen.queryByText("included")).not.toBeInTheDocument();
+  });
+
+  it("Bug 1 — excluir selecionados no TC aplica o motivo escolhido a TODOS os selecionados", async () => {
+    const onDecide = vi.fn().mockResolvedValue({ ok: true });
+    renderQueue({ stage: "full_text", onDecide });
+    await screen.findByText("Estudo Alpha");
+    await userEvent.keyboard("x"); // seleciona r1 (focado)
+    await userEvent.keyboard("j"); // foca r2
+    await userEvent.keyboard("x"); // seleciona r2
+    await userEvent.click(
+      screen.getByRole("button", { name: /excluir selecionados/i }),
+    );
+    // Abre UM portão de motivo para os 2 selecionados (não decide ainda).
+    expect(onDecide).not.toHaveBeenCalled();
+    const select = await screen.findByRole("combobox", { name: /motivo/i });
+    await userEvent.selectOptions(select, "x1");
+    await userEvent.click(
+      screen.getByRole("button", { name: /confirmar exclus/i }),
+    );
+    expect(onDecide).toHaveBeenCalledTimes(2);
+    expect(onDecide).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: "exclude", exclusionReasonId: "x1" }),
     );
   });
 

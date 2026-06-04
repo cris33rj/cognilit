@@ -10,6 +10,8 @@ import {
   fetchFuzzyCandidates,
   fetchScreeningQueue,
   fetchExclusionReasons,
+  addExclusionReason,
+  removeExclusionReason,
   decideScreening,
   reverseScreening,
 } from "./actions";
@@ -59,6 +61,8 @@ export default async function WorkbenchPage({
             stage={active}
             loadQueue={fetchScreeningQueue}
             loadReasons={fetchExclusionReasons}
+            onAddReason={addExclusionReason.bind(null, reviewId)}
+            onRemoveReason={removeExclusionReason.bind(null, reviewId)}
             onDecide={decideScreening.bind(null, reviewId)}
             onReverse={reverseScreening.bind(null, reviewId)}
           />
