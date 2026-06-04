@@ -86,6 +86,14 @@ export function ScreeningQueue({
     enabled: stage === "full_text",
   });
 
+  // Se o motivo selecionado no portão de exclusão for removido (soft-delete) da
+  // lista, descarta a seleção defasada para não enviar um id inativo ao decidir.
+  useEffect(() => {
+    if (reasonId && !(reasons.data ?? []).some((r) => r.id === reasonId)) {
+      setReasonId("");
+    }
+  }, [reasons.data, reasonId]);
+
   const rows = useMemo(() => queue.data ?? [], [queue.data]);
 
   // Filtro + ordenação reabríveis pela URL (FR-037); a decisão considerada
