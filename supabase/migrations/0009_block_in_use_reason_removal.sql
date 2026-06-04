@@ -18,9 +18,8 @@ set search_path = public
 as $$
 declare
   v_reason public.exclusion_reason;
-  v_in_use int;
 begin
-  select * into v_reason from public.exclusion_reason where id = p_reason_id;
+  select * into v_reason from public.exclusion_reason where id = p_reason_id for update;
   if not found then
     raise exception 'exclusion reason not found';
   end if;
@@ -32,11 +31,11 @@ begin
   -- Texto completo que o referencia. O usuário deve reverter essas exclusões antes
   -- (caminho via list_reason_usage + "Desfazer"). O PRISMA permanece íntegro.
   if not p_active then
-    select count(*) into v_in_use
-    from public.record r
-    where r.ft_exclusion_reason_id = p_reason_id
-      and r.corpus_state = 'excluded_ft';
-    if v_in_use > 0 then
+    if exists (
+      select 1 from public.record r
+      where r.ft_exclusion_reason_id = p_reason_id
+        and r.corpus_state = 'excluded_ft'
+    ) then
       raise exception 'exclusion reason in use';
     end if;
   end if;
@@ -108,6 +107,8 @@ begin
     r.metadata ->> 'title',
     sd.id
   from public.record r
+  -- Sob os invariantes (todo excluded_ft tem uma decisão de TC viva) sd.id é
+  -- sempre não-nulo; o LEFT JOIN é defensivo. A UI usa decision_id no "Desfazer".
   left join lateral (
     select s.id
     from public.screening_decision s

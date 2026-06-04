@@ -623,6 +623,9 @@ describe("RLS — não-membro não pode chamar os novos RPCs", () => {
 });
 
 describe("set_exclusion_reason_active — bloqueia remoção de motivo EM USO (8.1)", () => {
+  // NOTE: Testes deste bloco são intencionalmente dependentes de ordem.
+  // O 3º teste reverte a decisão e desativa o motivo; não adicione testes
+  // após ele esperando o motivo ainda ativo.
   let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
   let reviewId: string;
   let reasonId: string;
@@ -723,6 +726,7 @@ describe("list_reason_usage — RLS: não-membro não lista o uso (8.1)", () => 
       p_review_id: review.id,
       p_label: "Motivo X",
     });
+    expect(id).not.toBeNull();
     const { error } = await intruder.rpc("list_reason_usage", {
       p_reason_id: id,
     });
