@@ -45,6 +45,37 @@ export interface ExclusionReason {
   label: string;
   origin: "seed" | "criterion" | "manual";
   sourceCriterionId: string | null;
+  usageCount: number;
+}
+
+export interface ReasonUsage {
+  recordId: string;
+  title: string;
+  decisionId: string | null;
+}
+
+export interface ReasonUsageRaw {
+  record_id: string;
+  title: string | null;
+  decision_id: string | null;
+}
+
+/** Mapeia uma linha crua de list_reason_usage para o shape da UI. */
+export function mapReasonUsageRow(r: ReasonUsageRaw): ReasonUsage {
+  return {
+    recordId: r.record_id,
+    title: r.title ?? "(sem título)",
+    decisionId: r.decision_id,
+  };
+}
+
+/** Funde as contagens de uso (do breakdown PRISMA) na lista de motivos. */
+export function mergeUsageCounts(
+  reasons: Omit<ExclusionReason, "usageCount">[],
+  counts: { reasonId: string; n: number }[],
+): ExclusionReason[] {
+  const byReason = new Map(counts.map((c) => [c.reasonId, c.n]));
+  return reasons.map((r) => ({ ...r, usageCount: byReason.get(r.id) ?? 0 }));
 }
 
 /** Mapeia uma linha crua da RPC para o shape consumido pela UI. */
@@ -86,7 +117,7 @@ export async function listScreeningQueue(
   return ((data ?? []) as unknown as QueueRowRaw[]).map(mapQueueRow);
 }
 
-/** Motivos de exclusão configuráveis e ativos (FR-025). */
+/** Motivos de exclusão configuráveis e ativos, com contagem de uso (FR-025). */
 export async function listExclusionReasons(
   reviewId: string,
 ): Promise<ExclusionReason[]> {
@@ -98,12 +129,36 @@ export async function listExclusionReasons(
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []).map((r) => ({
+  const reasons = (data ?? []).map((r) => ({
     id: r.id,
     label: r.label,
     origin: r.origin as ExclusionReason["origin"],
     sourceCriterionId: r.source_criterion_id,
   }));
+
+  const { data: breakdown, error: bErr } = await supabase
+    .from("prisma_exclusion_breakdown")
+    .select("reason_id, n")
+    .eq("review_id", reviewId);
+  if (bErr) throw new Error(bErr.message);
+  const counts = (breakdown ?? []).map((b) => ({
+    reasonId: b.reason_id as string,
+    n: Number(b.n),
+  }));
+
+  return mergeUsageCounts(reasons, counts);
+}
+
+/** Artigos excluídos no TC que usam um motivo (para o popover "em uso"). */
+export async function listReasonUsage(
+  reasonId: string,
+): Promise<ReasonUsage[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("list_reason_usage", {
+    p_reason_id: reasonId,
+  });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as unknown as ReasonUsageRaw[]).map(mapReasonUsageRow);
 }
 
 /** Contador PRISMA parcial (Fatia 5): triados (ts_decision terminal, exclui maybe). */
