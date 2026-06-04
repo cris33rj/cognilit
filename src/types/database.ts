@@ -1200,6 +1200,14 @@ export type Database = {
           year_b: string
         }[]
       }
+      list_reason_usage: {
+        Args: { p_reason_id: string }
+        Returns: {
+          decision_id: string
+          record_id: string
+          title: string
+        }[]
+      }
       list_screening_queue: {
         Args: {
           p_review_id: string
