@@ -16,6 +16,7 @@ import {
 import type {
   ExclusionReason,
   QueueRow,
+  ReasonUsage,
   ScreeningStage,
 } from "@/lib/screening/queries";
 
@@ -36,6 +37,7 @@ export interface ScreeningQueueProps {
     aiSuggestionId?: string | null;
   }) => Promise<{ ok: boolean }>;
   onReverse: (decisionId: string) => Promise<{ ok: boolean }>;
+  onReasonUsage: (reasonId: string) => Promise<ReasonUsage[]>;
 }
 
 export function ScreeningQueue({
@@ -47,6 +49,7 @@ export function ScreeningQueue({
   onRemoveReason,
   onDecide,
   onReverse,
+  onReasonUsage,
 }: ScreeningQueueProps) {
   const qc = useQueryClient();
   const router = useRouter();
@@ -76,6 +79,10 @@ export function ScreeningQueue({
   const [reasonId, setReasonId] = useState<string>("");
   const [newReason, setNewReason] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [usagePopover, setUsagePopover] = useState<{
+    reasonId: string;
+    items: ReasonUsage[];
+  } | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
 
   const queue = useQuery({
@@ -257,6 +264,34 @@ export function ScreeningQueue({
     }
   }
 
+  // Abre o popover com os artigos que usam um motivo em uso (8.1).
+  async function openUsage(reasonId: string) {
+    setError(null);
+    try {
+      const items = await onReasonUsage(reasonId);
+      setUsagePopover({ reasonId, items });
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Falha ao listar os artigos do motivo.",
+      );
+    }
+  }
+
+  // Desfaz uma exclusão de dentro do popover e re-busca o uso (atualiza selo + lista).
+  async function reverseFromUsage(decisionId: string, reasonId: string) {
+    setError(null);
+    try {
+      await onReverse(decisionId);
+      await qc.invalidateQueries({ queryKey: ["screening"] });
+      const items = await onReasonUsage(reasonId);
+      setUsagePopover(items.length > 0 ? { reasonId, items } : null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao desfazer a decisão.");
+    }
+  }
+
   function toggleSelect(recordId: string) {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -405,17 +440,90 @@ export function ScreeningQueue({
                     </span>
                   )}
                 </span>
-                <button
-                  type="button"
-                  className="rounded border px-2 py-0.5 text-xs text-ink-soft hover:bg-paper-2"
-                  aria-label={`Remover motivo ${r.label}`}
-                  onClick={() => void handleRemoveReason(r.id)}
-                >
-                  Remover
-                </button>
+                {r.usageCount > 0 ? (
+                  <span className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      className="rounded-full border border-line bg-paper-2 px-2 py-0.5 text-xs text-ink-soft hover:bg-paper"
+                      aria-label={`em uso (${r.usageCount}) — ver artigos que usam o motivo ${r.label}`}
+                      onClick={() => void openUsage(r.id)}
+                    >
+                      em uso ({r.usageCount})
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded border px-2 py-0.5 text-xs text-ink-faint opacity-50"
+                      aria-label={`Remover motivo ${r.label}`}
+                      title="Reverta as exclusões que usam este motivo para poder removê-lo"
+                      disabled
+                    >
+                      Remover
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="rounded border px-2 py-0.5 text-xs text-ink-soft hover:bg-paper-2"
+                    aria-label={`Remover motivo ${r.label}`}
+                    onClick={() => void handleRemoveReason(r.id)}
+                  >
+                    Remover
+                  </button>
+                )}
               </li>
             ))}
           </ul>
+          {usagePopover && (
+            <div
+              role="dialog"
+              aria-label="Artigos que usam o motivo"
+              className="mt-2 rounded border border-line bg-paper-2 p-2"
+            >
+              <div className="mb-1 flex items-center justify-between">
+                <span className="font-medium">
+                  Artigos que usam este motivo — reverta para liberar a remoção
+                </span>
+                <button
+                  type="button"
+                  className="text-xs text-ink-soft hover:underline"
+                  onClick={() => setUsagePopover(null)}
+                >
+                  Fechar
+                </button>
+              </div>
+              {usagePopover.items.length === 0 ? (
+                <p className="text-xs text-ink-faint">
+                  Nenhum artigo usa este motivo.
+                </p>
+              ) : (
+                <ul className="flex flex-col gap-1">
+                  {usagePopover.items.map((it) => (
+                    <li
+                      key={it.recordId}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <span className="flex-1 truncate">{it.title}</span>
+                      {it.decisionId && (
+                        <button
+                          type="button"
+                          className="rounded border px-2 py-0.5 text-xs text-ink-soft hover:bg-paper"
+                          aria-label={`Desfazer exclusão de ${it.title}`}
+                          onClick={() =>
+                            void reverseFromUsage(
+                              it.decisionId!,
+                              usagePopover.reasonId,
+                            )
+                          }
+                        >
+                          Desfazer
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
           <div className="mt-2 flex items-center gap-2">
             <input
               type="text"

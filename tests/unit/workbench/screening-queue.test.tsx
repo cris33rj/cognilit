@@ -3,7 +3,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ScreeningQueue } from "@/components/workbench/ScreeningQueue";
-import type { QueueRow } from "@/lib/screening/queries";
+import type { QueueRow, ReasonUsage } from "@/lib/screening/queries";
 
 // O componente lê/escreve o estado de fila na URL (FR-037); em jsdom não há
 // router de App Router, então mockamos next/navigation.
@@ -85,12 +85,14 @@ function renderQueue(
             label: "Fora do escopo",
             origin: "seed",
             sourceCriterionId: null,
+            usageCount: 0,
           },
         ])}
         onAddReason={vi.fn().mockResolvedValue({ ok: true, id: "new1" })}
         onRemoveReason={vi.fn().mockResolvedValue({ ok: true })}
         onDecide={vi.fn().mockResolvedValue({ ok: true })}
         onReverse={vi.fn().mockResolvedValue({ ok: true })}
+        onReasonUsage={vi.fn().mockResolvedValue([] as ReasonUsage[])}
         {...over}
       />
     </QueryClientProvider>,
@@ -191,18 +193,21 @@ describe("ScreeningQueue (US4)", () => {
         label: "Idioma não elegível",
         origin: "criterion",
         sourceCriterionId: "crit1",
+        usageCount: 0,
       },
       {
         id: "s1",
         label: "Fora do escopo",
         origin: "seed",
         sourceCriterionId: null,
+        usageCount: 0,
       },
       {
         id: "m1",
         label: "Motivo manual",
         origin: "manual",
         sourceCriterionId: null,
+        usageCount: 0,
       },
     ]);
     renderQueue({ stage: "full_text", loadReasons });
@@ -295,5 +300,55 @@ describe("ScreeningQueue (US4)", () => {
     expect(desfazers.length).toBeGreaterThanOrEqual(1);
     await userEvent.click(desfazers[0]!);
     expect(onReverse).toHaveBeenCalledWith("d1");
+  });
+
+  it("8.1 — motivo em uso mostra selo 'em uso (N)' e desabilita Remover", async () => {
+    const loadReasons = vi.fn().mockResolvedValue([
+      {
+        id: "u1",
+        label: "Motivo usado",
+        origin: "seed",
+        sourceCriterionId: null,
+        usageCount: 2,
+      },
+    ]);
+    renderQueue({ stage: "full_text", loadReasons });
+    await screen.findByText("Motivo usado");
+    expect(
+      screen.getByRole("button", { name: /em uso \(2\)/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /remover motivo motivo usado/i }),
+    ).toBeDisabled();
+  });
+
+  it("8.1 — clicar no selo lista os artigos e 'Desfazer' chama onReverse", async () => {
+    const onReasonUsage = vi
+      .fn()
+      .mockResolvedValue([
+        { recordId: "r1", title: "Artigo X", decisionId: "dec1" },
+      ]);
+    const onReverse = vi.fn().mockResolvedValue({ ok: true });
+    const loadReasons = vi.fn().mockResolvedValue([
+      {
+        id: "u1",
+        label: "Motivo usado",
+        origin: "seed",
+        sourceCriterionId: null,
+        usageCount: 1,
+      },
+    ]);
+    renderQueue({ stage: "full_text", loadReasons, onReasonUsage, onReverse });
+    await screen.findByText("Motivo usado");
+    await userEvent.click(
+      screen.getByRole("button", { name: /em uso \(1\)/i }),
+    );
+    expect(onReasonUsage).toHaveBeenCalledWith("u1");
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: /desfazer exclusão de artigo x/i,
+      }),
+    );
+    expect(onReverse).toHaveBeenCalledWith("dec1");
   });
 });

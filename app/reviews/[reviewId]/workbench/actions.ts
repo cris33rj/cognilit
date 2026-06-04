@@ -12,6 +12,7 @@ import { listExactRemovals, listFuzzyCandidates } from "@/lib/dedup/queries";
 import {
   listScreeningQueue,
   listExclusionReasons,
+  listReasonUsage,
   type ScreeningStage,
 } from "@/lib/screening/queries";
 import { enqueueScreeningJob } from "@/lib/screening/enqueue";
@@ -168,6 +169,12 @@ export async function addExclusionReason(reviewId: string, label: string) {
   if (error) throw new Error(error.message);
   revalidatePath(`/reviews/${reviewId}/workbench`);
   return { ok: true as const, id: data as string };
+}
+
+/** Lista os artigos excluídos com um dado motivo (8.1 — popover de uso). */
+export async function fetchReasonUsage(reviewId: string, reasonId: string) {
+  await requireMember(reviewId);
+  return listReasonUsage(reasonId);
 }
 
 /** Soft delete de um motivo de exclusão (preserva PRISMA). */
