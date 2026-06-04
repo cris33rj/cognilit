@@ -371,36 +371,6 @@ export function ScreeningQueue({
         </div>
       </div>
 
-      {/* Barra de ações em lote (FR-039) */}
-      {selected.size > 0 && (
-        <div className="flex items-center gap-2 rounded border bg-paper-2 p-2 text-sm">
-          <span>{selected.size} selecionado(s):</span>
-          <button
-            type="button"
-            className="btn-primary"
-            onClick={() => void decideBatch("include")}
-          >
-            Incluir selecionados
-          </button>
-          <button
-            type="button"
-            className="rounded border border-line bg-paper px-3 py-1 font-medium text-ink hover:bg-paper-2"
-            onClick={() => void decideBatch("exclude")}
-          >
-            Excluir selecionados
-          </button>
-          {stage === "title_abstract" && (
-            <button
-              type="button"
-              className="rounded border border-line bg-paper px-3 py-1 font-medium text-ink hover:bg-paper-2"
-              onClick={() => void decideBatch("maybe")}
-            >
-              Dúvida em lote
-            </button>
-          )}
-        </div>
-      )}
-
       {error && (
         <p role="alert" className="text-sm text-red-600">
           {error}
@@ -471,6 +441,37 @@ export function ScreeningQueue({
             </button>
           </div>
         </section>
+      )}
+
+      {/* Barra de ações em lote (FR-039) — imediatamente acima da lista, abaixo
+          dos motivos de exclusão quando existirem (consistente entre os estágios). */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-2 rounded border bg-paper-2 p-2 text-sm">
+          <span>{selected.size} selecionado(s):</span>
+          <button
+            type="button"
+            className="rounded border border-line bg-paper px-3 py-1 font-medium text-ink hover:bg-paper-2"
+            onClick={() => void decideBatch("include")}
+          >
+            Incluir selecionados
+          </button>
+          <button
+            type="button"
+            className="rounded border border-line bg-paper px-3 py-1 font-medium text-ink hover:bg-paper-2"
+            onClick={() => void decideBatch("exclude")}
+          >
+            Excluir selecionados
+          </button>
+          {stage === "title_abstract" && (
+            <button
+              type="button"
+              className="rounded border border-line bg-paper px-3 py-1 font-medium text-ink hover:bg-paper-2"
+              onClick={() => void decideBatch("maybe")}
+            >
+              Dúvida em lote
+            </button>
+          )}
+        </div>
       )}
 
       {/* Seletor de motivo de exclusão — obrigatório no Texto completo (FR-025).
