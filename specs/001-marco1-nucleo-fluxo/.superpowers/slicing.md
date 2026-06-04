@@ -19,6 +19,15 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 > É uma fatia **transversal de UI** (não pipeline): não adiciona FR de produto,
 > repagina o que já existe. CHECKPOINT 1 desta fatia: aprovado nesta sessão.
 
+> **Adendo (2026-06-04):** **Fatia 8 — Motivos de exclusão derivados dos critérios**
+> acrescentada após constatação de necessidade de melhoria, aprovada pelo
+> desenvolvedor. **Não** é fatia de produto nova: **não** altera decisão assinada
+> (D7/FR-025 — T/R sem motivo, TC com motivo de lista configurável permanecem); ela
+> *cumpre* o "lista configurável por projeto" de D7, que até então não tinha UI de
+> edição. Conecta os critérios de exclusão ratificados (Pergunta/Protocolo) à lista de
+> motivos da Triagem de Texto completo. Detalhe em
+> [COMPLETION-fatia-8.md](./COMPLETION-fatia-8.md).
+
 ---
 
 ## Decisões de implementação resolvidas (A1/A2/A3)
@@ -223,6 +232,34 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   (repaginação preserva textos/atributos/`data-*`/`aria-*` — invariante central);
   contraste **WCAG AA**; `prefers-reduced-motion` desliga animações; teclado preservado.
 
+### Fatia 8 — Motivos de exclusão derivados dos critérios
+- **Branch:** `build/001-marco1-nucleo-fluxo/8-exclusion-reasons-from-criteria`
+- **Natureza:** fatia de **melhoria pós-Marco funcional**, acrescentada após
+  constatação de necessidade. **Não** adiciona FR nem altera decisão assinada
+  (D7/FR-025 intactos); *cumpre* o "lista configurável por projeto" de D7, que não
+  tinha UI de edição. Deriva de `docs/CONTEXT.md` (D7, D15, D24) e `spec.md` (FR-025, FR-036).
+- **Entra:**
+  - Motivos de TC **derivados dos critérios de exclusão ratificados**
+    (`kind='exclusion'`, ratificação aceita/editada), espelhados em `exclusion_reason`
+    (`origin='criterion'`, `source_criterion_id`) via
+    `sync_exclusion_reasons_from_criteria` (migration `0008`).
+  - Lista = derivados + seeds genéricos, **dedup por rótulo normalizado**
+    (`normalize_reason_label`); seed agora idempotente por rótulo.
+  - **Adicionar motivo manual inline** (dedup) e **remover** (soft-delete, preserva
+    PRISMA): RPCs `add_exclusion_reason`/`set_exclusion_reason_active`; actions
+    `addExclusionReason`/`removeExclusionReason`.
+  - Órfão (critério des-ratificado) → desativa só se não usado; re-ratificar reativa.
+  - **Painel "Motivos de exclusão"** no modo Texto completo do workbench, com marcador
+    "do critério" reusando o vocabulário visual de IA (SC-005).
+- **Não entra:** motivo de exclusão no T/R (emenda a D7/FR-025 → Sessão A); dedup
+  semântico de motivos (exige embeddings — Marco 2+).
+- **Depende de:** Fatia 2 (`eligibility_criterion`, ratificação), Fatia 5
+  (`exclusion_reason`, workbench Texto completo), Fatia 7 (vocabulário visual).
+- **Skills:** `frontend-design`, `react-best-practices`, `nextjs-best-practices`.
+- **Testes-chave:** 158 testes/40 arquivos verdes (incl. 12 novos em
+  `tests/integration/exclusion-reasons.test.ts`); e2e `screening.spec.ts` (exclusão TC +
+  add/remove inline); PRISMA intacto (view `0007` não tocada).
+
 ---
 
 ## Gate de cobertura (verificação — PROTOCOLS §Sessão B)
@@ -252,4 +289,5 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 4 — Deduplicação (mergeada — merge `82dcab5`)
 - [x] Fatia 5 — Triagem 2 etapas + IA-no-laço (CHECKPOINT 3 — mergeada)
 - [x] Fatia 6 — Shell, trilho & PRISMA vivo + export de auditoria (CHECKPOINT 3 — mergeada)
-- [ ] Fatia 7 — Design System + Polish Visual (CHECKPOINT 1 aprovado — `writing-plans` em curso)
+- [x] Fatia 7 — Design System + Polish Visual (CHECKPOINT 3 — mergeada — merge `bc962a8`)
+- [x] Fatia 8 — Motivos de exclusão derivados dos critérios (CHECKPOINT 3 — mergeada — merge `8a55408`)
