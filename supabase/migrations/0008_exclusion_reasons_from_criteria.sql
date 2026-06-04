@@ -127,10 +127,11 @@ begin
         v_created := v_created + 1;
       end if;
     else
-      -- Espelho existe: atualiza label se o texto do critério mudou.
-      if v_mirror.label is distinct from v_crit.text then
+      -- Espelho existe: atualiza label se o texto do critério mudou E/OU
+      -- reativa o espelho se ele estava desativado (critério re-ratificado).
+      if v_mirror.label is distinct from v_crit.text or not v_mirror.is_active then
         update public.exclusion_reason
-          set label = v_crit.text
+          set label = v_crit.text, is_active = true
         where id = v_mirror.id;
         v_updated := v_updated + 1;
       end if;
@@ -268,6 +269,21 @@ begin
   end if;
   if not public.is_review_member(v_reason.review_id) then
     raise exception 'not a member';
+  end if;
+
+  -- Ao REATIVAR, respeita o invariante de dedup por label normalizado:
+  -- não pode haver dois motivos ATIVOS com o mesmo label na mesma Revisão.
+  if p_active then
+    if exists (
+      select 1 from public.exclusion_reason er
+      where er.review_id = v_reason.review_id
+        and er.id <> p_reason_id
+        and er.is_active
+        and public.normalize_reason_label(er.label)
+            = public.normalize_reason_label(v_reason.label)
+    ) then
+      raise exception 'another active reason already uses this label';
+    end if;
   end if;
 
   update public.exclusion_reason

@@ -226,6 +226,73 @@ describe("sync — des-ratificar critério desativa o espelho não usado, preser
   });
 });
 
+describe("sync — re-ratificar critério reativa o espelho desativado", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let questionId: string;
+  let critId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`xr_rer_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Re-ratificar",
+    });
+    reviewId = review.id;
+    questionId = await seedQuestion(reviewId);
+    critId = await addCriterion(
+      reviewId,
+      questionId,
+      "Critério que vai e volta",
+      "accepted",
+    );
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+  });
+
+  it("rejeitar então re-aceitar o critério: espelho fica is_active=true de novo (uma só linha)", async () => {
+    const svc = serviceClient();
+
+    // Espelho criado e ativo.
+    const { data: mirror0 } = await svc
+      .from("exclusion_reason")
+      .select("id, is_active")
+      .eq("source_criterion_id", critId)
+      .single();
+    expect(mirror0!.is_active).toBe(true);
+
+    // Rejeita o critério → re-sync desativa o espelho (não usado).
+    await svc
+      .from("eligibility_criterion")
+      .update({ ratification_state: "rejected" })
+      .eq("id", critId);
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+    const { data: mirrorOff } = await svc
+      .from("exclusion_reason")
+      .select("is_active")
+      .eq("source_criterion_id", critId)
+      .single();
+    expect(mirrorOff!.is_active).toBe(false);
+
+    // Re-aceita o critério → re-sync reativa o espelho.
+    await svc
+      .from("eligibility_criterion")
+      .update({ ratification_state: "accepted" })
+      .eq("id", critId);
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+
+    const { data: mirrorBack } = await svc
+      .from("exclusion_reason")
+      .select("id, is_active")
+      .eq("source_criterion_id", critId);
+    // Ainda uma única linha para o critério.
+    expect(mirrorBack!.length).toBe(1);
+    const back = mirrorBack![0]!;
+    expect(back.is_active).toBe(true);
+    expect(back.id).toBe(mirror0!.id);
+  });
+});
+
 describe("add_exclusion_reason + set_exclusion_reason_active", () => {
   let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
   let reviewId: string;
@@ -294,6 +361,54 @@ describe("add_exclusion_reason + set_exclusion_reason_active", () => {
       .eq("id", id)
       .single();
     expect(row!.is_active).toBe(false);
+  });
+
+  it("set_exclusion_reason_active(true) rejeita se outro motivo ATIVO já usa o label normalizado", async () => {
+    const svc = serviceClient();
+
+    // Motivo ativo de referência.
+    const { data: activeId } = await owner.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: "Motivo colidente",
+    });
+
+    // Motivo distinto que será desativado e depois colidido por label.
+    const { data: inactiveId } = await owner.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: "Outro motivo qualquer",
+    });
+    await owner.rpc("set_exclusion_reason_active", {
+      p_reason_id: inactiveId,
+      p_active: false,
+    });
+
+    // Força o label do inativo a colidir (normalizado) com o ativo,
+    // contornando o dedup do add via service client.
+    await svc
+      .from("exclusion_reason")
+      .update({ label: "  motivo   COLIDENTE " })
+      .eq("id", inactiveId);
+
+    // Reativar deve falhar: outro ativo já usa o mesmo label normalizado.
+    const { error } = await owner.rpc("set_exclusion_reason_active", {
+      p_reason_id: inactiveId,
+      p_active: true,
+    });
+    expect(error).not.toBeNull();
+
+    // O motivo permanece inativo; o ativo de referência segue ativo.
+    const { data: stillInactive } = await svc
+      .from("exclusion_reason")
+      .select("is_active")
+      .eq("id", inactiveId)
+      .single();
+    expect(stillInactive!.is_active).toBe(false);
+    const { data: stillActive } = await svc
+      .from("exclusion_reason")
+      .select("is_active")
+      .eq("id", activeId)
+      .single();
+    expect(stillActive!.is_active).toBe(true);
   });
 });
 
