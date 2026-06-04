@@ -26,6 +26,8 @@ export interface ScreeningQueueProps {
   stage: ScreeningStage;
   loadQueue: (reviewId: string, stage: ScreeningStage) => Promise<QueueRow[]>;
   loadReasons: (reviewId: string) => Promise<ExclusionReason[]>;
+  onAddReason: (label: string) => Promise<{ ok: boolean; id?: string }>;
+  onRemoveReason: (reasonId: string) => Promise<{ ok: boolean }>;
   onDecide: (input: {
     recordId: string;
     stage: ScreeningStage;
@@ -41,6 +43,8 @@ export function ScreeningQueue({
   stage,
   loadQueue,
   loadReasons,
+  onAddReason,
+  onRemoveReason,
   onDecide,
   onReverse,
 }: ScreeningQueueProps) {
@@ -68,6 +72,7 @@ export function ScreeningQueue({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [pendingExclude, setPendingExclude] = useState<string | null>(null);
   const [reasonId, setReasonId] = useState<string>("");
+  const [newReason, setNewReason] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -167,6 +172,34 @@ export function ScreeningQueue({
       await qc.invalidateQueries({ queryKey: ["screening"] });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao desfazer a decisão.");
+    }
+  }
+
+  // Gestão de motivos de exclusão derivados/genéricos/manuais (Fatia 8).
+  async function handleAddReason() {
+    const label = newReason.trim();
+    if (!label) return;
+    setError(null);
+    try {
+      await onAddReason(label);
+      setNewReason("");
+      await qc.invalidateQueries({
+        queryKey: ["screening", "reasons", reviewId],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao adicionar o motivo.");
+    }
+  }
+
+  async function handleRemoveReason(reasonToRemove: string) {
+    setError(null);
+    try {
+      await onRemoveReason(reasonToRemove);
+      await qc.invalidateQueries({
+        queryKey: ["screening", "reasons", reviewId],
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Falha ao remover o motivo.");
     }
   }
 
@@ -318,6 +351,72 @@ export function ScreeningQueue({
         <p role="alert" className="text-sm text-red-600">
           {error}
         </p>
+      )}
+
+      {/* Gestão de motivos de exclusão — só no Texto completo (Fatia 8).
+          Motivos derivados de critérios trazem marcador discreto de origem,
+          reusando o vocabulário visual de IA (SC-005). */}
+      {stage === "full_text" && (
+        <section className="panel text-sm" aria-label="Motivos de exclusão">
+          <h3 className="panel-title">Motivos de exclusão</h3>
+          <ul
+            className="flex flex-col gap-1"
+            aria-label="Lista de motivos de exclusão"
+          >
+            {(reasons.data ?? []).map((r) => (
+              <li
+                key={r.id}
+                className="flex items-center justify-between gap-2"
+              >
+                <span className="flex items-center gap-1">
+                  <span>{r.label}</span>
+                  {r.origin === "criterion" && (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-full border border-accent bg-accent-wash px-2 py-0.5 text-xs font-medium text-accent-deep"
+                      data-ai-state="inferred"
+                      title="Derivado de um critério de elegibilidade"
+                    >
+                      <span aria-hidden>✦</span>
+                      do critério
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="rounded border px-2 py-0.5 text-xs text-ink-soft hover:bg-paper-2"
+                  aria-label={`Remover motivo ${r.label}`}
+                  onClick={() => void handleRemoveReason(r.id)}
+                >
+                  Remover
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              type="text"
+              className="control flex-1"
+              aria-label="Novo motivo de exclusão"
+              placeholder="Adicionar motivo…"
+              value={newReason}
+              onChange={(e) => setNewReason(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void handleAddReason();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={!newReason.trim()}
+              onClick={() => void handleAddReason()}
+            >
+              Adicionar
+            </button>
+          </div>
+        </section>
       )}
 
       {/* Seletor de motivo de exclusão — obrigatório no Texto completo (FR-025) */}

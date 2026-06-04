@@ -371,24 +371,30 @@ export type Database = {
           id: string
           is_active: boolean
           label: string
+          origin: string
           review_id: string
           sort_order: number
+          source_criterion_id: string | null
         }
         Insert: {
           created_at?: string
           id?: string
           is_active?: boolean
           label: string
+          origin?: string
           review_id: string
           sort_order?: number
+          source_criterion_id?: string | null
         }
         Update: {
           created_at?: string
           id?: string
           is_active?: boolean
           label?: string
+          origin?: string
           review_id?: string
           sort_order?: number
+          source_criterion_id?: string | null
         }
         Relationships: [
           {
@@ -403,6 +409,13 @@ export type Database = {
             columns: ["review_id"]
             isOneToOne: false
             referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exclusion_reason_source_criterion_id_fkey"
+            columns: ["source_criterion_id"]
+            isOneToOne: false
+            referencedRelation: "eligibility_criterion"
             referencedColumns: ["id"]
           },
         ]
@@ -1039,6 +1052,10 @@ export type Database = {
       }
     }
     Functions: {
+      add_exclusion_reason: {
+        Args: { p_label: string; p_review_id: string }
+        Returns: string
+      }
       add_protocol_amendment: {
         Args: { p_change: Json; p_review_id: string }
         Returns: {
@@ -1143,6 +1160,10 @@ export type Database = {
         Returns: string
       }
       dedup_exact: { Args: { p_review_id: string }; Returns: number }
+      ensure_exclusion_reasons: {
+        Args: { p_review_id: string }
+        Returns: undefined
+      }
       get_byok_secret: {
         Args: { p_review_id: string }
         Returns: {
@@ -1218,6 +1239,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      normalize_reason_label: { Args: { "": string }; Returns: string }
       reverse_dedup: { Args: { p_decision_id: string }; Returns: undefined }
       reverse_screening: { Args: { p_decision_id: string }; Returns: undefined }
       seed_default_exclusion_reasons: {
@@ -1244,8 +1266,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      set_exclusion_reason_active: {
+        Args: { p_active: boolean; p_reason_id: string }
+        Returns: undefined
+      }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      sync_exclusion_reasons_from_criteria: {
+        Args: { p_review_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       ai_target_kind: "eligibility" | "protocol_draft" | "screening"

@@ -128,4 +128,52 @@ test("Texto completo: excluir exige motivo (FR-025)", async ({ page }) => {
   await expect(
     page.getByRole("combobox", { name: /motivo da exclusão/i }),
   ).toBeVisible({ timeout: 10_000 });
+
+  // FR-025: a generic (seeded) reason is available; selecting it enables the
+  // confirmation and the exclusion lands (Desfazer appears).
+  await page
+    .getByRole("combobox", { name: /motivo da exclusão/i })
+    .selectOption({ label: "Idioma não elegível" });
+  await page.getByRole("button", { name: /confirmar exclus/i }).click();
+  await expect(
+    page.getByRole("button", { name: /desfazer/i }).first(),
+  ).toBeVisible({ timeout: 10_000 });
+});
+
+test("Texto completo: gestão de motivos (adicionar e remover inline) — Fatia 8", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+
+  const reviewId = await setupScreeningCorpus(page);
+
+  // Move at least one record to full_text by including it in title/abstract.
+  await page.goto(`/reviews/${reviewId}/workbench?mode=title_abstract`);
+  await expect(
+    page.getByRole("grid", { name: /fila de triagem/i }),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByRole("row").first()).toBeVisible({ timeout: 10_000 });
+  await page.keyboard.press("i");
+  await expect(
+    page.getByRole("button", { name: /desfazer/i }).first(),
+  ).toBeVisible({ timeout: 10_000 });
+
+  // Go to full_text — the management panel renders the seeded reasons.
+  await page.goto(`/reviews/${reviewId}/workbench?mode=full_text`);
+  const panel = page.getByRole("region", { name: /motivos de exclusão/i });
+  await expect(panel).toBeVisible({ timeout: 15_000 });
+  // Seeded reason is present.
+  await expect(panel.getByText("Idioma não elegível")).toBeVisible();
+
+  // Add a reason inline → it appears in the list.
+  const novo = "Sem grupo controle e2e";
+  await panel.getByRole("textbox", { name: /novo motivo/i }).fill(novo);
+  await panel.getByRole("button", { name: /adicionar/i }).click();
+  await expect(panel.getByText(novo)).toBeVisible({ timeout: 10_000 });
+
+  // Remove it inline → it disappears (soft delete; filtered out of the list).
+  await panel
+    .getByRole("button", { name: new RegExp(`remover motivo ${novo}`, "i") })
+    .click();
+  await expect(panel.getByText(novo)).toHaveCount(0, { timeout: 10_000 });
 });

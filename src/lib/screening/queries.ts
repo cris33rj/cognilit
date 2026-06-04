@@ -43,6 +43,8 @@ export interface QueueRow {
 export interface ExclusionReason {
   id: string;
   label: string;
+  origin: "seed" | "criterion" | "manual";
+  sourceCriterionId: string | null;
 }
 
 /** Mapeia uma linha crua da RPC para o shape consumido pela UI. */
@@ -91,12 +93,17 @@ export async function listExclusionReasons(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("exclusion_reason")
-    .select("id, label")
+    .select("id, label, origin, source_criterion_id")
     .eq("review_id", reviewId)
     .eq("is_active", true)
     .order("sort_order", { ascending: true });
   if (error) throw new Error(error.message);
-  return (data ?? []) as ExclusionReason[];
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    label: r.label,
+    origin: r.origin as ExclusionReason["origin"],
+    sourceCriterionId: r.source_criterion_id,
+  }));
 }
 
 /** Contador PRISMA parcial (Fatia 5): triados (ts_decision terminal, exclui maybe). */
