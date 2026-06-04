@@ -368,6 +368,7 @@ export type Database = {
       exclusion_reason: {
         Row: {
           created_at: string
+          dismissed: boolean
           id: string
           is_active: boolean
           label: string
@@ -378,6 +379,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          dismissed?: boolean
           id?: string
           is_active?: boolean
           label: string
@@ -388,6 +390,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          dismissed?: boolean
           id?: string
           is_active?: boolean
           label?: string

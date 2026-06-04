@@ -242,6 +242,50 @@ describe("ScreeningQueue (US4)", () => {
     expect(onRemoveReason).toHaveBeenCalledWith("x1");
   });
 
+  it("Bug 2 — no Texto completo a célula de status mostra a decisão de TC, não tsDecision", async () => {
+    // No TC, tsDecision é sempre 'included' (só chega quem foi incluído no T/R).
+    // A célula deve refletir ftDecision ('excluded'), não 'included'.
+    const rows: QueueRow[] = [
+      {
+        ...ROWS[0]!,
+        ai: null,
+        decisionId: null,
+        tsDecision: "included",
+        ftDecision: "excluded",
+      },
+    ];
+    renderQueue({
+      stage: "full_text",
+      loadQueue: vi.fn().mockResolvedValue(rows),
+    });
+    await screen.findByText("Estudo Alpha");
+    expect(screen.getByText("excluded")).toBeInTheDocument();
+    expect(screen.queryByText("included")).not.toBeInTheDocument();
+  });
+
+  it("Bug 1 — excluir selecionados no TC aplica o motivo escolhido a TODOS os selecionados", async () => {
+    const onDecide = vi.fn().mockResolvedValue({ ok: true });
+    renderQueue({ stage: "full_text", onDecide });
+    await screen.findByText("Estudo Alpha");
+    await userEvent.keyboard("x"); // seleciona r1 (focado)
+    await userEvent.keyboard("j"); // foca r2
+    await userEvent.keyboard("x"); // seleciona r2
+    await userEvent.click(
+      screen.getByRole("button", { name: /excluir selecionados/i }),
+    );
+    // Abre UM portão de motivo para os 2 selecionados (não decide ainda).
+    expect(onDecide).not.toHaveBeenCalled();
+    const select = await screen.findByRole("combobox", { name: /motivo/i });
+    await userEvent.selectOptions(select, "x1");
+    await userEvent.click(
+      screen.getByRole("button", { name: /confirmar exclus/i }),
+    );
+    expect(onDecide).toHaveBeenCalledTimes(2);
+    expect(onDecide).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: "exclude", exclusionReasonId: "x1" }),
+    );
+  });
+
   it("Fix 2d — botão Desfazer aparece quando row.decisionId é não-nulo (FR-026)", async () => {
     const onReverse = vi.fn().mockResolvedValue({ ok: true });
     renderQueue({ onReverse });

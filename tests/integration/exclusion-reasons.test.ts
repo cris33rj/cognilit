@@ -464,6 +464,132 @@ describe("prisma_exclusion_breakdown resolve motivo derivado usado", () => {
   });
 });
 
+describe("dismissed — a remoção do usuário é pegajosa (não ressuscita)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let questionId: string;
+  let critId: string;
+  const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`xr_dis_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Dismissed",
+    });
+    reviewId = review.id;
+    questionId = await seedQuestion(reviewId);
+    critId = await addCriterion(
+      reviewId,
+      questionId,
+      "Critério removível",
+      "accepted",
+    );
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+  });
+
+  it("remover um motivo DERIVADO (critério ainda ratificado) persiste após ensure", async () => {
+    const svc = serviceClient();
+    const { data: mirror } = await svc
+      .from("exclusion_reason")
+      .select("id")
+      .eq("source_criterion_id", critId)
+      .single();
+
+    await owner.rpc("set_exclusion_reason_active", {
+      p_reason_id: mirror!.id,
+      p_active: false,
+    });
+    // ensure roda sync (critério segue ratificado) — NÃO deve reativar.
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+
+    const { data: after } = await svc
+      .from("exclusion_reason")
+      .select("is_active, dismissed")
+      .eq("id", mirror!.id)
+      .single();
+    expect(after!.is_active).toBe(false);
+    expect(after!.dismissed).toBe(true);
+
+    // Não cria um segundo espelho para o mesmo critério.
+    const { data: mirrors } = await svc
+      .from("exclusion_reason")
+      .select("id")
+      .eq("source_criterion_id", critId);
+    expect(mirrors!.length).toBe(1);
+  });
+
+  it("remover um motivo SEED persiste após ensure (não re-semeia)", async () => {
+    const svc = serviceClient();
+    const { data: seeds } = await svc
+      .from("exclusion_reason")
+      .select("id, label")
+      .eq("review_id", reviewId)
+      .eq("origin", "seed")
+      .eq("is_active", true);
+    const seed = seeds![0]!;
+
+    await owner.rpc("set_exclusion_reason_active", {
+      p_reason_id: seed.id,
+      p_active: false,
+    });
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+
+    const { data: active } = await svc
+      .from("exclusion_reason")
+      .select("label")
+      .eq("review_id", reviewId)
+      .eq("is_active", true);
+    expect(active!.some((r) => norm(r.label) === norm(seed.label))).toBe(false);
+
+    // Continua existindo só uma linha com aquele label (a dispensada).
+    const { data: rows } = await svc
+      .from("exclusion_reason")
+      .select("id")
+      .eq("review_id", reviewId)
+      .eq("label", seed.label);
+    expect(rows!.length).toBe(1);
+  });
+
+  it("re-adicionar o mesmo label revive o motivo dispensado (sem duplicar)", async () => {
+    const svc = serviceClient();
+    const { data: seeds } = await svc
+      .from("exclusion_reason")
+      .select("id, label")
+      .eq("review_id", reviewId)
+      .eq("origin", "seed")
+      .eq("is_active", true);
+    const seed = seeds![0]!;
+
+    await owner.rpc("set_exclusion_reason_active", {
+      p_reason_id: seed.id,
+      p_active: false,
+    });
+    const res = await owner.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: seed.label,
+    });
+    expect(res.error).toBeNull();
+    expect(res.data).toBe(seed.id); // revive a mesma linha, não cria nova
+
+    const { data: after } = await svc
+      .from("exclusion_reason")
+      .select("is_active, dismissed")
+      .eq("id", seed.id)
+      .single();
+    expect(after!.is_active).toBe(true);
+    expect(after!.dismissed).toBe(false);
+
+    const { data: rows } = await svc
+      .from("exclusion_reason")
+      .select("id")
+      .eq("review_id", reviewId)
+      .eq("label", seed.label);
+    expect(rows!.length).toBe(1);
+  });
+});
+
 describe("RLS — não-membro não pode chamar os novos RPCs", () => {
   let intruder: Awaited<ReturnType<typeof signUpUser>>["client"];
   let reviewId: string;
