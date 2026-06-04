@@ -503,7 +503,7 @@ export function ScreeningQueue({
                       className="flex items-center justify-between gap-2"
                     >
                       <span className="flex-1 truncate">{it.title}</span>
-                      {it.decisionId && (
+                      {it.decisionId ? (
                         <button
                           type="button"
                           className="rounded border px-2 py-0.5 text-xs text-ink-soft hover:bg-paper"
@@ -517,6 +517,11 @@ export function ScreeningQueue({
                         >
                           Desfazer
                         </button>
+                      ) : (
+                        <span className="text-xs text-ink-faint">
+                          sem decisão reversível — reverta pela fila de Texto
+                          completo
+                        </span>
                       )}
                     </li>
                   ))}

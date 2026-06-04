@@ -351,4 +351,32 @@ describe("ScreeningQueue (US4)", () => {
     );
     expect(onReverse).toHaveBeenCalledWith("dec1");
   });
+
+  it("8.1 — artigo sem decisão reversível mostra nota, sem botão Desfazer", async () => {
+    const onReasonUsage = vi
+      .fn()
+      .mockResolvedValue([
+        { recordId: "r1", title: "Artigo Y", decisionId: null },
+      ]);
+    const loadReasons = vi.fn().mockResolvedValue([
+      {
+        id: "u1",
+        label: "Motivo usado",
+        origin: "seed",
+        sourceCriterionId: null,
+        usageCount: 1,
+      },
+    ]);
+    renderQueue({ stage: "full_text", loadReasons, onReasonUsage });
+    await screen.findByText("Motivo usado");
+    await userEvent.click(
+      screen.getByRole("button", { name: /em uso \(1\)/i }),
+    );
+    expect(
+      await screen.findByText(/sem decisão reversível/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /desfazer exclusão de artigo y/i }),
+    ).not.toBeInTheDocument();
+  });
 });
