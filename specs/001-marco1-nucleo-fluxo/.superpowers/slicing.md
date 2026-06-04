@@ -260,6 +260,37 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   `tests/integration/exclusion-reasons.test.ts`); e2e `screening.spec.ts` (exclusão TC +
   add/remove inline); PRISMA intacto (view `0007` não tocada).
 
+#### Incremento 8.1 — Bloqueio de remoção de motivo em uso (2026-06-04)
+- **Branch:** `build/001-marco1-nucleo-fluxo/8-1-block-in-use-reason-removal`
+- **Motivação:** após a Fatia 8, o "Remover" fazia soft-delete de um motivo **sem aviso**
+  mesmo quando ele já justificava exclusões de TC. O dado sobrevivia (PRISMA intacto via
+  view `0007`), mas o usuário ficava sem feedback e sem caminho para reverter as exclusões
+  que (deveriam) travar a remoção. Decisão do desenvolvedor: **bloquear** a remoção
+  enquanto o motivo estiver em uso, com caminho autocontido para revertê-lo.
+- **Entra:**
+  - **Guarda autoritativa** em `set_exclusion_reason_active` (nova migration `0009`):
+    com `p_active=false`, se houver registro `corpus_state='excluded_ft'` com
+    `ft_exclusion_reason_id = p_reason_id` → `raise exception 'exclusion reason in use'`.
+    Mesmo conjunto que o PRISMA reporta sob o motivo.
+  - **RPC de leitura** `list_reason_usage(p_reason_id)` → `{record_id, title, decision_id}`
+    dos artigos `excluded_ft` que usam o motivo, com o `decision_id` da decisão de TC viva
+    (`stage='full_text', is_reversed=false`) — id que o "Desfazer" consome. `security
+    definer` + `is_review_member`.
+  - **`listExclusionReasons`** passa a trazer `usageCount` por motivo, reaproveitando a
+    view `prisma_exclusion_breakdown` (left join por `reason_id`; sem N+1). Query/action
+    nova `listReasonUsage`/`fetchReasonUsage`.
+  - **UI (`ScreeningQueue`, painel de motivos):** com `usageCount>0`, troca "Remover" por
+    selo **"em uso (N)"** e **desabilita "Remover"** (tooltip explicativo); clicar no selo
+    abre **popover** com os N títulos + "Desfazer" inline (reusa `handleReverse`). Ao zerar
+    o uso, "Remover" habilita.
+- **Não entra:** mudança no comportamento de soft-delete para motivos **não** usados
+  (segue como na Fatia 8); alteração na view `0007`.
+- **Depende de:** Fatia 8 (mergeada).
+- **Testes-chave:** integração (banco direto) — `set_exclusion_reason_active` lança com
+  motivo em uso e passa após reverter; `list_reason_usage` retorna registros + decision ids
+  corretos. Unit (componente) — selo "em uso (N)" + "Remover" desabilitado; popover lista
+  artigos; "Desfazer" chama `onReverse`. PRISMA intacto.
+
 ---
 
 ## Gate de cobertura (verificação — PROTOCOLS §Sessão B)
