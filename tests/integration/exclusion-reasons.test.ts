@@ -1,0 +1,382 @@
+import { describe, it, expect, beforeAll } from "vitest";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+
+/** Cria uma question + N critérios de exclusão para a Revisão (origin=human). */
+async function seedQuestion(reviewId: string) {
+  const svc = serviceClient();
+  const { data: q, error } = await svc
+    .from("question")
+    .insert({
+      review_id: reviewId,
+      framework: "spider",
+      question_text: "Pergunta de teste",
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return q!.id as string;
+}
+
+async function addCriterion(
+  reviewId: string,
+  questionId: string,
+  text: string,
+  ratification: "pending" | "accepted" | "edited" | "rejected" = "accepted",
+) {
+  const svc = serviceClient();
+  const { data, error } = await svc
+    .from("eligibility_criterion")
+    .insert({
+      review_id: reviewId,
+      question_id: questionId,
+      kind: "exclusion",
+      text,
+      origin: "human",
+      ratification_state: ratification,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return data!.id as string;
+}
+
+async function seedActiveRecord(reviewId: string, title: string) {
+  const svc = serviceClient();
+  const { data, error } = await svc
+    .from("record")
+    .insert({
+      review_id: reviewId,
+      source_format: "ris",
+      raw: {},
+      metadata: { title, year: "2020" },
+      title_norm: title.toLowerCase().trim(),
+      corpus_state: "active",
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(error.message);
+  return data!.id as string;
+}
+
+describe("ensure_exclusion_reasons — deriva de critérios + semeia genéricos", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let questionId: string;
+  let critAId: string;
+  let critBId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`xr_ens_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Motivos derivados",
+    });
+    reviewId = review.id;
+    questionId = await seedQuestion(reviewId);
+    critAId = await addCriterion(
+      reviewId,
+      questionId,
+      "Estudo não randomizado",
+      "accepted",
+    );
+    critBId = await addCriterion(
+      reviewId,
+      questionId,
+      "Publicado antes de 2010",
+      "edited",
+    );
+  });
+
+  it("inclui os 2 motivos derivados (origin=criterion) + os 7 seeds, sem duplicata literal", async () => {
+    const { error } = await owner.rpc("ensure_exclusion_reasons", {
+      p_review_id: reviewId,
+    });
+    expect(error).toBeNull();
+
+    const svc = serviceClient();
+    const { data: reasons } = await svc
+      .from("exclusion_reason")
+      .select("id, label, origin, source_criterion_id, is_active")
+      .eq("review_id", reviewId)
+      .eq("is_active", true);
+
+    const derived = reasons!.filter((r) => r.origin === "criterion");
+    expect(derived.length).toBe(2);
+    const byCrit = new Map(
+      derived.map((r) => [r.source_criterion_id as string, r]),
+    );
+    expect(byCrit.get(critAId)!.label).toBe("Estudo não randomizado");
+    expect(byCrit.get(critBId)!.label).toBe("Publicado antes de 2010");
+
+    const seeds = reasons!.filter((r) => r.origin === "seed");
+    expect(seeds.length).toBe(7);
+
+    // Sem duplicata literal (label normalizado único entre ativos).
+    const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+    const labels = reasons!.map((r) => norm(r.label));
+    expect(new Set(labels).size).toBe(labels.length);
+  });
+
+  it("idempotência: chamar duas vezes não cria duplicatas", async () => {
+    const svc = serviceClient();
+    const before = await svc
+      .from("exclusion_reason")
+      .select("id")
+      .eq("review_id", reviewId);
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+    const after = await svc
+      .from("exclusion_reason")
+      .select("id")
+      .eq("review_id", reviewId);
+    expect(after.data!.length).toBe(before.data!.length);
+  });
+
+  it("editar o texto de um critério ratificado: re-sync atualiza o label do espelho", async () => {
+    const svc = serviceClient();
+    await svc
+      .from("eligibility_criterion")
+      .update({ text: "Estudo não randomizado (revisado)" })
+      .eq("id", critAId);
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+    const { data: mirror } = await svc
+      .from("exclusion_reason")
+      .select("label")
+      .eq("source_criterion_id", critAId)
+      .single();
+    expect(mirror!.label).toBe("Estudo não randomizado (revisado)");
+  });
+});
+
+describe("sync — des-ratificar critério desativa o espelho não usado, preserva o usado", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let questionId: string;
+  let critUnusedId: string;
+  let critUsedId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`xr_unr_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Des-ratificar",
+    });
+    reviewId = review.id;
+    questionId = await seedQuestion(reviewId);
+    critUnusedId = await addCriterion(
+      reviewId,
+      questionId,
+      "Motivo nunca usado",
+      "accepted",
+    );
+    critUsedId = await addCriterion(
+      reviewId,
+      questionId,
+      "Motivo que foi usado",
+      "accepted",
+    );
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+  });
+
+  it("espelho não usado vira is_active=false; espelho usado por um record permanece ativo", async () => {
+    const svc = serviceClient();
+    // Descobre o reason espelho do critério usado e referencia num record excluído.
+    const { data: usedReason } = await svc
+      .from("exclusion_reason")
+      .select("id")
+      .eq("source_criterion_id", critUsedId)
+      .single();
+    const recId = await seedActiveRecord(reviewId, "Estudo a excluir");
+    await owner.rpc("decide_screening", {
+      p_review_id: reviewId,
+      p_record_id: recId,
+      p_stage: "title_abstract",
+      p_decision: "include",
+    });
+    await owner.rpc("decide_screening", {
+      p_review_id: reviewId,
+      p_record_id: recId,
+      p_stage: "full_text",
+      p_decision: "exclude",
+      p_exclusion_reason_id: usedReason!.id,
+    });
+
+    // Des-ratifica ambos.
+    await svc
+      .from("eligibility_criterion")
+      .update({ ratification_state: "rejected" })
+      .in("id", [critUnusedId, critUsedId]);
+
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+
+    const { data: unused } = await svc
+      .from("exclusion_reason")
+      .select("is_active")
+      .eq("source_criterion_id", critUnusedId)
+      .single();
+    expect(unused!.is_active).toBe(false);
+
+    const { data: used } = await svc
+      .from("exclusion_reason")
+      .select("is_active")
+      .eq("source_criterion_id", critUsedId)
+      .single();
+    expect(used!.is_active).toBe(true);
+  });
+});
+
+describe("add_exclusion_reason + set_exclusion_reason_active", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`xr_man_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Manual",
+    });
+    reviewId = review.id;
+  });
+
+  it("add_exclusion_reason insere motivo manual (origin=manual)", async () => {
+    const { data: id, error } = await owner.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: "Motivo manual",
+    });
+    expect(error).toBeNull();
+    expect(id).toBeTruthy();
+    const svc = serviceClient();
+    const { data: row } = await svc
+      .from("exclusion_reason")
+      .select("origin, label")
+      .eq("id", id)
+      .single();
+    expect(row!.origin).toBe("manual");
+    expect(row!.label).toBe("Motivo manual");
+  });
+
+  it("dedup por label normalizado retorna o id existente, não duplica", async () => {
+    const { data: id1 } = await owner.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: "Duplo motivo",
+    });
+    const { data: id2 } = await owner.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: "  DUPLO   motivo  ",
+    });
+    expect(id2).toBe(id1);
+  });
+
+  it("rejeita label vazio", async () => {
+    const { error } = await owner.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: "   ",
+    });
+    expect(error).not.toBeNull();
+  });
+
+  it("set_exclusion_reason_active(false) faz soft-delete (linha permanece)", async () => {
+    const { data: id } = await owner.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: "Para desativar",
+    });
+    const { error } = await owner.rpc("set_exclusion_reason_active", {
+      p_reason_id: id,
+      p_active: false,
+    });
+    expect(error).toBeNull();
+    const svc = serviceClient();
+    const { data: row } = await svc
+      .from("exclusion_reason")
+      .select("is_active")
+      .eq("id", id)
+      .single();
+    expect(row!.is_active).toBe(false);
+  });
+});
+
+describe("prisma_exclusion_breakdown resolve motivo derivado usado", () => {
+  it("excluir no Texto completo com motivo derivado aparece no breakdown com o label do critério", async () => {
+    const s = Date.now();
+    const owner = (
+      await signUpUser(`xr_pri_${s}@example.com`, "senha-teste-123")
+    ).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Breakdown derivado",
+    });
+    const reviewId = review.id;
+    const questionId = await seedQuestion(reviewId);
+    const critId = await addCriterion(
+      reviewId,
+      questionId,
+      "Desfecho não relatado",
+      "accepted",
+    );
+    await owner.rpc("ensure_exclusion_reasons", { p_review_id: reviewId });
+
+    const svc = serviceClient();
+    const { data: reason } = await svc
+      .from("exclusion_reason")
+      .select("id")
+      .eq("source_criterion_id", critId)
+      .single();
+
+    const recId = await seedActiveRecord(reviewId, "Estudo p/ breakdown");
+    await owner.rpc("decide_screening", {
+      p_review_id: reviewId,
+      p_record_id: recId,
+      p_stage: "title_abstract",
+      p_decision: "include",
+    });
+    await owner.rpc("decide_screening", {
+      p_review_id: reviewId,
+      p_record_id: recId,
+      p_stage: "full_text",
+      p_decision: "exclude",
+      p_exclusion_reason_id: reason!.id,
+    });
+
+    const { data: breakdown } = await svc
+      .from("prisma_exclusion_breakdown")
+      .select("reason_id, reason_label, n")
+      .eq("review_id", reviewId);
+    const row = breakdown!.find((b) => b.reason_id === reason!.id);
+    expect(row).toBeDefined();
+    expect(row!.reason_label).toBe("Desfecho não relatado");
+    expect(Number(row!.n)).toBe(1);
+  });
+});
+
+describe("RLS — não-membro não pode chamar os novos RPCs", () => {
+  let intruder: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    const owner = (
+      await signUpUser(`xr_rls_o_${s}@example.com`, "senha-teste-123")
+    ).client;
+    intruder = (
+      await signUpUser(`xr_rls_i_${s}@example.com`, "senha-teste-123")
+    ).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "RLS novos RPCs",
+    });
+    reviewId = review.id;
+  });
+
+  it("ensure/add/set chamados por não-membro disparam erro", async () => {
+    const e1 = await intruder.rpc("ensure_exclusion_reasons", {
+      p_review_id: reviewId,
+    });
+    expect(e1.error).not.toBeNull();
+
+    const e2 = await intruder.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: "intruso",
+    });
+    expect(e2.error).not.toBeNull();
+  });
+});
