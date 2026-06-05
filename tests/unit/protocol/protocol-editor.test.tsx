@@ -61,3 +61,70 @@ describe("ProtocolEditor — feedback do 'Rascunhar por IA'", () => {
     ).toBeDisabled();
   });
 });
+
+describe("ProtocolEditor — toggle Editar/Visualizar", () => {
+  it("alterna para Visualizar: renderiza o markdown e esconde o textarea", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProtocolEditor
+        reviewId="r1"
+        initialMarkdown={"# Olá"}
+        locked={false}
+        canDraft
+      />,
+    );
+    expect(
+      screen.getByLabelText("Conteúdo do protocolo (Markdown)"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Visualizar" }));
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Olá" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Conteúdo do protocolo (Markdown)"),
+    ).toBeNull();
+  });
+
+  it("protocolo travado abre em Visualizar por padrão", () => {
+    render(
+      <ProtocolEditor
+        reviewId="r1"
+        initialMarkdown={"# Travado"}
+        locked
+        canDraft={false}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "Visualizar" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Travado" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Conteúdo do protocolo (Markdown)"),
+    ).toBeNull();
+  });
+
+  it("preview reflete a edição não salva do textarea (buffer vivo)", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProtocolEditor
+        reviewId="r1"
+        initialMarkdown={""}
+        locked={false}
+        canDraft
+      />,
+    );
+    await user.type(
+      screen.getByLabelText("Conteúdo do protocolo (Markdown)"),
+      "# Rascunho vivo",
+    );
+    await user.click(screen.getByRole("tab", { name: "Visualizar" }));
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Rascunho vivo" }),
+    ).toBeInTheDocument();
+  });
+});

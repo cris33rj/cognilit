@@ -474,4 +474,4 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 9 — Correção da semântica PRISMA (fluxo cumulativo) (CHECKPOINT 3 — mergeada — merge `c9c4e64`)
 - [x] Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (CHECKPOINT 3 — mergeada — merge `468f878`)
 - [x] Fatia 11 — Re-derivação segura de critérios (idempotência + guarda de fase) (CHECKPOINT 3 — mergeada — merge `14aa0dc`)
-- [ ] Fatia 12 — Visualização do markdown no editor de Protocolo (CHECKPOINT 1 aprovado — aguardando plano/execução)
+- [ ] Fatia 12 — Visualização do markdown no editor de Protocolo (CHECKPOINT 3 — aguardando merge manual)
