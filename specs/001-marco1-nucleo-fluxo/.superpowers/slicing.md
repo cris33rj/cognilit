@@ -401,6 +401,45 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
     critérios de IA; desabilitado com nota quando travado; primeira derivação inalterada.
   - `lint` + `tsc --noEmit` limpos.
 
+### Fatia 12 — Visualização do markdown no editor de Protocolo (2026-06-05)
+- **Branch:** `build/001-marco1-nucleo-fluxo/12-protocol-markdown-preview`
+- **Natureza:** melhoria de **UX pós-Marco funcional**, acrescentada após constatação do
+  desenvolvedor. **Não** adiciona FR nem altera decisão assinada (D); melhora a
+  usabilidade do `ProtocolEditor` (Fatia 2), que hoje mostra o markdown gerado pela IA
+  com os marcadores crus. Deriva de `spec.md`/design system.
+- **Motivação:** o campo do protocolo é um `<textarea>` único
+  ([src/components/protocol/ProtocolEditor.tsx](../../../src/components/protocol/ProtocolEditor.tsx));
+  o `.md` aparece sem formatação. Falta um modo de leitura renderizado.
+- **Decisões de implementação resolvidas (A-12.x), aprovadas pelo desenvolvedor:**
+  - **A-12.1 — renderização:** `react-markdown` + `remark-gfm`, com `components` mapeando
+    os elementos (`h1/h2/h3/ul/ol/li/strong/em/blockquote/code/pre/a/table`) às classes do
+    design system (`text-ink`, `text-ink-soft`, …). **Sem** `rehype-raw` (anti-XSS). Reset
+    opinativo do `prose` descartado por destoar do tema paper/ink.
+  - **A-12.2 — modo padrão contextual:** `mode = locked ? "preview" : "edit"`. Rascunho
+    abre em Editar (autor escrevendo); travado abre em Visualizar (read-only). Toggle
+    disponível nos dois estados.
+  - **A-12.3 — preview lê o buffer vivo** (`md` no estado, incl. edições não salvas);
+    WYSIWYG do que se está escrevendo, não a versão persistida.
+  - **A-12.4 — conteúdo vazio:** placeholder discreto ("Sem conteúdo.").
+- **Entra:**
+  - Novo componente puro `src/components/protocol/MarkdownPreview.tsx` (recebe
+    `markdown: string`).
+  - `ProtocolEditor` ganha estado `mode` + toggle segmentado "Editar · Visualizar"
+    (`role="tab"`/`aria-selected`, padrão ARIA já usado no projeto); `edit` → `<textarea>`
+    atual, `preview` → `<MarkdownPreview>`.
+- **Não entra (YAGNI):** editor rico/WYSIWYG, barra de formatação, render das emendas,
+  mudança no export `.md` (já existe), syntax highlighting de code fences.
+- **Depende de:** Fatia 2 (`ProtocolEditor`) e Fatia 7 (design system). **Ambas mergeadas.**
+- **Dependências novas (autorizadas por esta tarefa — A-12.1):** `react-markdown`,
+  `remark-gfm`. Desvio registrado conforme constituição ("deps novas só por tarefa
+  explícita").
+- **Skills:** `react-best-practices`, `nextjs-best-practices`, `frontend-design`.
+- **Testes-chave:**
+  - **unit (componente):** alterna edit↔preview ao clicar o toggle; `# Título` vira
+    `role="heading"`; default contextual (travado→preview, rascunho→edit); preview reflete
+    edição não salva; HTML cru no markdown **não** vira elemento ativo (sem `rehype-raw`).
+  - `lint` + `tsc --noEmit` limpos.
+
 ---
 
 ## Gate de cobertura (verificação — PROTOCOLS §Sessão B)
@@ -434,4 +473,5 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 8 — Motivos de exclusão derivados dos critérios (CHECKPOINT 3 — mergeada — merge `8a55408`)
 - [x] Fatia 9 — Correção da semântica PRISMA (fluxo cumulativo) (CHECKPOINT 3 — mergeada — merge `c9c4e64`)
 - [x] Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (CHECKPOINT 3 — mergeada — merge `468f878`)
-- [ ] Fatia 11 — Re-derivação segura de critérios (idempotência + guarda de fase) (CHECKPOINT 3 — aguardando merge manual)
+- [x] Fatia 11 — Re-derivação segura de critérios (idempotência + guarda de fase) (CHECKPOINT 3 — mergeada — merge `14aa0dc`)
+- [ ] Fatia 12 — Visualização do markdown no editor de Protocolo (CHECKPOINT 1 aprovado — aguardando plano/execução)
