@@ -1,751 +1,490 @@
-# Fatia 11 — Re-derivação segura de critérios (idempotência + guarda de fase)
+# Fatia 12 — Visualização do markdown no editor de Protocolo
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recomendado) ou superpowers:executing-plans para implementar tarefa a tarefa, cada
 > uma em TDD. Os passos usam checkbox (`- [ ]`) para rastreio.
 >
-> **Escopo:** Fatia 11 do Marco 1 (`001-marco1-nucleo-fluxo`), correção/melhoria
-> pós-Marco. Branch isolado `build/001-marco1-nucleo-fluxo/11-criteria-rederivation-guard`.
+> **Escopo:** Fatia 12 do Marco 1 (`001-marco1-nucleo-fluxo`), melhoria de UX
+> pós-Marco. Branch isolado `build/001-marco1-nucleo-fluxo/12-protocol-markdown-preview`.
 > A sessão **NUNCA** faz `git merge`/`git push` para a feature ou `main`.
 > *(Planos de fatias anteriores permanecem no histórico git e em `.superpowers/`.)*
->
-> **Não** adiciona FR nem altera decisão assinada (D); **reforça** FR-007/008
-> (ratificação), FR-010 (trava na 1ª decisão de triagem) e FR-011 (emendas). Detalhe
-> da fatia em `.superpowers/slicing.md` (§"Fatia 11").
 
-**Goal:** Tornar "Derivar por IA" idempotente — re-clicar **regenera** (substitui só as
-sugestões de IA ainda pendentes, preserva ratificados, deduplica o lote novo) em vez de
-acumular; e **bloquear** a re-derivação depois que o protocolo trava, apontando o canal
-de emenda.
+**Goal:** Dar ao editor de Protocolo PRISMA-P um modo "Visualizar" que renderiza o
+markdown gerado pela IA como HTML formatado, com toggle Editar/Visualizar.
 
-**Architecture:** Toda a mutação autoritativa vive numa RPC nova
-`regenerate_eligibility_criteria` (migration `0011`, `security definer` + `is_review_member`,
-padrão das Fatias 8/8.1/9): recusa quando `protocol.state='locked'`, insere a `ai_suggestion`
-(proveniência preservada), apaga **só** `eligibility_criterion` com `origin='ai' AND
-ratification_state='pending'`, e insere o lote novo deduplicado por `normalize_reason_label`
-(reuso da Fatia 8) contra os critérios sobreviventes. O server action `deriveCriteria` passa
-a (a) pré-checar a trava — evitando gastar a chamada de LLM — e (b) chamar a RPC. A UI
-(`CriteriaPanel`) troca o rótulo para "Regerar sugestões" + confirmação quando já há
-critérios de IA, e desabilita com nota quando travado. A página da Pergunta passa a ler o
-estado do protocolo.
+**Architecture:** Um componente puro `MarkdownPreview` (react-markdown + remark-gfm,
+elementos mapeados às classes do design system, sem `rehype-raw`) consumido por
+`ProtocolEditor`, que ganha estado de modo (`edit`/`preview`) e um toggle segmentado
+no padrão `role="tablist"`/`tab` já usado no `ModeBar`. Toggle é puramente client-side;
+nenhuma server action é tocada.
 
-**Tech Stack:** PostgreSQL (Supabase, RPC `security definer` + RLS via `is_review_member`,
-reuso de `normalize_reason_label`/`lock_protocol`), Next.js 14 App Router (Server Actions,
-RSC), React 18 + `AsyncActionButton` (Fatia 10), TypeScript strict, Vitest (unit +
-integração DB-direta).
+**Tech Stack:** React 18 + TS strict, Tailwind 4 (tokens `--color-*` → utilitários
+`text-/bg-/border-*`), Vitest + Testing Library (jsdom), `react-markdown@^9`,
+`remark-gfm@^4`.
+
+**Decisões herdadas do design (slicing.md §Fatia 12, A-12.x):**
+- A-12.1 — react-markdown + remark-gfm, `components` mapeados ao tema; **sem** `rehype-raw`.
+- A-12.2 — modo inicial contextual: `locked ? "preview" : "edit"`.
+- A-12.3 — preview lê o buffer vivo (`md`), incl. edições não salvas.
+- A-12.4 — vazio → placeholder "Sem conteúdo.".
 
 ---
 
 ## Estrutura de arquivos
 
-- **Criar** `supabase/migrations/0011_regenerate_eligibility_criteria.sql` — RPC
-  autoritativa (guarda de trava + supersede de pendentes + dedupe + auditoria).
-- **Criar** `tests/integration/criteria-rederivation.test.ts` — integração DB-direta da RPC.
-- **Criar** `src/lib/question/criteria.ts` — helper puro `criteriaItemsFromOutput` (achata
-  a saída do LLM em `{kind,text}[]`).
-- **Criar** `tests/unit/question/criteria-items.test.ts` — unit do helper puro.
-- **Modificar** `app/reviews/[reviewId]/question/actions.ts` — `deriveCriteria` pré-checa a
-  trava e chama a RPC (remove insert cego + writeAudit manual).
-- **Modificar** `src/components/question/CriteriaPanel.tsx` — "Regerar sugestões" +
-  confirmação + `locked` (desabilita + nota).
-- **Modificar** `tests/unit/question/criteria-panel.test.tsx` — testes novos (regerar/
-  confirm/locked); os da Fatia 10 permanecem verdes.
-- **Modificar** `app/reviews/[reviewId]/question/page.tsx` — lê `getProtocol` e passa
-  `locked` ao `CriteriaPanel`.
-
-> **Nota de teste (memória do projeto):** server actions usam `createClient()` server-side
-> (cookies) e **não** podem ser chamados de testes Vitest. Por isso a lógica autoritativa
-> fica na RPC (testada DB-direto) e no helper puro (unit). O `deriveCriteria` em si é cola
-> fina, verificada por `tsc` + revisão.
-
-> **Nota de ambiente:** os testes de **integração** exigem o Supabase local de pé com as
-> migrations aplicadas (`npx supabase migration up`). `unit`/`lint`/`tsc` não exigem.
+- **Criar:** `src/components/protocol/MarkdownPreview.tsx` — render puro de markdown→HTML
+  temático. Props: `{ markdown: string }`. Sem estado, sem efeitos.
+- **Modificar:** `src/components/protocol/ProtocolEditor.tsx` — adiciona estado `mode`,
+  toggle `role="tablist"`, e troca `<textarea>`↔`<MarkdownPreview>`.
+- **Criar:** `tests/unit/protocol/markdown-preview.test.tsx` — testes do componente puro.
+- **Modificar:** `tests/unit/protocol/protocol-editor.test.tsx` — testes do toggle.
+- **Modificar:** `package.json` / `package-lock.json` — deps `react-markdown`, `remark-gfm`.
 
 ---
 
-## Task 1: Migration 0011 — RPC `regenerate_eligibility_criteria` (TDD, integração DB-direta)
+## Task 1: Adicionar dependências (tarefa explícita — constitution §Portões)
 
 **Files:**
-- Create: `supabase/migrations/0011_regenerate_eligibility_criteria.sql`
-- Test: `tests/integration/criteria-rederivation.test.ts`
+- Modify: `package.json`, `package-lock.json`
 
-- [ ] **Step 1: Escrever o teste de integração que falha**
+- [ ] **Step 1: Instalar as duas dependências de runtime**
 
-Crie `tests/integration/criteria-rederivation.test.ts`:
-
-```ts
-// @vitest-environment node
-import { describe, it, expect, beforeAll } from "vitest";
-import { signUpUser, serviceClient } from "./helpers/supabase";
-
-const PROV = {
-  model: "test-model",
-  version: "1",
-  prompt_or_span: "teste",
-  timestamp: new Date().toISOString(),
-};
-const OUTPUT = { inclusion: [], exclusion: [], searchTerms: [] };
-
-describe("regenerate_eligibility_criteria — supersede + dedupe + guarda de trava (Fatia 11)", () => {
-  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-
-  beforeAll(async () => {
-    const s = Date.now();
-    owner = (await signUpUser(`rederiv_${s}@example.com`, "senha-teste-123")).client;
-    const { data: r } = await owner.rpc("create_review", { p_title: "Rederiv" });
-    reviewId = r.id;
-    await owner.from("question").insert({
-      review_id: reviewId,
-      framework: "spider",
-      question_text: "Pergunta de teste",
-    });
-  });
-
-  function regenerate(items: { kind: string; text: string }[]) {
-    return owner.rpc("regenerate_eligibility_criteria", {
-      p_review_id: reviewId,
-      p_output: OUTPUT,
-      p_provenance: PROV,
-      p_not_found: false,
-      p_items: items,
-    });
-  }
-
-  async function listCriteria() {
-    const svc = serviceClient();
-    const { data } = await svc
-      .from("eligibility_criterion")
-      .select("kind, text, origin, ratification_state")
-      .eq("review_id", reviewId)
-      .order("created_at", { ascending: true });
-    return data ?? [];
-  }
-
-  it("primeira derivação insere o lote (count = nº de itens)", async () => {
-    const { data, error } = await regenerate([
-      { kind: "inclusion", text: "Adultos" },
-      { kind: "exclusion", text: "Crianças" },
-      { kind: "search_term", text: "ansiedade" },
-    ]);
-    expect(error).toBeNull();
-    expect(data).toBe(3);
-    expect((await listCriteria()).length).toBe(3);
-  });
-
-  it("re-derivar substitui os pendentes — NÃO dobra (converge)", async () => {
-    const { data, error } = await regenerate([
-      { kind: "inclusion", text: "Adultos" },
-      { kind: "exclusion", text: "Crianças" },
-    ]);
-    expect(error).toBeNull();
-    expect(data).toBe(2);
-    expect((await listCriteria()).length).toBe(2);
-  });
-
-  it("preserva ratificados e não re-propõe o que já foi decidido (dedupe)", async () => {
-    const svc = serviceClient();
-    await svc
-      .from("eligibility_criterion")
-      .update({ ratification_state: "accepted" })
-      .eq("review_id", reviewId)
-      .eq("text", "Adultos");
-
-    const { data, error } = await regenerate([
-      { kind: "inclusion", text: "Adultos" }, // já aceito → dedupe
-      { kind: "inclusion", text: "Idosos" }, // novo → entra
-    ]);
-    expect(error).toBeNull();
-    expect(data).toBe(1);
-
-    const rows = await listCriteria();
-    expect(rows.map((r) => r.text).sort()).toEqual(["Adultos", "Idosos"]);
-    expect(rows.find((r) => r.text === "Adultos")!.ratification_state).toBe("accepted");
-  });
-
-  it("recusa quando o protocolo está travado (FR-010/011)", async () => {
-    const svc = serviceClient();
-    await svc.from("protocol").insert({ review_id: reviewId, state: "locked" });
-
-    const { error } = await regenerate([{ kind: "inclusion", text: "X" }]);
-    expect(error).not.toBeNull();
-    expect(error!.message).toMatch(/locked/);
-  });
-
-  it("RLS: não-membro não consegue regenerar", async () => {
-    const s = Date.now();
-    const intruder = (await signUpUser(`rederiv_i_${s}@example.com`, "senha-teste-123"))
-      .client;
-    const { error } = await intruder.rpc("regenerate_eligibility_criteria", {
-      p_review_id: reviewId,
-      p_output: OUTPUT,
-      p_provenance: PROV,
-      p_not_found: false,
-      p_items: [{ kind: "inclusion", text: "Y" }],
-    });
-    expect(error).not.toBeNull();
-  });
-});
+Run (na raiz do worktree da fatia):
+```bash
+npm install react-markdown@^9 remark-gfm@^4
 ```
+Expected: `package.json#dependencies` passa a conter `react-markdown` e `remark-gfm`;
+`package-lock.json` atualizado; `node_modules` populado.
 
-- [ ] **Step 2: Rodar e confirmar que falha**
+- [ ] **Step 2: Verificar que entraram como dependencies (não devDependencies)**
 
-Run: `npx supabase migration up` (aplica migrations existentes) e então
-`npm run test -- tests/integration/criteria-rederivation.test.ts --run`
-Expected: FALHA — `regenerate_eligibility_criteria` ainda não existe (erro de função
-inexistente). *(Se o Supabase local não estiver de pé, suba-o antes: `npx supabase start`.)*
-
-- [ ] **Step 3: Escrever a migration 0011**
-
-Crie `supabase/migrations/0011_regenerate_eligibility_criteria.sql`:
-
-```sql
--- 0011_regenerate_eligibility_criteria.sql
--- Fatia 11 — re-derivação segura de critérios de elegibilidade.
--- RPC autoritativa: recusa se o protocolo travou (a base de elegibilidade só muda
--- por emenda — FR-010/011), registra a sugestão de IA (proveniência preservada),
--- substitui SÓ os critérios de IA ainda pendentes (preserva humanos e ratificados),
--- e insere o lote novo deduplicado por rótulo normalizado contra os sobreviventes.
-
-create or replace function public.regenerate_eligibility_criteria(
-  p_review_id  uuid,
-  p_output     jsonb,
-  p_provenance jsonb,
-  p_not_found  boolean,
-  p_items      jsonb
-)
-returns integer
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_question_id uuid;
-  v_state       protocol_state;
-  v_sug         uuid;
-  v_count       integer;
-begin
-  if not public.is_review_member(p_review_id) then
-    raise exception 'not a member';
-  end if;
-
-  select id into v_question_id
-  from public.question
-  where review_id = p_review_id;
-  if v_question_id is null then
-    raise exception 'question not found';
-  end if;
-
-  -- Guarda de fase (FR-010): elegibilidade congela quando o protocolo trava.
-  select state into v_state
-  from public.protocol
-  where review_id = p_review_id;
-  if v_state = 'locked' then
-    raise exception 'protocol is locked; eligibility changes must be amendments';
-  end if;
-
-  -- Proveniência da nova sugestão (histórico preservado; não apaga ai_suggestion).
-  insert into public.ai_suggestion (
-    review_id, target_kind, target_id, output, provenance, state, not_found
-  ) values (
-    p_review_id, 'eligibility', v_question_id, p_output, p_provenance, 'pending', p_not_found
-  )
-  returning id into v_sug;
-
-  -- Supersede: remove SÓ as sugestões de IA ainda não ratificadas.
-  delete from public.eligibility_criterion
-  where review_id = p_review_id
-    and origin = 'ai'
-    and ratification_state = 'pending';
-
-  -- Insere o lote novo deduplicado por rótulo normalizado:
-  --   (a) dentro do próprio lote (distinct on);
-  --   (b) contra TODO critério sobrevivente (humano + ratificado) — a IA não
-  --       re-propõe o já aceito/editado nem re-empurra o rejeitado.
-  insert into public.eligibility_criterion (
-    review_id, question_id, kind, text, origin, ratification_state, ai_suggestion_id
-  )
-  select p_review_id, v_question_id, x.kind, x.text, 'ai', 'pending', v_sug
-  from (
-    select distinct on (public.normalize_reason_label(text)) kind, text
-    from jsonb_to_recordset(p_items) as r(kind criterion_kind, text text)
-    where btrim(text) <> ''
-    order by public.normalize_reason_label(text)
-  ) x
-  where public.normalize_reason_label(x.text) not in (
-    select public.normalize_reason_label(text)
-    from public.eligibility_criterion
-    where review_id = p_review_id
-  );
-  get diagnostics v_count = row_count;
-
-  insert into public.audit_entry (
-    review_id, actor_type, actor_id, action, entity, entity_id, before, after
-  ) values (
-    p_review_id, 'human', auth.uid(), 'derive_criteria', 'ai_suggestion', v_sug,
-    null, jsonb_build_object('count', v_count)
-  );
-
-  return v_count;
-end;
-$$;
-
-grant execute on function
-  public.regenerate_eligibility_criteria(uuid, jsonb, jsonb, boolean, jsonb)
-  to authenticated;
+Run:
+```bash
+node -e "const p=require('./package.json'); console.log(p.dependencies['react-markdown'], p.dependencies['remark-gfm'])"
 ```
+Expected: imprime as duas versões (ex.: `^9.x.x ^4.x.x`), nenhuma `undefined`.
 
-- [ ] **Step 4: Aplicar a migration e rodar o teste até passar**
-
-Run: `npx supabase migration up && npm run test -- tests/integration/criteria-rederivation.test.ts --run`
-Expected: PASS (5 testes). *(Se preferir recriar o schema do zero: `npx supabase db reset`.)*
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add supabase/migrations/0011_regenerate_eligibility_criteria.sql tests/integration/criteria-rederivation.test.ts
-git commit -m "feat(11): RPC regenerate_eligibility_criteria (supersede + dedupe + guarda de trava)
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git add package.json package-lock.json
+git commit -m "build(12): adiciona react-markdown + remark-gfm (preview do protocolo)"
 ```
 
 ---
 
-## Task 2: Helper puro `criteriaItemsFromOutput` + reescrita de `deriveCriteria`
+## Task 2: Componente `MarkdownPreview` (TDD)
 
 **Files:**
-- Create: `src/lib/question/criteria.ts`
-- Test: `tests/unit/question/criteria-items.test.ts`
-- Modify: `app/reviews/[reviewId]/question/actions.ts` (função `deriveCriteria`, ~linhas 58-133)
+- Create: `tests/unit/protocol/markdown-preview.test.tsx`
+- Create: `src/components/protocol/MarkdownPreview.tsx`
 
-- [ ] **Step 1: Escrever o teste unit do helper (falha)**
+- [ ] **Step 1: Escrever o teste que falha**
 
-Crie `tests/unit/question/criteria-items.test.ts`:
-
-```ts
+Criar `tests/unit/protocol/markdown-preview.test.tsx`:
+```tsx
 import { describe, it, expect } from "vitest";
-import { criteriaItemsFromOutput } from "@/lib/question/criteria";
+import { render, screen } from "@testing-library/react";
+import { MarkdownPreview } from "@/components/protocol/MarkdownPreview";
 
-describe("criteriaItemsFromOutput", () => {
-  it("achata inclusion/exclusion/searchTerms preservando o kind", () => {
-    const items = criteriaItemsFromOutput({
-      inclusion: ["A", "B"],
-      exclusion: ["C"],
-      searchTerms: ["d", "e"],
-    });
-    expect(items).toEqual([
-      { kind: "inclusion", text: "A" },
-      { kind: "inclusion", text: "B" },
-      { kind: "exclusion", text: "C" },
-      { kind: "search_term", text: "d" },
-      { kind: "search_term", text: "e" },
-    ]);
+describe("MarkdownPreview", () => {
+  it("renderiza markdown como HTML semântico (heading, item de lista, negrito)", () => {
+    render(
+      <MarkdownPreview markdown={"# Protocolo\n\n- item um\n\n**negrito**"} />,
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Protocolo" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("item um").closest("li")).not.toBeNull();
+    expect(screen.getByText("negrito").tagName).toBe("STRONG");
   });
 
-  it("lida com listas vazias (not_found)", () => {
-    expect(
-      criteriaItemsFromOutput({ inclusion: [], exclusion: [], searchTerms: [] }),
-    ).toEqual([]);
+  it("mostra placeholder discreto quando o conteúdo é vazio/só espaços", () => {
+    render(<MarkdownPreview markdown={"   "} />);
+    expect(screen.getByText("Sem conteúdo.")).toBeInTheDocument();
+  });
+
+  it("não materializa HTML cru como elemento ativo (anti-XSS, sem rehype-raw)", () => {
+    const { container } = render(
+      <MarkdownPreview markdown={'texto <img src=x onerror="alert(1)"> fim'} />,
+    );
+    expect(container.querySelector("img")).toBeNull();
   });
 });
 ```
 
 - [ ] **Step 2: Rodar e confirmar que falha**
 
-Run: `npm run test -- tests/unit/question/criteria-items.test.ts --run`
-Expected: FALHA — módulo `@/lib/question/criteria` inexistente.
+Run: `npm test -- tests/unit/protocol/markdown-preview.test.tsx`
+Expected: FAIL — `Failed to resolve import "@/components/protocol/MarkdownPreview"`.
 
-- [ ] **Step 3: Criar o helper**
+- [ ] **Step 3: Implementar o componente mínimo**
 
-Crie `src/lib/question/criteria.ts`:
+Criar `src/components/protocol/MarkdownPreview.tsx`:
+```tsx
+"use client";
 
-```ts
-export interface CriterionItem {
-  kind: "inclusion" | "exclusion" | "search_term";
-  text: string;
-}
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 
-/**
- * Achata a saída factual do LLM (`deriveEligibility`) em itens `{kind,text}` para a
- * RPC `regenerate_eligibility_criteria`. Função pura — sem I/O, fácil de testar.
- */
-export function criteriaItemsFromOutput(output: {
-  inclusion: string[];
-  exclusion: string[];
-  searchTerms: string[];
-}): CriterionItem[] {
-  return [
-    ...output.inclusion.map((text) => ({ kind: "inclusion" as const, text })),
-    ...output.exclusion.map((text) => ({ kind: "exclusion" as const, text })),
-    ...output.searchTerms.map((text) => ({ kind: "search_term" as const, text })),
-  ];
+const components: Components = {
+  h1: ({ children }) => (
+    <h1 className="font-serif text-2xl font-semibold text-ink">{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="font-serif text-xl font-semibold text-ink">{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="font-serif text-lg font-semibold text-ink">{children}</h3>
+  ),
+  p: ({ children }) => <p className="text-ink">{children}</p>,
+  ul: ({ children }) => <ul className="list-disc pl-6 text-ink">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal pl-6 text-ink">{children}</ol>,
+  li: ({ children }) => <li className="text-ink">{children}</li>,
+  strong: ({ children }) => (
+    <strong className="font-semibold text-ink">{children}</strong>
+  ),
+  em: ({ children }) => <em className="italic">{children}</em>,
+  blockquote: ({ children }) => (
+    <blockquote className="border-l-2 border-accent pl-3 text-ink-soft">
+      {children}
+    </blockquote>
+  ),
+  a: ({ children, href }) => (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="text-accent-deep underline"
+    >
+      {children}
+    </a>
+  ),
+  code: ({ children }) => (
+    <code className="font-mono text-sm">{children}</code>
+  ),
+  pre: ({ children }) => (
+    <pre className="overflow-x-auto rounded bg-paper-2 p-3 font-mono text-sm text-ink">
+      {children}
+    </pre>
+  ),
+  table: ({ children }) => (
+    <table className="w-full border-collapse text-sm text-ink">{children}</table>
+  ),
+  th: ({ children }) => (
+    <th className="border border-ink-faint px-2 py-1 text-left">{children}</th>
+  ),
+  td: ({ children }) => (
+    <td className="border border-ink-faint px-2 py-1">{children}</td>
+  ),
+};
+
+export function MarkdownPreview({ markdown }: { markdown: string }) {
+  if (!markdown.trim()) {
+    return <p className="text-sm text-ink-soft">Sem conteúdo.</p>;
+  }
+  return (
+    <div
+      className="flex flex-col gap-3"
+      aria-label="Pré-visualização do protocolo"
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {markdown}
+      </ReactMarkdown>
+    </div>
+  );
 }
 ```
 
 - [ ] **Step 4: Rodar e confirmar que passa**
 
-Run: `npm run test -- tests/unit/question/criteria-items.test.ts --run`
-Expected: PASS (2 testes).
-
-- [ ] **Step 5: Reescrever `deriveCriteria`**
-
-Em `app/reviews/[reviewId]/question/actions.ts`, adicione o import (junto aos demais
-imports do topo):
-
-```ts
-import { criteriaItemsFromOutput } from "@/lib/question/criteria";
-```
-
-Substitua **toda** a função `deriveCriteria` (atualmente ~linhas 58-133) por:
-
-```ts
-export async function deriveCriteria(reviewId: string) {
-  const { supabase } = await requireMember(reviewId);
-  const { data: q } = await supabase
-    .from("question")
-    .select("id, framework, question_text, fields")
-    .eq("review_id", reviewId)
-    .maybeSingle();
-  if (!q) return { ok: false, error: "Formule a pergunta primeiro." };
-
-  // Pré-checagem de fase: evita gastar a chamada de LLM se o protocolo já travou.
-  // A RPC reforça isto de forma autoritativa (defesa em profundidade).
-  const { data: protocol } = await supabase
-    .from("protocol")
-    .select("state")
-    .eq("review_id", reviewId)
-    .maybeSingle();
-  if (protocol?.state === "locked") {
-    return {
-      ok: false,
-      error:
-        "Protocolo travado: mudanças de elegibilidade entram como emenda do protocolo.",
-    };
-  }
-
-  let provider;
-  try {
-    provider = await getLLMProvider(reviewId);
-  } catch (e) {
-    if (e instanceof MissingByokError)
-      return {
-        ok: false,
-        error: "Cadastre a chave de IA (BYOK) para usar a derivação.",
-      };
-    throw e;
-  }
-
-  const s = await provider.deriveEligibility({
-    framework: q.framework,
-    questionText: q.question_text,
-    fields: (q.fields ?? {}) as Record<string, unknown>,
-  });
-
-  const { data: count, error } = await supabase.rpc(
-    "regenerate_eligibility_criteria",
-    {
-      p_review_id: reviewId,
-      p_output: s.output,
-      p_provenance: s.provenance,
-      p_not_found: s.not_found,
-      p_items: criteriaItemsFromOutput(s.output),
-    },
-  );
-  if (error) {
-    if (error.message.includes("locked"))
-      return {
-        ok: false,
-        error:
-          "Protocolo travado: mudanças de elegibilidade entram como emenda do protocolo.",
-      };
-    return { ok: false, error: "Falha ao gravar critérios." };
-  }
-
-  revalidatePath(`/reviews/${reviewId}/question`);
-  return { ok: true as const, notFound: s.not_found, count: count ?? 0 };
-}
-```
-
-Observações: a inserção de `ai_suggestion`, a inserção dos critérios e o `writeAudit`
-manual saíram daqui — agora vivem dentro da RPC (atômico). O import de `writeAudit`
-**permanece** (ainda usado por `saveQuestion` e `ratifyCriterion`).
-
-- [ ] **Step 6: Verificar tipos**
-
-Run: `npx tsc --noEmit`
-Expected: 0 erros. *(Confirma que `s.output` casa com o parâmetro do helper e que a RPC
-é chamada com os tipos certos.)*
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/lib/question/criteria.ts tests/unit/question/criteria-items.test.ts "app/reviews/[reviewId]/question/actions.ts"
-git commit -m "feat(11): deriveCriteria pré-checa trava e chama a RPC de regeração
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
-```
-
----
-
-## Task 3: `CriteriaPanel` — "Regerar sugestões" + confirmação + guarda de trava (TDD)
-
-**Files:**
-- Modify: `src/components/question/CriteriaPanel.tsx`
-- Test: `tests/unit/question/criteria-panel.test.tsx` (adiciona testes; os da Fatia 10 ficam)
-
-- [ ] **Step 1: Escrever os testes novos (falham)**
-
-Adicione ao final de `tests/unit/question/criteria-panel.test.tsx` (o `vi.mock` de actions e
-o import de `CriteriaPanel`/`render`/`screen`/`vi` já existem no topo do arquivo, da Fatia 10):
-
-```tsx
-import { fireEvent } from "@testing-library/react";
-
-const aiCriterion = {
-  id: "c1",
-  kind: "inclusion" as const,
-  text: "Adultos",
-  origin: "ai" as const,
-  ratification_state: "pending" as const,
-  ai_suggestion_id: "s1",
-};
-
-describe("CriteriaPanel — Fatia 11: regerar / confirmação / trava", () => {
-  it("com critérios de IA presentes, o botão vira 'Regerar sugestões'", () => {
-    render(<CriteriaPanel reviewId="r1" criteria={[aiCriterion]} canDerive />);
-    expect(
-      screen.getByRole("button", { name: "Regerar sugestões" }),
-    ).toBeInTheDocument();
-  });
-
-  it("regerar pede confirmação; ao cancelar, não chama deriveCriteria", async () => {
-    const { deriveCriteria } = await import(
-      "../../../app/reviews/[reviewId]/question/actions"
-    );
-    (deriveCriteria as ReturnType<typeof vi.fn>).mockClear();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-
-    render(<CriteriaPanel reviewId="r1" criteria={[aiCriterion]} canDerive />);
-    fireEvent.click(screen.getByRole("button", { name: "Regerar sugestões" }));
-
-    expect(confirmSpy).toHaveBeenCalledTimes(1);
-    expect(deriveCriteria).not.toHaveBeenCalled();
-    confirmSpy.mockRestore();
-  });
-
-  it("travado: botão desabilitado e nota apontando emenda", () => {
-    render(
-      <CriteriaPanel reviewId="r1" criteria={[aiCriterion]} canDerive locked />,
-    );
-    expect(
-      screen.getByRole("button", { name: "Regerar sugestões" }),
-    ).toBeDisabled();
-    expect(screen.getByText(/emenda do protocolo/i)).toBeInTheDocument();
-  });
-});
-```
-
-- [ ] **Step 2: Rodar e confirmar que falham**
-
-Run: `npm run test -- tests/unit/question/criteria-panel.test.tsx --run`
-Expected: FALHA — hoje o botão é sempre "Derivar por IA", sem confirmação, sem `locked`.
-
-- [ ] **Step 3: Atualizar `CriteriaPanel`**
-
-Em `src/components/question/CriteriaPanel.tsx`:
-
-(a) Acrescente `locked` à assinatura de props (opcional, default `false` — assim os testes
-da Fatia 10 que não passam `locked` continuam válidos):
-
-```tsx
-export function CriteriaPanel({
-  reviewId,
-  criteria,
-  canDerive,
-  locked = false,
-}: {
-  reviewId: string;
-  criteria: CriterionRow[];
-  canDerive: boolean;
-  locked?: boolean;
-}) {
-```
-
-(b) Logo após os `useState`, derive se já há sugestões de IA:
-
-```tsx
-  const hasAi = criteria.some((c) => c.origin === "ai");
-```
-
-(c) Substitua o `<AsyncActionButton ... idleLabel="Derivar por IA" .../>` (da Fatia 10) por:
-
-```tsx
-        <AsyncActionButton
-          idleLabel={hasAi ? "Regerar sugestões" : "Derivar por IA"}
-          pendingLabel={hasAi ? "Regerando…" : "Derivando…"}
-          disabled={!canDerive || locked}
-          title={
-            locked
-              ? "Protocolo travado — mudanças de elegibilidade entram como emenda do protocolo"
-              : canDerive
-                ? ""
-                : "Salve a pergunta e cadastre a chave de IA"
-          }
-          className="btn-primary disabled:opacity-50"
-          onRun={async () => {
-            if (
-              hasAi &&
-              !window.confirm(
-                "Regerar substitui as sugestões ainda não ratificadas; seus critérios aceitos/editados permanecem. Continuar?",
-              )
-            )
-              return;
-            const r = await deriveCriteria(reviewId);
-            setNotFound(!!r.ok && !!r.notFound);
-            setMsg(
-              r.ok ? "Sugestões geradas." : "error" in r ? r.error : "Erro",
-            );
-          }}
-        />
-```
-
-(d) Imediatamente **após** o `</div>` que fecha o header (`<div className="flex items-center gap-3">`),
-adicione a nota de trava:
-
-```tsx
-      {locked && (
-        <p className="text-xs text-ink-soft">
-          Protocolo travado: mudanças de elegibilidade entram como{" "}
-          <a href={`/reviews/${reviewId}/protocol`} className="underline">
-            emenda do protocolo
-          </a>
-          .
-        </p>
-      )}
-```
-
-Não altere a lista de critérios, `SuggestionChip`/`SuggestionActions`, nem `NotFound`.
-
-- [ ] **Step 4: Rodar e confirmar que passa (incl. testes da Fatia 10)**
-
-Run: `npm run test -- tests/unit/question/criteria-panel.test.tsx --run; echo "EXIT=$?"`
-Expected: todos PASS (2 da Fatia 10 + 3 novos), EXIT=0.
+Run: `npm test -- tests/unit/protocol/markdown-preview.test.tsx`
+Expected: PASS (3 testes verdes).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/components/question/CriteriaPanel.tsx tests/unit/question/criteria-panel.test.tsx
-git commit -m "feat(11): CriteriaPanel — Regerar com confirmação e guarda de trava
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git add src/components/protocol/MarkdownPreview.tsx tests/unit/protocol/markdown-preview.test.tsx
+git commit -m "feat(12): MarkdownPreview — render temático de markdown (sem rehype-raw)"
 ```
 
 ---
 
-## Task 4: Página da Pergunta lê o estado do protocolo
+## Task 3: Toggle Editar/Visualizar no `ProtocolEditor` (TDD)
 
 **Files:**
-- Modify: `app/reviews/[reviewId]/question/page.tsx`
+- Modify: `tests/unit/protocol/protocol-editor.test.tsx`
+- Modify: `src/components/protocol/ProtocolEditor.tsx`
 
-- [ ] **Step 1: Passar `locked` ao `CriteriaPanel`**
+- [ ] **Step 1: Acrescentar o bloco de testes do toggle (que falha)**
 
-Em `app/reviews/[reviewId]/question/page.tsx`:
-
-(a) Adicione o import:
-
+Adicionar ao fim de `tests/unit/protocol/protocol-editor.test.tsx` (o mock das actions
+no topo do arquivo permanece e cobre este bloco):
 ```tsx
-import { getProtocol } from "@/lib/protocol/queries";
+describe("ProtocolEditor — toggle Editar/Visualizar", () => {
+  it("alterna para Visualizar: renderiza o markdown e esconde o textarea", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProtocolEditor
+        reviewId="r1"
+        initialMarkdown={"# Olá"}
+        locked={false}
+        canDraft
+      />,
+    );
+    expect(
+      screen.getByLabelText("Conteúdo do protocolo (Markdown)"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Visualizar" }));
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Olá" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Conteúdo do protocolo (Markdown)"),
+    ).toBeNull();
+  });
+
+  it("protocolo travado abre em Visualizar por padrão", () => {
+    render(
+      <ProtocolEditor
+        reviewId="r1"
+        initialMarkdown={"# Travado"}
+        locked
+        canDraft={false}
+      />,
+    );
+    expect(screen.getByRole("tab", { name: "Visualizar" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Travado" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByLabelText("Conteúdo do protocolo (Markdown)"),
+    ).toBeNull();
+  });
+
+  it("preview reflete a edição não salva do textarea (buffer vivo)", async () => {
+    const user = userEvent.setup();
+    render(
+      <ProtocolEditor
+        reviewId="r1"
+        initialMarkdown={""}
+        locked={false}
+        canDraft
+      />,
+    );
+    await user.type(
+      screen.getByLabelText("Conteúdo do protocolo (Markdown)"),
+      "# Rascunho vivo",
+    );
+    await user.click(screen.getByRole("tab", { name: "Visualizar" }));
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Rascunho vivo" }),
+    ).toBeInTheDocument();
+  });
+});
 ```
 
-(b) Inclua `getProtocol` no `Promise.all` e capture `protocol`:
+- [ ] **Step 2: Rodar e confirmar que falha**
 
+Run: `npm test -- tests/unit/protocol/protocol-editor.test.tsx`
+Expected: FAIL — não existe `tab` "Visualizar" (os 3 novos testes falham; os 2 antigos
+continuam passando).
+
+- [ ] **Step 3: Implementar o toggle no `ProtocolEditor`**
+
+Substituir o conteúdo de `src/components/protocol/ProtocolEditor.tsx` por:
 ```tsx
-  const [question, criteria, byok, protocol] = await Promise.all([
-    getQuestion(reviewId),
-    listCriteria(reviewId),
-    getByokStatus(reviewId),
-    getProtocol(reviewId),
-  ]);
+"use client";
+
+import { useState } from "react";
+import {
+  draftProtocol,
+  saveProtocolDraft,
+  lockProtocol,
+} from "../../../app/reviews/[reviewId]/protocol/actions";
+import { AsyncActionButton } from "@/components/ai/AsyncActionButton";
+import { MarkdownPreview } from "@/components/protocol/MarkdownPreview";
+
+type ViewMode = "edit" | "preview";
+
+export function ProtocolEditor({
+  reviewId,
+  initialMarkdown,
+  locked,
+  canDraft,
+}: {
+  reviewId: string;
+  initialMarkdown: string;
+  locked: boolean;
+  canDraft: boolean;
+}) {
+  const [md, setMd] = useState(initialMarkdown);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [mode, setMode] = useState<ViewMode>(locked ? "preview" : "edit");
+
+  return (
+    <section className="flex flex-col gap-2">
+      <div className="flex gap-2">
+        <AsyncActionButton
+          idleLabel="Rascunhar por IA"
+          pendingLabel="Rascunhando…"
+          disabled={locked || !canDraft}
+          title={canDraft ? "" : "Cadastre a chave de IA"}
+          className="btn-primary disabled:opacity-50"
+          onRun={async () => {
+            const r = await draftProtocol(reviewId);
+            setMsg(r.ok ? "Rascunho gerado pela IA." : (r.error ?? "Erro"));
+          }}
+        />
+        <button
+          type="button"
+          disabled={locked}
+          onClick={async () => {
+            const r = await saveProtocolDraft(reviewId, md);
+            setMsg(r.ok ? "Rascunho salvo." : (r.error ?? "Erro"));
+          }}
+          className="btn-primary disabled:opacity-50"
+        >
+          Salvar rascunho
+        </button>
+        <button
+          type="button"
+          disabled={locked}
+          onClick={async () => {
+            if (
+              !window.confirm(
+                "Travar o protocolo? Mudanças passarão a ser emendas.",
+              )
+            )
+              return;
+            const r = await lockProtocol(reviewId);
+            setMsg(r.ok ? "Protocolo travado." : (r.error ?? "Erro"));
+          }}
+          className="btn-primary disabled:opacity-50"
+        >
+          Travar protocolo
+        </button>
+      </div>
+
+      <div
+        role="tablist"
+        aria-label="Modo de exibição do protocolo"
+        className="flex gap-1"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "edit"}
+          onClick={() => setMode("edit")}
+          className={`rounded px-3 py-1 text-sm ${
+            mode === "edit" ? "bg-ink text-paper" : "hover:bg-paper-2"
+          }`}
+        >
+          Editar
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "preview"}
+          onClick={() => setMode("preview")}
+          className={`rounded px-3 py-1 text-sm ${
+            mode === "preview" ? "bg-ink text-paper" : "hover:bg-paper-2"
+          }`}
+        >
+          Visualizar
+        </button>
+      </div>
+
+      {mode === "edit" ? (
+        <textarea
+          value={md}
+          onChange={(e) => setMd(e.target.value)}
+          readOnly={locked}
+          rows={16}
+          aria-label="Conteúdo do protocolo (Markdown)"
+          className="control font-mono text-sm read-only:bg-paper-2"
+        />
+      ) : (
+        <MarkdownPreview markdown={md} />
+      )}
+
+      {locked && (
+        <p className="text-xs text-ink-soft">
+          Protocolo travado: o conteúdo é imutável; registre mudanças como
+          emendas abaixo.
+        </p>
+      )}
+      {msg && <p className="text-xs text-ink-soft">{msg}</p>}
+    </section>
+  );
+}
 ```
 
-(c) Passe `locked` ao `CriteriaPanel`:
+- [ ] **Step 4: Rodar e confirmar que passa (arquivo do editor inteiro)**
 
-```tsx
-      <CriteriaPanel
-        reviewId={reviewId}
-        criteria={criteria}
-        canDerive={!!question && byok.present}
-        locked={protocol?.state === "locked"}
-      />
-```
+Run: `npm test -- tests/unit/protocol/protocol-editor.test.tsx`
+Expected: PASS — 5 testes (2 antigos de "Rascunhar por IA" + 3 novos do toggle).
 
-- [ ] **Step 2: Verificar tipos**
-
-Run: `npx tsc --noEmit`
-Expected: 0 erros. *(`getProtocol` retorna objeto com `.state: 'draft'|'locked'`.)*
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add "app/reviews/[reviewId]/question/page.tsx"
-git commit -m "feat(11): página da Pergunta lê a trava do protocolo e bloqueia regeração
-
-Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+git add src/components/protocol/ProtocolEditor.tsx tests/unit/protocol/protocol-editor.test.tsx
+git commit -m "feat(12): ProtocolEditor — toggle Editar/Visualizar (default contextual)"
 ```
 
 ---
 
-## Task 5: Verificação final da fatia (gate de CHECKPOINT 3)
+## Task 4: Gate de verificação da fatia
 
-**Files:** nenhum (verificação).
+**Files:** nenhum novo (apenas verificação; corrigir inline se algo falhar).
 
-- [ ] **Step 1: Suite unit completa verde**
+- [ ] **Step 1: Suíte unitária inteira verde**
 
-Run: `npm run test -- tests/unit --run; echo "EXIT=$?"`
-Expected: PASS — incluindo `criteria-items` (2) e os novos de `criteria-panel` (3),
-**sem regressão** (os da Fatia 10 inclusos). EXIT=0.
+Run: `npm test`
+Expected: PASS — todos os arquivos (os 2 novos testes da fatia + a suíte herdada
+inalterada). Se algum teste herdado quebrar, é regressão desta fatia → corrigir antes
+de seguir.
 
-- [ ] **Step 2: Integração da Fatia 11 (requer Supabase local)**
-
-Run: `npx supabase migration up && npm run test -- tests/integration/criteria-rederivation.test.ts --run; echo "EXIT=$?"`
-Expected: 5 PASS, EXIT=0. *(Se o Supabase local não estiver disponível no ambiente,
-**registrar honestamente** que a integração não pôde rodar aqui e que unit/lint/tsc estão
-verdes — não alegar verde sem ter rodado.)*
-
-- [ ] **Step 3: Lint limpo**
+- [ ] **Step 2: Lint limpo**
 
 Run: `npm run lint`
-Expected: PASS (0 erros).
+Expected: sem erros (`next lint`). Avisos pré-existentes inalterados.
 
-- [ ] **Step 4: Type-check limpo**
+- [ ] **Step 3: Type-check limpo**
 
-Run: `npx tsc --noEmit`
-Expected: PASS (0 erros).
+Run: `npm run typecheck`
+Expected: `tsc --noEmit` sem erros.
 
-> **PARAR — CHECKPOINT 3.** Apresentar ao desenvolvedor: branch
-> `build/001-marco1-nucleo-fluxo/11-criteria-rederivation-guard`, o diff, e o resultado de
-> `tests/unit` + integração (ou a nota de indisponibilidade) + `npm run lint` +
-> `npx tsc --noEmit`. **Aguardar o merge manual.** Não iniciar outra fatia.
+- [ ] **Step 4: Commit de fechamento (se houve ajustes) + parar no CHECKPOINT 3**
+
+Se os steps 1–3 exigiram correções, commitar:
+```bash
+git add -A
+git commit -m "chore(12): ajustes do gate de verificação (lint/tsc/test)"
+```
+Em seguida **PARAR** (CHECKPOINT 3): apresentar ao desenvolvedor o branch
+`build/001-marco1-nucleo-fluxo/12-protocol-markdown-preview`, o diff, e a saída de
+`npm test` + `npm run lint` + `npm run typecheck`. **Não** mergear, **não** iniciar
+outra fatia.
 
 ---
 
-## Self-Review
+## Self-review do plano (verificado)
 
-**1. Cobertura do escopo (slicing §"Fatia 11"):**
-- **A-11.1** sinal de fase = `protocol.state='locked'` → RPC (Task 1) + pré-checa (Task 2) + UI (Task 3) + página (Task 4).
-- **A-11.2** supersede de `origin='ai' AND pending`, preserva humanos/ratificados → RPC Task 1 `delete`; teste "não dobra" + "preserva ratificados".
-- **A-11.3** dedupe por `normalize_reason_label` contra sobreviventes → RPC Task 1 `not in`; teste "não re-propõe o que já foi decidido".
-- **A-11.4** guarda autoritativa server-side (RPC) + disable UI → Task 1 (raise) + Task 2 (pré-checa) + Task 3 (`disabled`).
-- **A-11.5** pós-trava = bloquear + nota apontando emenda → Task 3 (nota + link para `/protocol`); sem nova UI de emenda.
-- Camada 2 (affordance "Regerar" + confirmação) → Task 3.
-
-**2. Varredura de placeholders:** nenhum "TBD/TODO"; todo passo de código mostra o código
-completo; comandos com saída esperada.
-
-**3. Consistência de tipos/nomes:** `regenerate_eligibility_criteria(p_review_id, p_output,
-p_provenance, p_not_found, p_items)` idêntico entre a migration (Task 1), o teste (Task 1) e
-a chamada em `deriveCriteria` (Task 2). `criteriaItemsFromOutput` retorna `{kind,text}[]`
-consumido como `p_items`. `CriterionItem.kind` ∈ {inclusion,exclusion,search_term} = enum
-`criterion_kind`. Prop `locked?: boolean` consistente entre `CriteriaPanel` (Task 3) e a
-página (Task 4). Rótulos "Regerar sugestões"/"Regerando…" consistentes entre componente e
-testes.
+- **Cobertura do spec (slicing §Fatia 12):** A-12.1 → Task 1+2 (deps + componente sem
+  rehype-raw); A-12.2 → Task 3 (`mode = locked ? "preview" : "edit"` + teste do travado);
+  A-12.3 → Task 3 (teste "buffer vivo"); A-12.4 → Task 2 (teste do placeholder). "Entra"
+  (MarkdownPreview + toggle `role=tab`) → Tasks 2 e 3. Testes-chave do slicing → todos
+  mapeados a um teste concreto.
+- **Sem placeholders:** todo passo de código mostra o código completo; todo passo de
+  comando mostra o comando e o resultado esperado.
+- **Consistência de tipos/nomes:** `MarkdownPreview({ markdown })` definido na Task 2 é
+  consumido com `markdown={md}` na Task 3; `ViewMode = "edit" | "preview"` usado
+  uniformemente; `aria-label="Conteúdo do protocolo (Markdown)"` idêntico entre o
+  componente e os testes; rótulos dos tabs ("Editar"/"Visualizar") idênticos entre
+  implementação e testes.
