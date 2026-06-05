@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { mapQueueRow } from "@/lib/screening/queries";
+import {
+  mapQueueRow,
+  mergeUsageCounts,
+  mapReasonUsageRow,
+} from "@/lib/screening/queries";
 
 describe("mapQueueRow", () => {
   it("mapeia linha da RPC para o shape de UI, com IA quando presente", () => {
@@ -43,5 +47,34 @@ describe("mapQueueRow", () => {
     });
     expect(row.ai).toBeNull();
     expect(row.decisionId).toBeNull();
+  });
+});
+
+describe("mergeUsageCounts (8.1)", () => {
+  it("atribui a contagem a cada motivo por id; 0 quando ausente", () => {
+    const reasons = [
+      { id: "a", label: "A", origin: "seed" as const, sourceCriterionId: null },
+      {
+        id: "b",
+        label: "B",
+        origin: "manual" as const,
+        sourceCriterionId: null,
+      },
+    ];
+    const counts = [{ reasonId: "a", n: 3 }];
+    const merged = mergeUsageCounts(reasons, counts);
+    expect(merged.find((r) => r.id === "a")!.usageCount).toBe(3);
+    expect(merged.find((r) => r.id === "b")!.usageCount).toBe(0);
+  });
+});
+
+describe("mapReasonUsageRow (8.1)", () => {
+  it("mapeia snake_case → camelCase; título nulo vira placeholder", () => {
+    expect(
+      mapReasonUsageRow({ record_id: "r1", title: "T", decision_id: "d1" }),
+    ).toEqual({ recordId: "r1", title: "T", decisionId: "d1" });
+    expect(
+      mapReasonUsageRow({ record_id: "r2", title: null, decision_id: null }),
+    ).toEqual({ recordId: "r2", title: "(sem título)", decisionId: null });
   });
 });

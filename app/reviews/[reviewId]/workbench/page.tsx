@@ -10,6 +10,7 @@ import {
   fetchFuzzyCandidates,
   fetchScreeningQueue,
   fetchExclusionReasons,
+  fetchReasonUsage,
   addExclusionReason,
   removeExclusionReason,
   decideScreening,
@@ -65,6 +66,7 @@ export default async function WorkbenchPage({
             onRemoveReason={removeExclusionReason.bind(null, reviewId)}
             onDecide={decideScreening.bind(null, reviewId)}
             onReverse={reverseScreening.bind(null, reviewId)}
+            onReasonUsage={fetchReasonUsage.bind(null, reviewId)}
           />
         ) : (
           <p className="text-sm text-ink-soft">

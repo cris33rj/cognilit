@@ -621,3 +621,115 @@ describe("RLS — não-membro não pode chamar os novos RPCs", () => {
     expect(e2.error).not.toBeNull();
   });
 });
+
+describe("set_exclusion_reason_active — bloqueia remoção de motivo EM USO (8.1)", () => {
+  // NOTE: Testes deste bloco são intencionalmente dependentes de ordem.
+  // O 3º teste reverte a decisão e desativa o motivo; não adicione testes
+  // após ele esperando o motivo ainda ativo.
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let reasonId: string;
+  let recordId: string;
+  let decisionId: string;
+
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`xr_use_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "Em uso",
+    });
+    reviewId = review.id;
+    const { data: id } = await owner.rpc("add_exclusion_reason", {
+      p_review_id: reviewId,
+      p_label: "Motivo em uso",
+    });
+    reasonId = id as string;
+    recordId = await seedActiveRecord(reviewId, "Estudo que usa o motivo");
+    await owner.rpc("decide_screening", {
+      p_review_id: reviewId,
+      p_record_id: recordId,
+      p_stage: "title_abstract",
+      p_decision: "include",
+    });
+    const { data: did } = await owner.rpc("decide_screening", {
+      p_review_id: reviewId,
+      p_record_id: recordId,
+      p_stage: "full_text",
+      p_decision: "exclude",
+      p_exclusion_reason_id: reasonId,
+    });
+    decisionId = did as string;
+  });
+
+  it("remover (desativar) um motivo em uso dispara erro e mantém o motivo ativo", async () => {
+    const { error } = await owner.rpc("set_exclusion_reason_active", {
+      p_reason_id: reasonId,
+      p_active: false,
+    });
+    expect(error).not.toBeNull();
+    const svc = serviceClient();
+    const { data: row } = await svc
+      .from("exclusion_reason")
+      .select("is_active")
+      .eq("id", reasonId)
+      .single();
+    expect(row!.is_active).toBe(true);
+  });
+
+  it("list_reason_usage retorna o artigo + título + decision_id da decisão viva", async () => {
+    const { data, error } = await owner.rpc("list_reason_usage", {
+      p_reason_id: reasonId,
+    });
+    expect(error).toBeNull();
+    expect(data!.length).toBe(1);
+    expect(data![0].record_id).toBe(recordId);
+    expect(data![0].title).toBe("Estudo que usa o motivo");
+    expect(data![0].decision_id).toBe(decisionId);
+  });
+
+  it("após reverter a exclusão, o motivo deixa de estar em uso e a remoção passa", async () => {
+    await owner.rpc("reverse_screening", { p_decision_id: decisionId });
+    const { data: usage } = await owner.rpc("list_reason_usage", {
+      p_reason_id: reasonId,
+    });
+    expect(usage!.length).toBe(0);
+    const { error } = await owner.rpc("set_exclusion_reason_active", {
+      p_reason_id: reasonId,
+      p_active: false,
+    });
+    expect(error).toBeNull();
+    const svc = serviceClient();
+    const { data: row } = await svc
+      .from("exclusion_reason")
+      .select("is_active, dismissed")
+      .eq("id", reasonId)
+      .single();
+    expect(row!.is_active).toBe(false);
+    expect(row!.dismissed).toBe(true);
+  });
+});
+
+describe("list_reason_usage — RLS: não-membro não lista o uso (8.1)", () => {
+  it("não-membro chamando list_reason_usage dispara erro", async () => {
+    const s = Date.now();
+    const owner = (
+      await signUpUser(`xr_lru_o_${s}@example.com`, "senha-teste-123")
+    ).client;
+    const intruder = (
+      await signUpUser(`xr_lru_i_${s}@example.com`, "senha-teste-123")
+    ).client;
+    const { data: review } = await owner.rpc("create_review", {
+      p_title: "RLS usage",
+    });
+    const { data: id } = await owner.rpc("add_exclusion_reason", {
+      p_review_id: review.id,
+      p_label: "Motivo X",
+    });
+    expect(id).not.toBeNull();
+    const { error } = await intruder.rpc("list_reason_usage", {
+      p_reason_id: id,
+    });
+    expect(error).not.toBeNull();
+  });
+});
