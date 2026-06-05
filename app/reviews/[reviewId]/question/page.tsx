@@ -1,5 +1,6 @@
 import { getQuestion, listCriteria } from "@/lib/question/queries";
 import { getByokStatus } from "@/lib/byok/queries";
+import { getProtocol } from "@/lib/protocol/queries";
 import { QuestionForm } from "@/components/question/QuestionForm";
 import { CriteriaPanel } from "@/components/question/CriteriaPanel";
 import { ByokKeyForm } from "@/components/ai/ByokKeyForm";
@@ -12,10 +13,11 @@ export default async function QuestionPage({
   params: Promise<{ reviewId: string }>;
 }) {
   const { reviewId } = await params;
-  const [question, criteria, byok] = await Promise.all([
+  const [question, criteria, byok, protocol] = await Promise.all([
     getQuestion(reviewId),
     listCriteria(reviewId),
     getByokStatus(reviewId),
+    getProtocol(reviewId),
   ]);
 
   return (
@@ -30,6 +32,7 @@ export default async function QuestionPage({
         reviewId={reviewId}
         criteria={criteria}
         canDerive={!!question && byok.present}
+        locked={protocol?.state === "locked"}
       />
     </div>
   );

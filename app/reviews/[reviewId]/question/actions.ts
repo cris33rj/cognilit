@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getLLMProvider, MissingByokError } from "@/lib/ai/llm";
 import { questionSchema } from "@/lib/question/schema";
 import { writeAudit } from "@/lib/audit";
+import { criteriaItemsFromOutput } from "@/lib/question/criteria";
 
 async function requireMember(reviewId: string) {
   const supabase = await createClient();
@@ -56,13 +57,28 @@ export async function saveQuestion(reviewId: string, formData: FormData) {
 }
 
 export async function deriveCriteria(reviewId: string) {
-  const { supabase, userId } = await requireMember(reviewId);
+  const { supabase } = await requireMember(reviewId);
   const { data: q } = await supabase
     .from("question")
     .select("id, framework, question_text, fields")
     .eq("review_id", reviewId)
     .maybeSingle();
   if (!q) return { ok: false, error: "Formule a pergunta primeiro." };
+
+  // Pré-checagem de fase: evita gastar a chamada de LLM se o protocolo já travou.
+  // A RPC reforça isto de forma autoritativa (defesa em profundidade).
+  const { data: protocol } = await supabase
+    .from("protocol")
+    .select("state")
+    .eq("review_id", reviewId)
+    .maybeSingle();
+  if (protocol?.state === "locked") {
+    return {
+      ok: false,
+      error:
+        "Protocolo travado: mudanças de elegibilidade entram como emenda do protocolo.",
+    };
+  }
 
   let provider;
   try {
@@ -82,54 +98,28 @@ export async function deriveCriteria(reviewId: string) {
     fields: (q.fields ?? {}) as Record<string, unknown>,
   });
 
-  const { data: sug, error: sugErr } = await supabase
-    .from("ai_suggestion")
-    .insert({
-      review_id: reviewId,
-      target_kind: "eligibility",
-      target_id: q.id,
-      output: s.output,
-      provenance: s.provenance,
-      state: "pending",
-      not_found: s.not_found,
-    })
-    .select("id")
-    .single();
-  if (sugErr || !sug)
-    return { ok: false, error: "Falha ao registrar sugestão." };
-
-  const rows = [
-    ...s.output.inclusion.map((t) => ({ kind: "inclusion" as const, text: t })),
-    ...s.output.exclusion.map((t) => ({ kind: "exclusion" as const, text: t })),
-    ...s.output.searchTerms.map((t) => ({
-      kind: "search_term" as const,
-      text: t,
-    })),
-  ].map((r) => ({
-    review_id: reviewId,
-    question_id: q.id,
-    kind: r.kind,
-    text: r.text,
-    origin: "ai" as const,
-    ratification_state: "pending" as const,
-    ai_suggestion_id: sug.id,
-  }));
-  if (rows.length > 0) {
-    const { error } = await supabase.from("eligibility_criterion").insert(rows);
-    if (error) return { ok: false, error: "Falha ao gravar critérios." };
+  const { data: count, error } = await supabase.rpc(
+    "regenerate_eligibility_criteria",
+    {
+      p_review_id: reviewId,
+      p_output: s.output,
+      p_provenance: s.provenance,
+      p_not_found: s.not_found,
+      p_items: criteriaItemsFromOutput(s.output),
+    },
+  );
+  if (error) {
+    if (error.message.includes("locked"))
+      return {
+        ok: false,
+        error:
+          "Protocolo travado: mudanças de elegibilidade entram como emenda do protocolo.",
+      };
+    return { ok: false, error: "Falha ao gravar critérios." };
   }
 
-  await writeAudit(supabase, {
-    reviewId,
-    actorId: userId,
-    action: "derive_criteria",
-    entity: "ai_suggestion",
-    entityId: sug.id,
-    before: null,
-    after: { count: rows.length },
-  });
   revalidatePath(`/reviews/${reviewId}/question`);
-  return { ok: true as const, notFound: s.not_found, count: rows.length };
+  return { ok: true as const, notFound: s.not_found, count: count ?? 0 };
 }
 
 export async function ratifyCriterion(
