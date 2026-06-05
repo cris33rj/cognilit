@@ -7,6 +7,8 @@ export interface PrismaCounters {
   includedTs: number;
   excludedTs: number;
   maybeTs: number;
+  /** Cumulativo dos que passaram no T/R ("assessed for eligibility" — PRISMA). */
+  passedTs: number;
   includedFt: number;
   excludedFt: number;
 }
@@ -25,7 +27,7 @@ export async function getPrismaCounters(
   const { data, error } = await supabase
     .from("prisma_counter")
     .select(
-      "identified, duplicates, screened, included_ts, excluded_ts, maybe_ts, included_ft, excluded_ft",
+      "identified, duplicates, screened, included_ts, excluded_ts, maybe_ts, included_ft, excluded_ft, passed_ts",
     )
     .eq("review_id", reviewId)
     .maybeSingle();
@@ -37,6 +39,7 @@ export async function getPrismaCounters(
     includedTs: data?.included_ts ?? 0,
     excludedTs: data?.excluded_ts ?? 0,
     maybeTs: data?.maybe_ts ?? 0,
+    passedTs: data?.passed_ts ?? 0,
     includedFt: data?.included_ft ?? 0,
     excludedFt: data?.excluded_ft ?? 0,
   };

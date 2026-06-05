@@ -32,6 +32,8 @@ export interface PhaseInput {
   duplicates: number;
   screenedTs: number;
   includedTs: number;
+  /** Cumulativo dos que passaram no T/R (PRISMA "assessed for eligibility"). */
+  passedTs: number;
   includedFt: number;
   excludedFt: number;
 }
@@ -81,8 +83,11 @@ const PIPELINE: PhaseDef[] = [
     key: "screening_ft",
     label: "Triagem TC",
     href: (r) => `/reviews/${r}/workbench?mode=full_text`,
+    // Concluída quando todos que passaram no T/R (passedTs, cumulativo) têm
+    // decisão de TC. Usar includedTs (inventário) aqui falha: ele zera quando
+    // todos avançam, então a fase nunca fecharia.
     completed: (i) =>
-      i.includedTs > 0 && i.includedFt + i.excludedFt >= i.includedTs,
+      i.passedTs > 0 && i.includedFt + i.excludedFt >= i.passedTs,
   },
 ];
 
@@ -150,6 +155,7 @@ export async function loadPhaseStates(reviewId: string): Promise<Phase[]> {
     duplicates: counters.duplicates,
     screenedTs: counters.screened,
     includedTs: counters.includedTs,
+    passedTs: counters.passedTs,
     includedFt: counters.includedFt,
     excludedFt: counters.excludedFt,
   });

@@ -291,6 +291,40 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   corretos. Unit (componente) — selo "em uso (N)" + "Remover" desabilitado; popover lista
   artigos; "Desfazer" chama `onReverse`. PRISMA intacto.
 
+### Fatia 9 — Correção da semântica PRISMA (fluxo cumulativo) (2026-06-05)
+- **Branch:** `build/001-marco1-nucleo-fluxo/9-prisma-flow-semantics`
+- **Natureza:** fatia de **correção pós-Marco funcional**. **Não** adiciona FR
+  nem altera decisão assinada. Corrige a implementação da Fatia 6: a barra PRISMA
+  e o trilho de fases misturavam semântica de **inventário** (`corpus_state`, um
+  estado por registro) com a semântica de **fluxo cumulativo** que o PRISMA exige.
+  Isso significa que **SC-004 não estava de fato cumprido** em semântica de fluxo.
+- **Motivação:** observado pelo desenvolvedor — com todos os artigos avançados ao
+  Texto Completo, `Incluídos (T/R)` mostrava **0** (deveria mostrar o total que
+  passou no T/R, p.ex. 15) porque `included_ts` só conta os que passaram e *ainda
+  aguardam* TC; e `Excluídos (T/R)` não era exibido apesar de já calculado.
+- **Entra:**
+  - **Coluna derivada `passed_ts`** na view `prisma_counter` (nova migration
+    `0010`, `create or replace view` — não toca `prisma_exclusion_breakdown`):
+    `passed_ts = count(corpus_state in ('included_ts','included_ft','excluded_ft'))`.
+    `maybe_ts` (dúvida) **não** entra — não passou no T/R (bloqueia avanço, Q1).
+    Fonte única preservada (SC-004); `security_invoker` e grants mantidos.
+  - **`PrismaCounters`/`getPrismaCounters`** (`src/lib/prisma/queries.ts`): campo
+    `passedTs` lido de `passed_ts`.
+  - **`PrismaBar`**: `Incluídos (T/R)` passa a usar `passedTs` (cumulativo) e nova
+    entrada `Excluídos (T/R)` (`excludedTs`), reordenadas no fluxo PRISMA.
+  - **Trilho (`phases.ts`)**: o predicado de conclusão de "Triagem TC" passa de
+    `includedTs` (inventário, nunca verdadeiro na conclusão) para `passedTs`
+    cumulativo — mesma raiz, segundo consumidor.
+  - **`src/types/database.ts`**: `passed_ts` no Row de `prisma_counter`.
+- **Não entra:** semântica de `screened`; relabel de `Incluídos (T/R)` (Ajuste D);
+  alteração de `prisma_exclusion_breakdown` ou da view `0007`.
+- **Depende de:** Fatia 6 (mergeada — view `prisma_counter`, `PrismaBar`, `phases`).
+- **Testes-chave:** integração (banco direto) — `prisma_counter.passed_ts` bate
+  número-a-número (= `included_ts + included_ft + excluded_ft`); unit — `PrismaBar`
+  exibe `Incluídos (T/R)`=`passedTs` e `Excluídos (T/R)`=`excludedTs`; `phases`
+  marca "Triagem TC" como `done` com `passedTs>0` e todos decididos
+  (`includedTs===0`). `lint` + `tsc` limpos.
+
 ---
 
 ## Gate de cobertura (verificação — PROTOCOLS §Sessão B)
@@ -322,3 +356,4 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 6 — Shell, trilho & PRISMA vivo + export de auditoria (CHECKPOINT 3 — mergeada)
 - [x] Fatia 7 — Design System + Polish Visual (CHECKPOINT 3 — mergeada — merge `bc962a8`)
 - [x] Fatia 8 — Motivos de exclusão derivados dos critérios (CHECKPOINT 3 — mergeada — merge `8a55408`)
+- [ ] Fatia 9 — Correção da semântica PRISMA (fluxo cumulativo) (em execução)

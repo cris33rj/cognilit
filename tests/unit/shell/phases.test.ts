@@ -8,6 +8,7 @@ const base: PhaseInput = {
   duplicates: 0,
   screenedTs: 0,
   includedTs: 0,
+  passedTs: 0,
   includedFt: 0,
   excludedFt: 0,
 };
@@ -52,6 +53,46 @@ describe("computePhaseStates — trilho de fases (US7)", () => {
     );
     expect(s.import).toBe("done");
     expect(s.screening_ts).toBe("current");
+  });
+
+  it("Triagem TC fica 'done' quando todos que passaram no T/R têm decisão (includedTs===0)", () => {
+    // Cenário do bug: 15 passaram no T/R e TODOS avançaram (13 incluídos + 2
+    // excluídos no TC) ⇒ includedts (inventário) cai a 0. A conclusão deve usar
+    // passedTs (cumulativo), senão a fase nunca fecha.
+    const s = by(
+      computePhaseStates("rev1", {
+        ...base,
+        hasQuestion: true,
+        protocolStatus: "locked",
+        identified: 20,
+        duplicates: 2,
+        screenedTs: 18,
+        passedTs: 15,
+        includedTs: 0,
+        includedFt: 13,
+        excludedFt: 2,
+      }),
+    );
+    expect(s.screening_ts).toBe("done");
+    expect(s.screening_ft).toBe("done");
+  });
+
+  it("Triagem TC fica 'current' enquanto há registros que passaram sem decisão de TC", () => {
+    const s = by(
+      computePhaseStates("rev1", {
+        ...base,
+        hasQuestion: true,
+        protocolStatus: "locked",
+        identified: 20,
+        duplicates: 2,
+        screenedTs: 18,
+        passedTs: 15,
+        includedTs: 5,
+        includedFt: 8,
+        excludedFt: 2,
+      }),
+    );
+    expect(s.screening_ft).toBe("current");
   });
 
   it("hrefs apontam para as rotas reais da Revisão", () => {

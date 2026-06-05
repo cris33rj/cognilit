@@ -1024,6 +1024,7 @@ export type Database = {
           included_ft: number | null
           included_ts: number | null
           maybe_ts: number | null
+          passed_ts: number | null
           review_id: string | null
           screened: number | null
         }

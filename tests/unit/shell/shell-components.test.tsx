@@ -39,6 +39,7 @@ const counters: PrismaCounters = {
   includedTs: 25,
   excludedTs: 15,
   maybeTs: 5,
+  passedTs: 50,
   includedFt: 10,
   excludedFt: 15,
 };
@@ -71,6 +72,20 @@ describe("PrismaBar", () => {
     );
     expect(screen.getByText("Incluídos (TC)").parentElement).toHaveTextContent(
       "10",
+    );
+  });
+
+  it("Incluídos (T/R) usa o cumulativo passedTs (não o inventário includedTs)", () => {
+    render(<PrismaBar counters={counters} />);
+    expect(screen.getByText("Incluídos (T/R)").parentElement).toHaveTextContent(
+      "50",
+    );
+  });
+
+  it("exibe Excluídos (T/R) a partir de excludedTs", () => {
+    render(<PrismaBar counters={counters} />);
+    expect(screen.getByText("Excluídos (T/R)").parentElement).toHaveTextContent(
+      "15",
     );
   });
 });
