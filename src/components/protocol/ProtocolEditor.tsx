@@ -7,6 +7,9 @@ import {
   lockProtocol,
 } from "../../../app/reviews/[reviewId]/protocol/actions";
 import { AsyncActionButton } from "@/components/ai/AsyncActionButton";
+import { MarkdownPreview } from "@/components/protocol/MarkdownPreview";
+
+type ViewMode = "edit" | "preview";
 
 export function ProtocolEditor({
   reviewId,
@@ -21,6 +24,7 @@ export function ProtocolEditor({
 }) {
   const [md, setMd] = useState(initialMarkdown);
   const [msg, setMsg] = useState<string | null>(null);
+  const [mode, setMode] = useState<ViewMode>(locked ? "preview" : "edit");
 
   return (
     <section className="flex flex-col gap-2">
@@ -66,14 +70,47 @@ export function ProtocolEditor({
         </button>
       </div>
 
-      <textarea
-        value={md}
-        onChange={(e) => setMd(e.target.value)}
-        readOnly={locked}
-        rows={16}
-        aria-label="Conteúdo do protocolo (Markdown)"
-        className="control font-mono text-sm read-only:bg-paper-2"
-      />
+      <div
+        role="tablist"
+        aria-label="Modo de exibição do protocolo"
+        className="flex gap-1"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "edit"}
+          onClick={() => setMode("edit")}
+          className={`rounded px-3 py-1 text-sm ${
+            mode === "edit" ? "bg-ink text-paper" : "hover:bg-paper-2"
+          }`}
+        >
+          Editar
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === "preview"}
+          onClick={() => setMode("preview")}
+          className={`rounded px-3 py-1 text-sm ${
+            mode === "preview" ? "bg-ink text-paper" : "hover:bg-paper-2"
+          }`}
+        >
+          Visualizar
+        </button>
+      </div>
+
+      {mode === "edit" ? (
+        <textarea
+          value={md}
+          onChange={(e) => setMd(e.target.value)}
+          readOnly={locked}
+          rows={16}
+          aria-label="Conteúdo do protocolo (Markdown)"
+          className="control font-mono text-sm read-only:bg-paper-2"
+        />
+      ) : (
+        <MarkdownPreview markdown={md} />
+      )}
       {locked && (
         <p className="text-xs text-ink-soft">
           Protocolo travado: o conteúdo é imutável; registre mudanças como
