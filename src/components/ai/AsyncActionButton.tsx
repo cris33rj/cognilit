@@ -30,6 +30,11 @@ export function AsyncActionButton({
         setPending(true);
         try {
           await onRun();
+        } catch {
+          // onRun é dono do tratamento de erro (os call-sites leem o resultado e
+          // exibem a própria mensagem). Engolimos aqui só para o handler de evento
+          // não emitir uma unhandled rejection; o estado de pendência é restaurado
+          // no finally de qualquer forma.
         } finally {
           setPending(false);
         }
