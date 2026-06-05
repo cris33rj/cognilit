@@ -1,13 +1,17 @@
 import type { PrismaCounters } from "@/lib/prisma/queries";
 
 export function PrismaBar({ counters }: { counters: PrismaCounters }) {
+  // Ordem do fluxo PRISMA; cada caixa fecha com a seguinte. "Incluídos (T/R)"
+  // é cumulativo (passedTs = "assessed for eligibility"), não o inventário
+  // includedTs — senão zera quando todos avançam ao Texto Completo.
   const items: [string, number][] = [
     ["Identificados", counters.identified],
     ["Duplicados", counters.duplicates],
     ["Triados", counters.screened],
-    ["Incluídos (T/R)", counters.includedTs],
-    ["Incluídos (TC)", counters.includedFt],
+    ["Excluídos (T/R)", counters.excludedTs],
+    ["Incluídos (T/R)", counters.passedTs],
     ["Excluídos (TC)", counters.excludedFt],
+    ["Incluídos (TC)", counters.includedFt],
   ];
   return (
     <div

@@ -64,6 +64,10 @@ describe("prisma_counter — fonte única (SC-004 / FR-036)", () => {
     expect(data!.maybe_ts).toBe(1);
     expect(data!.included_ft).toBe(1);
     expect(data!.excluded_ft).toBe(1);
+    // passed_ts = "Reports assessed for eligibility" (PRISMA): tudo que passou no
+    // T/R, cumulativo — included_ts(1) + included_ft(1) + excluded_ft(1) = 3.
+    // maybe_ts (dúvida) NÃO entra: não passou no T/R (bloqueia avanço, Q1).
+    expect(data!.passed_ts).toBe(3);
   });
 
   it("RLS: intruso não-membro enxerga zero/linha vazia na view", async () => {
