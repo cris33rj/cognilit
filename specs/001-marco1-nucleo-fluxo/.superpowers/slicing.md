@@ -350,6 +350,57 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   action não resolve; volta ao normal após resolver (sucesso **e** erro); rótulo/aria
   refletem o estado; `prefers-reduced-motion` desliga a animação.
 
+### Fatia 11 — Re-derivação segura de critérios (idempotência + guarda de fase) (2026-06-05)
+- **Branch:** `build/001-marco1-nucleo-fluxo/11-criteria-rederivation-guard`
+- **Natureza:** fatia de **correção/melhoria pós-Marco funcional**, acrescentada após
+  constatação do desenvolvedor. **Não** adiciona FR nem altera decisão assinada (D);
+  **reforça** FR-007/008 (ratificação), FR-010 (trava na 1ª decisão de triagem) e
+  FR-011 (emendas). Deriva de `docs/CONTEXT.md` e `spec.md`.
+- **Motivação:** `deriveCriteria` ([app/reviews/[reviewId]/question/actions.ts](../../../app/reviews/%5BreviewId%5D/question/actions.ts))
+  faz `insert` **cego** a cada clique (novo `ai_suggestion` + lote de
+  `eligibility_criterion` todos `pending`), sem idempotência nem guarda de fase. Dois
+  sintomas: **(1)** clicar N× duplica/dobra os critérios; **(2)** voltar de uma fase
+  adiante (ex.: T/R) e re-derivar despeja pendentes sobre uma base **já comprometida**
+  (protocolo travado, motivos de exclusão derivados na Fatia 8).
+- **Decisões de implementação resolvidas (A-11.x), aprovadas pelo desenvolvedor:**
+  - **A-11.1 — sinal de fase = `protocol.state='locked'`** (canônico: a trava ocorre na
+    1ª decisão de triagem, FR-010). A página passa a ler o estado do protocolo.
+  - **A-11.2 — supersede:** antes de inserir, apaga `eligibility_criterion` com
+    `origin='ai' AND ratification_state='pending'` do review; **preserva** humanos e
+    ratificados (`accepted`/`edited`/`rejected`). Mantém `ai_suggestion` (proveniência).
+  - **A-11.3 — dedupe inteligente:** o lote novo é deduplicado por **rótulo
+    normalizado** (reusa o normalizador da Fatia 8) contra os critérios sobreviventes —
+    a IA não re-propõe o que já foi aceito/editado nem re-empurra o que foi rejeitado.
+  - **A-11.4 — guarda autoritativa server-side** no caminho de derivação (recusa quando
+    travado), **+** desabilitação na UI. Forma fina (action vs. RPC transacional
+    reusando o padrão das Fatias 8/8.1) decidida no `writing-plans`.
+  - **A-11.5 — pós-trava = bloquear + nota** apontando a **emenda de protocolo**
+    (FR-011) na página do Protocolo (mecanismo já existe na Fatia 2). **Sem** nova UI de
+    emenda na Pergunta.
+- **Entra:**
+  - **Camada 1 (idempotência):** supersede de pendentes (A-11.2) + dedupe (A-11.3) no
+    `deriveCriteria`; auditoria registra a regeração (`derive_criteria`, before/after).
+  - **Camada 2 (affordance):** o botão vira **"Regerar sugestões"** quando já há
+    critérios de IA, com **confirmação** ("substitui as sugestões ainda não ratificadas;
+    seus aceitos/editados permanecem"). Sem critérios de IA → continua "Derivar por IA".
+  - **Camada 3 (guarda de fase):** `question/page.tsx` lê o estado do protocolo; travado
+    ⇒ botão desabilitado + nota apontando emenda (A-11.5); guarda server-side (A-11.4).
+- **Não entra:** UI de emenda inline na Pergunta (segue no Protocolo); dedup **semântico**
+  por embeddings (Marco 2+); motivo de exclusão no T/R (emenda a D7 → Sessão A);
+  alteração de `LLMProvider.deriveEligibility` ou do contrato factual.
+- **Depende de:** Fatia 2 (`question`/`eligibility_criterion`/`protocol`/ratificação/
+  `LLMProvider`), Fatia 5 (trava do protocolo na 1ª decisão, FR-010), Fatia 8
+  (normalizador de rótulo), Fatia 10. **Todas mergeadas.**
+- **Skills:** `react-best-practices`, `nextjs-best-practices`, `frontend-design`
+  (affordance "Regerar"/confirmação).
+- **Testes-chave:**
+  - **integração (banco direto):** regerar 2× converge para **um** conjunto pendente
+    (não dobra); ratificados preservados; dedupe não re-propõe rótulo já aceito/rejeitado;
+    derivação **recusa** quando `protocol.state='locked'`.
+  - **unit (componente):** botão exibe "Regerar sugestões" + confirmação quando há
+    critérios de IA; desabilitado com nota quando travado; primeira derivação inalterada.
+  - `lint` + `tsc --noEmit` limpos.
+
 ---
 
 ## Gate de cobertura (verificação — PROTOCOLS §Sessão B)
@@ -382,4 +433,5 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 7 — Design System + Polish Visual (CHECKPOINT 3 — mergeada — merge `bc962a8`)
 - [x] Fatia 8 — Motivos de exclusão derivados dos critérios (CHECKPOINT 3 — mergeada — merge `8a55408`)
 - [x] Fatia 9 — Correção da semântica PRISMA (fluxo cumulativo) (CHECKPOINT 3 — mergeada — merge `c9c4e64`)
-- [ ] Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (CHECKPOINT 3 — aguardando merge manual)
+- [x] Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (CHECKPOINT 3 — mergeada — merge `468f878`)
+- [ ] Fatia 11 — Re-derivação segura de critérios (idempotência + guarda de fase) (CHECKPOINT 1 — slicing escrito, aguardando aprovação)

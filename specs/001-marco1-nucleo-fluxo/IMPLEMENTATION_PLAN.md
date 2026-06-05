@@ -1,416 +1,605 @@
-# Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA
+# Fatia 11 — Re-derivação segura de critérios (idempotência + guarda de fase)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recomendado) ou superpowers:executing-plans para implementar tarefa a tarefa, cada
 > uma em TDD. Os passos usam checkbox (`- [ ]`) para rastreio.
 >
-> **Escopo:** Fatia 10 do Marco 1 (`001-marco1-nucleo-fluxo`), melhoria de UX
-> pós-Marco funcional. Branch isolado
-> `build/001-marco1-nucleo-fluxo/10-ai-pending-feedback`.
+> **Escopo:** Fatia 11 do Marco 1 (`001-marco1-nucleo-fluxo`), correção/melhoria
+> pós-Marco. Branch isolado `build/001-marco1-nucleo-fluxo/11-criteria-rederivation-guard`.
 > A sessão **NUNCA** faz `git merge`/`git push` para a feature ou `main`.
-> *(Planos de fatias anteriores permanecem no histórico git e em
-> `.superpowers/COMPLETION-fatia-N.md`.)*
+> *(Planos de fatias anteriores permanecem no histórico git e em `.superpowers/`.)*
 >
-> **Não** adiciona FR nem altera decisão assinada (D). Repagina comportamento
-> existente: cobre a lacuna de feedback nos dois botões que disparam chamada de LLM
-> **síncrona** (sem job/polling), onde hoje, após o clique, o usuário não sabe se a
-> solicitação está em curso. Detalhe da fatia em `.superpowers/slicing.md` (§"Fatia 10").
+> **Não** adiciona FR nem altera decisão assinada (D); **reforça** FR-007/008
+> (ratificação), FR-010 (trava na 1ª decisão de triagem) e FR-011 (emendas). Detalhe
+> da fatia em `.superpowers/slicing.md` (§"Fatia 11").
 
-**Goal:** Dar feedback de "processando" nos botões **"Derivar por IA"**
-([CriteriaPanel](../../src/components/question/CriteriaPanel.tsx)) e **"Rascunhar por
-IA"** ([ProtocolEditor](../../src/components/protocol/ProtocolEditor.tsx)): enquanto a
-server action de IA não resolve, o botão desabilita, exibe um spinner e troca o rótulo;
-ao resolver (sucesso **ou** erro) volta ao estado normal.
+**Goal:** Tornar "Derivar por IA" idempotente — re-clicar **regenera** (substitui só as
+sugestões de IA ainda pendentes, preserva ratificados, deduplica o lote novo) em vez de
+acumular; e **bloquear** a re-derivação depois que o protocolo trava, apontando o canal
+de emenda.
 
-**Architecture:** Um único componente cliente reusável `AsyncActionButton`
-(`src/components/ai/`) encapsula o estado de pendência com `useState` + `try/finally`
-(robusto em React 18, onde `useTransition` não rastreia `await` de server action).
-Os dois call-sites passam a usá-lo, preservando seus rótulos, `title`, `disabled` e o
-efeito colateral de `msg`. O spinner é uma classe CSS no design system
-(`app/globals.css`), com `@keyframes spin` e desligamento em
-`prefers-reduced-motion: reduce` (mesma estratégia das animações `pulse`/`rise` já
-existentes).
+**Architecture:** Toda a mutação autoritativa vive numa RPC nova
+`regenerate_eligibility_criteria` (migration `0011`, `security definer` + `is_review_member`,
+padrão das Fatias 8/8.1/9): recusa quando `protocol.state='locked'`, insere a `ai_suggestion`
+(proveniência preservada), apaga **só** `eligibility_criterion` com `origin='ai' AND
+ratification_state='pending'`, e insere o lote novo deduplicado por `normalize_reason_label`
+(reuso da Fatia 8) contra os critérios sobreviventes. O server action `deriveCriteria` passa
+a (a) pré-checar a trava — evitando gastar a chamada de LLM — e (b) chamar a RPC. A UI
+(`CriteriaPanel`) troca o rótulo para "Regerar sugestões" + confirmação quando já há
+critérios de IA, e desabilita com nota quando travado. A página da Pergunta passa a ler o
+estado do protocolo.
 
-**Tech Stack:** React 18 (client component, `useState`), Tailwind 4 / CSS custom
-(`app/globals.css`), Vitest + Testing Library (jsdom), `@testing-library/user-event`.
-
----
-
-## File Structure
-
-- **Create:** `src/components/ai/AsyncActionButton.tsx` — botão cliente genérico que
-  mostra estado de pendência durante uma ação assíncrona. Responsabilidade única:
-  feedback de "processando" (disabled + `aria-busy` + spinner + rótulo de pendência).
-- **Modify:** `app/globals.css` — adiciona `@keyframes spin`, a classe `.btn-spinner`
-  e a regra de `prefers-reduced-motion`.
-- **Modify:** `src/components/question/CriteriaPanel.tsx` — troca o `<button>` "Derivar
-  por IA" pelo `AsyncActionButton`.
-- **Modify:** `src/components/protocol/ProtocolEditor.tsx` — troca o `<button>`
-  "Rascunhar por IA" pelo `AsyncActionButton` (os botões "Salvar rascunho" e "Travar
-  protocolo" **não** mudam — fora de escopo, escritas rápidas).
-- **Create:** `tests/unit/ai/async-action-button.test.tsx` — unit do componente
-  (matriz pendência → sucesso/erro, `disabled`, `aria-busy`).
-- **Create:** `tests/unit/question/criteria-panel.test.tsx` — fiação do "Derivar por IA".
-- **Create:** `tests/unit/protocol/protocol-editor.test.tsx` — fiação do "Rascunhar por IA".
-
-> **Fora de escopo (não tocar):** job de pré-classificação de triagem
-> (`ai_screening_batch`, já observável por polling); botões Aceitar/Editar/Rejeitar
-> (`SuggestionActions`, escritas rápidas de banco); estimativa de custo prévia (FR-033);
-> novos FR; dark mode.
-
-> **Nota sobre `prefers-reduced-motion`:** o jsdom não aplica CSS, então a regra de
-> mídia **não** é unit-testável. Ela é verificada por leitura da regra adicionada em
-> `app/globals.css` (Task 2). Os testes unitários cobrem o estado de pendência e a
-> acessibilidade do botão.
+**Tech Stack:** PostgreSQL (Supabase, RPC `security definer` + RLS via `is_review_member`,
+reuso de `normalize_reason_label`/`lock_protocol`), Next.js 14 App Router (Server Actions,
+RSC), React 18 + `AsyncActionButton` (Fatia 10), TypeScript strict, Vitest (unit +
+integração DB-direta).
 
 ---
 
-## Task 1: Componente `AsyncActionButton` (TDD)
+## Estrutura de arquivos
+
+- **Criar** `supabase/migrations/0011_regenerate_eligibility_criteria.sql` — RPC
+  autoritativa (guarda de trava + supersede de pendentes + dedupe + auditoria).
+- **Criar** `tests/integration/criteria-rederivation.test.ts` — integração DB-direta da RPC.
+- **Criar** `src/lib/question/criteria.ts` — helper puro `criteriaItemsFromOutput` (achata
+  a saída do LLM em `{kind,text}[]`).
+- **Criar** `tests/unit/question/criteria-items.test.ts` — unit do helper puro.
+- **Modificar** `app/reviews/[reviewId]/question/actions.ts` — `deriveCriteria` pré-checa a
+  trava e chama a RPC (remove insert cego + writeAudit manual).
+- **Modificar** `src/components/question/CriteriaPanel.tsx` — "Regerar sugestões" +
+  confirmação + `locked` (desabilita + nota).
+- **Modificar** `tests/unit/question/criteria-panel.test.tsx` — testes novos (regerar/
+  confirm/locked); os da Fatia 10 permanecem verdes.
+- **Modificar** `app/reviews/[reviewId]/question/page.tsx` — lê `getProtocol` e passa
+  `locked` ao `CriteriaPanel`.
+
+> **Nota de teste (memória do projeto):** server actions usam `createClient()` server-side
+> (cookies) e **não** podem ser chamados de testes Vitest. Por isso a lógica autoritativa
+> fica na RPC (testada DB-direto) e no helper puro (unit). O `deriveCriteria` em si é cola
+> fina, verificada por `tsc` + revisão.
+
+> **Nota de ambiente:** os testes de **integração** exigem o Supabase local de pé com as
+> migrations aplicadas (`npx supabase migration up`). `unit`/`lint`/`tsc` não exigem.
+
+---
+
+## Task 1: Migration 0011 — RPC `regenerate_eligibility_criteria` (TDD, integração DB-direta)
 
 **Files:**
-- Create: `src/components/ai/AsyncActionButton.tsx`
-- Test: `tests/unit/ai/async-action-button.test.tsx`
+- Create: `supabase/migrations/0011_regenerate_eligibility_criteria.sql`
+- Test: `tests/integration/criteria-rederivation.test.ts`
 
-- [ ] **Step 1: Escrever o teste que falha**
+- [ ] **Step 1: Escrever o teste de integração que falha**
 
-```tsx
-// tests/unit/ai/async-action-button.test.tsx
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { AsyncActionButton } from "@/components/ai/AsyncActionButton";
+Crie `tests/integration/criteria-rederivation.test.ts`:
 
-// Cria uma promise controlável: o teste decide quando ela resolve/rejeita.
-function deferred<T>() {
-  let resolve!: (v: T) => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+```ts
+// @vitest-environment node
+import { describe, it, expect, beforeAll } from "vitest";
+import { signUpUser, serviceClient } from "./helpers/supabase";
 
-describe("AsyncActionButton", () => {
-  it("mostra pendência (disabled + aria-busy + rótulo) durante a ação e restaura no sucesso", async () => {
-    const user = userEvent.setup();
-    const d = deferred<void>();
-    const onRun = vi.fn(() => d.promise);
+const PROV = {
+  model: "test-model",
+  version: "1",
+  prompt_or_span: "teste",
+  timestamp: new Date().toISOString(),
+};
+const OUTPUT = { inclusion: [], exclusion: [], searchTerms: [] };
 
-    render(
-      <AsyncActionButton
-        idleLabel="Derivar por IA"
-        pendingLabel="Derivando…"
-        onRun={onRun}
-        className="btn-primary"
-      />,
-    );
+describe("regenerate_eligibility_criteria — supersede + dedupe + guarda de trava (Fatia 11)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
 
-    const btn = screen.getByRole("button");
-    expect(btn).toHaveTextContent("Derivar por IA");
-    expect(btn).not.toBeDisabled();
-    expect(btn).toHaveAttribute("aria-busy", "false");
-
-    await user.click(btn);
-
-    // Em curso: desabilitado, aria-busy, rótulo de pendência, spinner presente.
-    expect(onRun).toHaveBeenCalledTimes(1);
-    expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute("aria-busy", "true");
-    expect(btn).toHaveTextContent("Derivando…");
-    expect(btn.querySelector(".btn-spinner")).not.toBeNull();
-
-    await act(async () => {
-      d.resolve();
-      await d.promise;
+  beforeAll(async () => {
+    const s = Date.now();
+    owner = (await signUpUser(`rederiv_${s}@example.com`, "senha-teste-123")).client;
+    const { data: r } = await owner.rpc("create_review", { p_title: "Rederiv" });
+    reviewId = r.id;
+    await owner.from("question").insert({
+      review_id: reviewId,
+      framework: "spider",
+      question_text: "Pergunta de teste",
     });
-
-    // Restaurado.
-    await waitFor(() => expect(btn).not.toBeDisabled());
-    expect(btn).toHaveAttribute("aria-busy", "false");
-    expect(btn).toHaveTextContent("Derivar por IA");
-    expect(btn.querySelector(".btn-spinner")).toBeNull();
   });
 
-  it("restaura o estado mesmo quando a ação rejeita (finally)", async () => {
-    const user = userEvent.setup();
-    const d = deferred<void>();
-    const onRun = vi.fn(() => d.promise);
-
-    render(
-      <AsyncActionButton
-        idleLabel="Rascunhar por IA"
-        pendingLabel="Rascunhando…"
-        onRun={onRun}
-      />,
-    );
-
-    const btn = screen.getByRole("button");
-    await user.click(btn);
-    expect(btn).toBeDisabled();
-
-    await act(async () => {
-      d.reject(new Error("falha"));
-      await d.promise.catch(() => {});
+  function regenerate(items: { kind: string; text: string }[]) {
+    return owner.rpc("regenerate_eligibility_criteria", {
+      p_review_id: reviewId,
+      p_output: OUTPUT,
+      p_provenance: PROV,
+      p_not_found: false,
+      p_items: items,
     });
+  }
 
-    await waitFor(() => expect(btn).not.toBeDisabled());
-    expect(btn).toHaveTextContent("Rascunhar por IA");
-    expect(btn).toHaveAttribute("aria-busy", "false");
+  async function listCriteria() {
+    const svc = serviceClient();
+    const { data } = await svc
+      .from("eligibility_criterion")
+      .select("kind, text, origin, ratification_state")
+      .eq("review_id", reviewId)
+      .order("created_at", { ascending: true });
+    return data ?? [];
+  }
+
+  it("primeira derivação insere o lote (count = nº de itens)", async () => {
+    const { data, error } = await regenerate([
+      { kind: "inclusion", text: "Adultos" },
+      { kind: "exclusion", text: "Crianças" },
+      { kind: "search_term", text: "ansiedade" },
+    ]);
+    expect(error).toBeNull();
+    expect(data).toBe(3);
+    expect((await listCriteria()).length).toBe(3);
   });
 
-  it("respeita a prop disabled e não dispara onRun", async () => {
-    const user = userEvent.setup();
-    const onRun = vi.fn(() => Promise.resolve());
+  it("re-derivar substitui os pendentes — NÃO dobra (converge)", async () => {
+    const { data, error } = await regenerate([
+      { kind: "inclusion", text: "Adultos" },
+      { kind: "exclusion", text: "Crianças" },
+    ]);
+    expect(error).toBeNull();
+    expect(data).toBe(2);
+    expect((await listCriteria()).length).toBe(2);
+  });
 
-    render(
-      <AsyncActionButton
-        idleLabel="Derivar por IA"
-        pendingLabel="Derivando…"
-        onRun={onRun}
-        disabled
-      />,
-    );
+  it("preserva ratificados e não re-propõe o que já foi decidido (dedupe)", async () => {
+    const svc = serviceClient();
+    await svc
+      .from("eligibility_criterion")
+      .update({ ratification_state: "accepted" })
+      .eq("review_id", reviewId)
+      .eq("text", "Adultos");
 
-    const btn = screen.getByRole("button");
-    expect(btn).toBeDisabled();
-    await user.click(btn);
-    expect(onRun).not.toHaveBeenCalled();
+    const { data, error } = await regenerate([
+      { kind: "inclusion", text: "Adultos" }, // já aceito → dedupe
+      { kind: "inclusion", text: "Idosos" }, // novo → entra
+    ]);
+    expect(error).toBeNull();
+    expect(data).toBe(1);
+
+    const rows = await listCriteria();
+    expect(rows.map((r) => r.text).sort()).toEqual(["Adultos", "Idosos"]);
+    expect(rows.find((r) => r.text === "Adultos")!.ratification_state).toBe("accepted");
+  });
+
+  it("recusa quando o protocolo está travado (FR-010/011)", async () => {
+    const svc = serviceClient();
+    await svc.from("protocol").insert({ review_id: reviewId, state: "locked" });
+
+    const { error } = await regenerate([{ kind: "inclusion", text: "X" }]);
+    expect(error).not.toBeNull();
+    expect(error!.message).toMatch(/locked/);
+  });
+
+  it("RLS: não-membro não consegue regenerar", async () => {
+    const s = Date.now();
+    const intruder = (await signUpUser(`rederiv_i_${s}@example.com`, "senha-teste-123"))
+      .client;
+    const { error } = await intruder.rpc("regenerate_eligibility_criteria", {
+      p_review_id: reviewId,
+      p_output: OUTPUT,
+      p_provenance: PROV,
+      p_not_found: false,
+      p_items: [{ kind: "inclusion", text: "Y" }],
+    });
+    expect(error).not.toBeNull();
   });
 });
 ```
 
-- [ ] **Step 2: Rodar o teste e confirmar que falha**
+- [ ] **Step 2: Rodar e confirmar que falha**
 
-Run: `npm run test -- tests/unit/ai/async-action-button.test.tsx`
-Expected: FAIL — `Cannot find module '@/components/ai/AsyncActionButton'`.
+Run: `npx supabase migration up` (aplica migrations existentes) e então
+`npm run test -- tests/integration/criteria-rederivation.test.ts --run`
+Expected: FALHA — `regenerate_eligibility_criteria` ainda não existe (erro de função
+inexistente). *(Se o Supabase local não estiver de pé, suba-o antes: `npx supabase start`.)*
 
-- [ ] **Step 3: Implementação mínima**
+- [ ] **Step 3: Escrever a migration 0011**
 
-```tsx
-// src/components/ai/AsyncActionButton.tsx
-"use client";
+Crie `supabase/migrations/0011_regenerate_eligibility_criteria.sql`:
 
-import { useState } from "react";
+```sql
+-- 0011_regenerate_eligibility_criteria.sql
+-- Fatia 11 — re-derivação segura de critérios de elegibilidade.
+-- RPC autoritativa: recusa se o protocolo travou (a base de elegibilidade só muda
+-- por emenda — FR-010/011), registra a sugestão de IA (proveniência preservada),
+-- substitui SÓ os critérios de IA ainda pendentes (preserva humanos e ratificados),
+-- e insere o lote novo deduplicado por rótulo normalizado contra os sobreviventes.
 
-export function AsyncActionButton({
-  onRun,
-  idleLabel,
-  pendingLabel,
-  disabled = false,
-  title,
-  className,
-}: {
-  /** Ação assíncrona disparada pelo clique. O botão fica pendente até resolver/rejeitar. */
-  onRun: () => Promise<void>;
-  idleLabel: string;
-  pendingLabel: string;
-  disabled?: boolean;
-  title?: string;
-  className?: string;
-}) {
-  const [pending, setPending] = useState(false);
+create or replace function public.regenerate_eligibility_criteria(
+  p_review_id  uuid,
+  p_output     jsonb,
+  p_provenance jsonb,
+  p_not_found  boolean,
+  p_items      jsonb
+)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_question_id uuid;
+  v_state       protocol_state;
+  v_sug         uuid;
+  v_count       integer;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
 
-  return (
-    <button
-      type="button"
-      disabled={disabled || pending}
-      aria-busy={pending}
-      title={title}
-      onClick={async () => {
-        setPending(true);
-        try {
-          await onRun();
-        } finally {
-          setPending(false);
-        }
-      }}
-      className={className}
-    >
-      {pending && <span className="btn-spinner" aria-hidden="true" />}
-      {pending ? pendingLabel : idleLabel}
-    </button>
+  select id into v_question_id
+  from public.question
+  where review_id = p_review_id;
+  if v_question_id is null then
+    raise exception 'question not found';
+  end if;
+
+  -- Guarda de fase (FR-010): elegibilidade congela quando o protocolo trava.
+  select state into v_state
+  from public.protocol
+  where review_id = p_review_id;
+  if v_state = 'locked' then
+    raise exception 'protocol is locked; eligibility changes must be amendments';
+  end if;
+
+  -- Proveniência da nova sugestão (histórico preservado; não apaga ai_suggestion).
+  insert into public.ai_suggestion (
+    review_id, target_kind, target_id, output, provenance, state, not_found
+  ) values (
+    p_review_id, 'eligibility', v_question_id, p_output, p_provenance, 'pending', p_not_found
+  )
+  returning id into v_sug;
+
+  -- Supersede: remove SÓ as sugestões de IA ainda não ratificadas.
+  delete from public.eligibility_criterion
+  where review_id = p_review_id
+    and origin = 'ai'
+    and ratification_state = 'pending';
+
+  -- Insere o lote novo deduplicado por rótulo normalizado:
+  --   (a) dentro do próprio lote (distinct on);
+  --   (b) contra TODO critério sobrevivente (humano + ratificado) — a IA não
+  --       re-propõe o já aceito/editado nem re-empurra o rejeitado.
+  insert into public.eligibility_criterion (
+    review_id, question_id, kind, text, origin, ratification_state, ai_suggestion_id
+  )
+  select p_review_id, v_question_id, x.kind, x.text, 'ai', 'pending', v_sug
+  from (
+    select distinct on (public.normalize_reason_label(text)) kind, text
+    from jsonb_to_recordset(p_items) as r(kind criterion_kind, text text)
+    where btrim(text) <> ''
+    order by public.normalize_reason_label(text)
+  ) x
+  where public.normalize_reason_label(x.text) not in (
+    select public.normalize_reason_label(text)
+    from public.eligibility_criterion
+    where review_id = p_review_id
   );
-}
+  get diagnostics v_count = row_count;
+
+  insert into public.audit_entry (
+    review_id, actor_type, actor_id, action, entity, entity_id, before, after
+  ) values (
+    p_review_id, 'human', auth.uid(), 'derive_criteria', 'ai_suggestion', v_sug,
+    null, jsonb_build_object('count', v_count)
+  );
+
+  return v_count;
+end;
+$$;
+
+grant execute on function
+  public.regenerate_eligibility_criteria(uuid, jsonb, jsonb, boolean, jsonb)
+  to authenticated;
 ```
 
-- [ ] **Step 4: Rodar o teste e confirmar que passa**
+- [ ] **Step 4: Aplicar a migration e rodar o teste até passar**
 
-Run: `npm run test -- tests/unit/ai/async-action-button.test.tsx`
-Expected: PASS (3 testes).
+Run: `npx supabase migration up && npm run test -- tests/integration/criteria-rederivation.test.ts --run`
+Expected: PASS (5 testes). *(Se preferir recriar o schema do zero: `npx supabase db reset`.)*
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/components/ai/AsyncActionButton.tsx tests/unit/ai/async-action-button.test.tsx
-git commit -m "feat(10): AsyncActionButton com estado de pendência reusável"
+git add supabase/migrations/0011_regenerate_eligibility_criteria.sql tests/integration/criteria-rederivation.test.ts
+git commit -m "feat(11): RPC regenerate_eligibility_criteria (supersede + dedupe + guarda de trava)
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
 
 ---
 
-## Task 2: Spinner no design system (`app/globals.css`)
+## Task 2: Helper puro `criteriaItemsFromOutput` + reescrita de `deriveCriteria`
 
 **Files:**
-- Modify: `app/globals.css` (acrescentar `@keyframes spin` + `.btn-spinner`; estender o
-  bloco `@media (prefers-reduced-motion: reduce)` existente)
+- Create: `src/lib/question/criteria.ts`
+- Test: `tests/unit/question/criteria-items.test.ts`
+- Modify: `app/reviews/[reviewId]/question/actions.ts` (função `deriveCriteria`, ~linhas 58-133)
 
-- [ ] **Step 1: Adicionar `@keyframes spin` e a classe `.btn-spinner`**
+- [ ] **Step 1: Escrever o teste unit do helper (falha)**
 
-Acrescente, logo após o bloco `@keyframes rise { ... }` (atualmente terminando na
-linha ~214) e **antes** do `@media (prefers-reduced-motion: reduce)`:
+Crie `tests/unit/question/criteria-items.test.ts`:
 
-```css
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-.btn-spinner {
-  display: inline-block;
-  width: 0.8em;
-  height: 0.8em;
-  margin-right: 0.45em;
-  border: 2px solid currentColor;
-  border-top-color: transparent;
-  border-radius: 9999px;
-  vertical-align: -0.1em;
-  animation: spin 0.6s linear infinite;
-}
-```
+```ts
+import { describe, it, expect } from "vitest";
+import { criteriaItemsFromOutput } from "@/lib/question/criteria";
 
-- [ ] **Step 2: Desligar a animação em `prefers-reduced-motion`**
-
-Dentro do bloco `@media (prefers-reduced-motion: reduce) { ... }` já existente,
-acrescente a regra do spinner (mantém o glifo visível, só sem girar):
-
-```css
-  .btn-spinner {
-    animation: none;
-  }
-```
-
-O bloco final deve ficar assim:
-
-```css
-@media (prefers-reduced-motion: reduce) {
-  [data-rise] {
-    animation: none;
-    opacity: 1;
-    transform: none;
-  }
-  .rail-node-current {
-    animation: none;
-  }
-  .btn-spinner {
-    animation: none;
-  }
-}
-```
-
-- [ ] **Step 3: Verificar lint/format do CSS**
-
-Run: `npm run lint`
-Expected: PASS (sem novos avisos).
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add app/globals.css
-git commit -m "feat(10): classe .btn-spinner no design system (respeita reduced-motion)"
-```
-
----
-
-## Task 3: Fiar "Derivar por IA" no `CriteriaPanel` (TDD)
-
-**Files:**
-- Modify: `src/components/question/CriteriaPanel.tsx:37-51` (substitui o `<button>`)
-- Test: `tests/unit/question/criteria-panel.test.tsx`
-
-- [ ] **Step 1: Escrever o teste que falha**
-
-```tsx
-// tests/unit/question/criteria-panel.test.tsx
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-
-// Promise controlável para a action de IA.
-let resolveDerive!: (v: { ok: true; notFound: false }) => void;
-vi.mock("../../../app/reviews/[reviewId]/question/actions", () => ({
-  deriveCriteria: vi.fn(
-    () =>
-      new Promise((res) => {
-        resolveDerive = res;
-      }),
-  ),
-  ratifyCriterion: vi.fn().mockResolvedValue({ ok: true }),
-}));
-
-import { CriteriaPanel } from "@/components/question/CriteriaPanel";
-
-describe("CriteriaPanel — feedback do 'Derivar por IA'", () => {
-  it("mostra 'Derivando…' enquanto processa e a mensagem ao concluir", async () => {
-    const user = userEvent.setup();
-    render(<CriteriaPanel reviewId="r1" criteria={[]} canDerive />);
-
-    const btn = screen.getByRole("button", { name: "Derivar por IA" });
-    await user.click(btn);
-
-    expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute("aria-busy", "true");
-    expect(btn).toHaveTextContent("Derivando…");
-
-    await act(async () => {
-      resolveDerive({ ok: true, notFound: false });
+describe("criteriaItemsFromOutput", () => {
+  it("achata inclusion/exclusion/searchTerms preservando o kind", () => {
+    const items = criteriaItemsFromOutput({
+      inclusion: ["A", "B"],
+      exclusion: ["C"],
+      searchTerms: ["d", "e"],
     });
-
-    await waitFor(() =>
-      expect(screen.getByText("Sugestões geradas.")).toBeInTheDocument(),
-    );
-    expect(
-      screen.getByRole("button", { name: "Derivar por IA" }),
-    ).not.toBeDisabled();
+    expect(items).toEqual([
+      { kind: "inclusion", text: "A" },
+      { kind: "inclusion", text: "B" },
+      { kind: "exclusion", text: "C" },
+      { kind: "search_term", text: "d" },
+      { kind: "search_term", text: "e" },
+    ]);
   });
 
-  it("mantém o botão desabilitado quando canDerive é false", () => {
-    render(<CriteriaPanel reviewId="r1" criteria={[]} canDerive={false} />);
+  it("lida com listas vazias (not_found)", () => {
     expect(
-      screen.getByRole("button", { name: "Derivar por IA" }),
-    ).toBeDisabled();
+      criteriaItemsFromOutput({ inclusion: [], exclusion: [], searchTerms: [] }),
+    ).toEqual([]);
   });
 });
 ```
 
-- [ ] **Step 2: Rodar o teste e confirmar que falha**
+- [ ] **Step 2: Rodar e confirmar que falha**
 
-Run: `npm run test -- tests/unit/question/criteria-panel.test.tsx`
-Expected: FAIL — o botão atual não expõe `aria-busy`/"Derivando…" (sem estado de pendência).
+Run: `npm run test -- tests/unit/question/criteria-items.test.ts --run`
+Expected: FALHA — módulo `@/lib/question/criteria` inexistente.
 
-- [ ] **Step 3: Trocar o `<button>` pelo `AsyncActionButton`**
+- [ ] **Step 3: Criar o helper**
 
-Em `src/components/question/CriteriaPanel.tsx`, adicione o import e substitua o
-`<button>…Derivar por IA…</button>` (linhas 37-51) pelo componente. O bloco de
-import (após a linha 5) ganha:
+Crie `src/lib/question/criteria.ts`:
 
-```tsx
-import { AsyncActionButton } from "@/components/ai/AsyncActionButton";
+```ts
+export interface CriterionItem {
+  kind: "inclusion" | "exclusion" | "search_term";
+  text: string;
+}
+
+/**
+ * Achata a saída factual do LLM (`deriveEligibility`) em itens `{kind,text}` para a
+ * RPC `regenerate_eligibility_criteria`. Função pura — sem I/O, fácil de testar.
+ */
+export function criteriaItemsFromOutput(output: {
+  inclusion: string[];
+  exclusion: string[];
+  searchTerms: string[];
+}): CriterionItem[] {
+  return [
+    ...output.inclusion.map((text) => ({ kind: "inclusion" as const, text })),
+    ...output.exclusion.map((text) => ({ kind: "exclusion" as const, text })),
+    ...output.searchTerms.map((text) => ({ kind: "search_term" as const, text })),
+  ];
+}
 ```
 
-O cabeçalho da seção fica:
+- [ ] **Step 4: Rodar e confirmar que passa**
+
+Run: `npm run test -- tests/unit/question/criteria-items.test.ts --run`
+Expected: PASS (2 testes).
+
+- [ ] **Step 5: Reescrever `deriveCriteria`**
+
+Em `app/reviews/[reviewId]/question/actions.ts`, adicione o import (junto aos demais
+imports do topo):
+
+```ts
+import { criteriaItemsFromOutput } from "@/lib/question/criteria";
+```
+
+Substitua **toda** a função `deriveCriteria` (atualmente ~linhas 58-133) por:
+
+```ts
+export async function deriveCriteria(reviewId: string) {
+  const { supabase } = await requireMember(reviewId);
+  const { data: q } = await supabase
+    .from("question")
+    .select("id, framework, question_text, fields")
+    .eq("review_id", reviewId)
+    .maybeSingle();
+  if (!q) return { ok: false, error: "Formule a pergunta primeiro." };
+
+  // Pré-checagem de fase: evita gastar a chamada de LLM se o protocolo já travou.
+  // A RPC reforça isto de forma autoritativa (defesa em profundidade).
+  const { data: protocol } = await supabase
+    .from("protocol")
+    .select("state")
+    .eq("review_id", reviewId)
+    .maybeSingle();
+  if (protocol?.state === "locked") {
+    return {
+      ok: false,
+      error:
+        "Protocolo travado: mudanças de elegibilidade entram como emenda do protocolo.",
+    };
+  }
+
+  let provider;
+  try {
+    provider = await getLLMProvider(reviewId);
+  } catch (e) {
+    if (e instanceof MissingByokError)
+      return {
+        ok: false,
+        error: "Cadastre a chave de IA (BYOK) para usar a derivação.",
+      };
+    throw e;
+  }
+
+  const s = await provider.deriveEligibility({
+    framework: q.framework,
+    questionText: q.question_text,
+    fields: (q.fields ?? {}) as Record<string, unknown>,
+  });
+
+  const { data: count, error } = await supabase.rpc(
+    "regenerate_eligibility_criteria",
+    {
+      p_review_id: reviewId,
+      p_output: s.output,
+      p_provenance: s.provenance,
+      p_not_found: s.not_found,
+      p_items: criteriaItemsFromOutput(s.output),
+    },
+  );
+  if (error) {
+    if (error.message.includes("locked"))
+      return {
+        ok: false,
+        error:
+          "Protocolo travado: mudanças de elegibilidade entram como emenda do protocolo.",
+      };
+    return { ok: false, error: "Falha ao gravar critérios." };
+  }
+
+  revalidatePath(`/reviews/${reviewId}/question`);
+  return { ok: true as const, notFound: s.not_found, count: count ?? 0 };
+}
+```
+
+Observações: a inserção de `ai_suggestion`, a inserção dos critérios e o `writeAudit`
+manual saíram daqui — agora vivem dentro da RPC (atômico). O import de `writeAudit`
+**permanece** (ainda usado por `saveQuestion` e `ratifyCriterion`).
+
+- [ ] **Step 6: Verificar tipos**
+
+Run: `npx tsc --noEmit`
+Expected: 0 erros. *(Confirma que `s.output` casa com o parâmetro do helper e que a RPC
+é chamada com os tipos certos.)*
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/lib/question/criteria.ts tests/unit/question/criteria-items.test.ts "app/reviews/[reviewId]/question/actions.ts"
+git commit -m "feat(11): deriveCriteria pré-checa trava e chama a RPC de regeração
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+```
+
+---
+
+## Task 3: `CriteriaPanel` — "Regerar sugestões" + confirmação + guarda de trava (TDD)
+
+**Files:**
+- Modify: `src/components/question/CriteriaPanel.tsx`
+- Test: `tests/unit/question/criteria-panel.test.tsx` (adiciona testes; os da Fatia 10 ficam)
+
+- [ ] **Step 1: Escrever os testes novos (falham)**
+
+Adicione ao final de `tests/unit/question/criteria-panel.test.tsx` (o `vi.mock` de actions e
+o import de `CriteriaPanel`/`render`/`screen`/`vi` já existem no topo do arquivo, da Fatia 10):
 
 ```tsx
-      <div className="flex items-center gap-3">
-        <h2 className="text-lg font-medium text-ink">
-          Critérios e termos (sugeridos pela IA)
-        </h2>
+import { fireEvent } from "@testing-library/react";
+
+const aiCriterion = {
+  id: "c1",
+  kind: "inclusion" as const,
+  text: "Adultos",
+  origin: "ai" as const,
+  ratification_state: "pending" as const,
+  ai_suggestion_id: "s1",
+};
+
+describe("CriteriaPanel — Fatia 11: regerar / confirmação / trava", () => {
+  it("com critérios de IA presentes, o botão vira 'Regerar sugestões'", () => {
+    render(<CriteriaPanel reviewId="r1" criteria={[aiCriterion]} canDerive />);
+    expect(
+      screen.getByRole("button", { name: "Regerar sugestões" }),
+    ).toBeInTheDocument();
+  });
+
+  it("regerar pede confirmação; ao cancelar, não chama deriveCriteria", async () => {
+    const { deriveCriteria } = await import(
+      "../../../app/reviews/[reviewId]/question/actions"
+    );
+    (deriveCriteria as ReturnType<typeof vi.fn>).mockClear();
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    render(<CriteriaPanel reviewId="r1" criteria={[aiCriterion]} canDerive />);
+    fireEvent.click(screen.getByRole("button", { name: "Regerar sugestões" }));
+
+    expect(confirmSpy).toHaveBeenCalledTimes(1);
+    expect(deriveCriteria).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
+  });
+
+  it("travado: botão desabilitado e nota apontando emenda", () => {
+    render(
+      <CriteriaPanel reviewId="r1" criteria={[aiCriterion]} canDerive locked />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Regerar sugestões" }),
+    ).toBeDisabled();
+    expect(screen.getByText(/emenda do protocolo/i)).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e confirmar que falham**
+
+Run: `npm run test -- tests/unit/question/criteria-panel.test.tsx --run`
+Expected: FALHA — hoje o botão é sempre "Derivar por IA", sem confirmação, sem `locked`.
+
+- [ ] **Step 3: Atualizar `CriteriaPanel`**
+
+Em `src/components/question/CriteriaPanel.tsx`:
+
+(a) Acrescente `locked` à assinatura de props (opcional, default `false` — assim os testes
+da Fatia 10 que não passam `locked` continuam válidos):
+
+```tsx
+export function CriteriaPanel({
+  reviewId,
+  criteria,
+  canDerive,
+  locked = false,
+}: {
+  reviewId: string;
+  criteria: CriterionRow[];
+  canDerive: boolean;
+  locked?: boolean;
+}) {
+```
+
+(b) Logo após os `useState`, derive se já há sugestões de IA:
+
+```tsx
+  const hasAi = criteria.some((c) => c.origin === "ai");
+```
+
+(c) Substitua o `<AsyncActionButton ... idleLabel="Derivar por IA" .../>` (da Fatia 10) por:
+
+```tsx
         <AsyncActionButton
-          idleLabel="Derivar por IA"
-          pendingLabel="Derivando…"
-          disabled={!canDerive}
-          title={canDerive ? "" : "Salve a pergunta e cadastre a chave de IA"}
+          idleLabel={hasAi ? "Regerar sugestões" : "Derivar por IA"}
+          pendingLabel={hasAi ? "Regerando…" : "Derivando…"}
+          disabled={!canDerive || locked}
+          title={
+            locked
+              ? "Protocolo travado — mudanças de elegibilidade entram como emenda do protocolo"
+              : canDerive
+                ? ""
+                : "Salve a pergunta e cadastre a chave de IA"
+          }
           className="btn-primary disabled:opacity-50"
           onRun={async () => {
+            if (
+              hasAi &&
+              !window.confirm(
+                "Regerar substitui as sugestões ainda não ratificadas; seus critérios aceitos/editados permanecem. Continuar?",
+              )
+            )
+              return;
             const r = await deriveCriteria(reviewId);
             setNotFound(!!r.ok && !!r.notFound);
             setMsg(
@@ -418,140 +607,90 @@ O cabeçalho da seção fica:
             );
           }}
         />
-        {msg && <span className="text-xs text-ink-soft">{msg}</span>}
-      </div>
 ```
 
-- [ ] **Step 4: Rodar o teste e confirmar que passa**
+(d) Imediatamente **após** o `</div>` que fecha o header (`<div className="flex items-center gap-3">`),
+adicione a nota de trava:
 
-Run: `npm run test -- tests/unit/question/criteria-panel.test.tsx`
-Expected: PASS (2 testes).
+```tsx
+      {locked && (
+        <p className="text-xs text-ink-soft">
+          Protocolo travado: mudanças de elegibilidade entram como{" "}
+          <a href={`/reviews/${reviewId}/protocol`} className="underline">
+            emenda do protocolo
+          </a>
+          .
+        </p>
+      )}
+```
+
+Não altere a lista de critérios, `SuggestionChip`/`SuggestionActions`, nem `NotFound`.
+
+- [ ] **Step 4: Rodar e confirmar que passa (incl. testes da Fatia 10)**
+
+Run: `npm run test -- tests/unit/question/criteria-panel.test.tsx --run; echo "EXIT=$?"`
+Expected: todos PASS (2 da Fatia 10 + 3 novos), EXIT=0.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/components/question/CriteriaPanel.tsx tests/unit/question/criteria-panel.test.tsx
-git commit -m "feat(10): feedback de pendência no 'Derivar por IA' (CriteriaPanel)"
+git commit -m "feat(11): CriteriaPanel — Regerar com confirmação e guarda de trava
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
 
 ---
 
-## Task 4: Fiar "Rascunhar por IA" no `ProtocolEditor` (TDD)
+## Task 4: Página da Pergunta lê o estado do protocolo
 
 **Files:**
-- Modify: `src/components/protocol/ProtocolEditor.tsx:27-38` (substitui o `<button>`)
-- Test: `tests/unit/protocol/protocol-editor.test.tsx`
+- Modify: `app/reviews/[reviewId]/question/page.tsx`
 
-- [ ] **Step 1: Escrever o teste que falha**
+- [ ] **Step 1: Passar `locked` ao `CriteriaPanel`**
 
-```tsx
-// tests/unit/protocol/protocol-editor.test.tsx
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+Em `app/reviews/[reviewId]/question/page.tsx`:
 
-let resolveDraft!: (v: { ok: true }) => void;
-vi.mock("../../../app/reviews/[reviewId]/protocol/actions", () => ({
-  draftProtocol: vi.fn(
-    () =>
-      new Promise((res) => {
-        resolveDraft = res;
-      }),
-  ),
-  saveProtocolDraft: vi.fn().mockResolvedValue({ ok: true }),
-  lockProtocol: vi.fn().mockResolvedValue({ ok: true }),
-}));
-
-import { ProtocolEditor } from "@/components/protocol/ProtocolEditor";
-
-describe("ProtocolEditor — feedback do 'Rascunhar por IA'", () => {
-  it("mostra 'Rascunhando…' enquanto processa e a mensagem ao concluir", async () => {
-    const user = userEvent.setup();
-    render(
-      <ProtocolEditor
-        reviewId="r1"
-        initialMarkdown=""
-        locked={false}
-        canDraft
-      />,
-    );
-
-    const btn = screen.getByRole("button", { name: "Rascunhar por IA" });
-    await user.click(btn);
-
-    expect(btn).toBeDisabled();
-    expect(btn).toHaveAttribute("aria-busy", "true");
-    expect(btn).toHaveTextContent("Rascunhando…");
-
-    await act(async () => {
-      resolveDraft({ ok: true });
-    });
-
-    await waitFor(() =>
-      expect(screen.getByText("Rascunho gerado pela IA.")).toBeInTheDocument(),
-    );
-    expect(
-      screen.getByRole("button", { name: "Rascunhar por IA" }),
-    ).not.toBeDisabled();
-  });
-
-  it("mantém 'Rascunhar por IA' desabilitado quando canDraft é false", () => {
-    render(
-      <ProtocolEditor
-        reviewId="r1"
-        initialMarkdown=""
-        locked={false}
-        canDraft={false}
-      />,
-    );
-    expect(
-      screen.getByRole("button", { name: "Rascunhar por IA" }),
-    ).toBeDisabled();
-  });
-});
-```
-
-- [ ] **Step 2: Rodar o teste e confirmar que falha**
-
-Run: `npm run test -- tests/unit/protocol/protocol-editor.test.tsx`
-Expected: FAIL — o botão atual não expõe `aria-busy`/"Rascunhando…".
-
-- [ ] **Step 3: Trocar o `<button>` "Rascunhar por IA" pelo `AsyncActionButton`**
-
-Em `src/components/protocol/ProtocolEditor.tsx`, adicione o import (após a linha 8):
+(a) Adicione o import:
 
 ```tsx
-import { AsyncActionButton } from "@/components/ai/AsyncActionButton";
+import { getProtocol } from "@/lib/protocol/queries";
 ```
 
-Substitua **somente** o primeiro `<button>` (linhas 27-38, "Rascunhar por IA") por:
+(b) Inclua `getProtocol` no `Promise.all` e capture `protocol`:
 
 ```tsx
-        <AsyncActionButton
-          idleLabel="Rascunhar por IA"
-          pendingLabel="Rascunhando…"
-          disabled={locked || !canDraft}
-          title={canDraft ? "" : "Cadastre a chave de IA"}
-          className="btn-primary disabled:opacity-50"
-          onRun={async () => {
-            const r = await draftProtocol(reviewId);
-            setMsg(r.ok ? "Rascunho gerado pela IA." : (r.error ?? "Erro"));
-          }}
-        />
+  const [question, criteria, byok, protocol] = await Promise.all([
+    getQuestion(reviewId),
+    listCriteria(reviewId),
+    getByokStatus(reviewId),
+    getProtocol(reviewId),
+  ]);
 ```
 
-Os botões "Salvar rascunho" e "Travar protocolo" **permanecem inalterados**.
+(c) Passe `locked` ao `CriteriaPanel`:
 
-- [ ] **Step 4: Rodar o teste e confirmar que passa**
+```tsx
+      <CriteriaPanel
+        reviewId={reviewId}
+        criteria={criteria}
+        canDerive={!!question && byok.present}
+        locked={protocol?.state === "locked"}
+      />
+```
 
-Run: `npm run test -- tests/unit/protocol/protocol-editor.test.tsx`
-Expected: PASS (2 testes).
+- [ ] **Step 2: Verificar tipos**
 
-- [ ] **Step 5: Commit**
+Run: `npx tsc --noEmit`
+Expected: 0 erros. *(`getProtocol` retorna objeto com `.state: 'draft'|'locked'`.)*
+
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/components/protocol/ProtocolEditor.tsx tests/unit/protocol/protocol-editor.test.tsx
-git commit -m "feat(10): feedback de pendência no 'Rascunhar por IA' (ProtocolEditor)"
+git add "app/reviews/[reviewId]/question/page.tsx"
+git commit -m "feat(11): página da Pergunta lê a trava do protocolo e bloqueia regeração
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ```
 
 ---
@@ -562,53 +701,51 @@ git commit -m "feat(10): feedback de pendência no 'Rascunhar por IA' (ProtocolE
 
 - [ ] **Step 1: Suite unit completa verde**
 
-Run: `npm run test -- tests/unit`
-Expected: PASS — incluindo os 7 novos testes (3 + 2 + 2) e **sem regressão** nas
-suites existentes (`question-form`, `suggestion-chip`, etc.).
+Run: `npm run test -- tests/unit --run; echo "EXIT=$?"`
+Expected: PASS — incluindo `criteria-items` (2) e os novos de `criteria-panel` (3),
+**sem regressão** (os da Fatia 10 inclusos). EXIT=0.
 
-- [ ] **Step 2: Lint limpo**
+- [ ] **Step 2: Integração da Fatia 11 (requer Supabase local)**
+
+Run: `npx supabase migration up && npm run test -- tests/integration/criteria-rederivation.test.ts --run; echo "EXIT=$?"`
+Expected: 5 PASS, EXIT=0. *(Se o Supabase local não estiver disponível no ambiente,
+**registrar honestamente** que a integração não pôde rodar aqui e que unit/lint/tsc estão
+verdes — não alegar verde sem ter rodado.)*
+
+- [ ] **Step 3: Lint limpo**
 
 Run: `npm run lint`
 Expected: PASS (0 erros).
 
-- [ ] **Step 3: Type-check limpo**
+- [ ] **Step 4: Type-check limpo**
 
 Run: `npx tsc --noEmit`
 Expected: PASS (0 erros).
 
-- [ ] **Step 4: Commit de fechamento (se houver ajuste pendente)**
-
-```bash
-git add -A
-git commit -m "chore(10): fatia 10 verde — lint + tsc + unit" --allow-empty
-```
-
 > **PARAR — CHECKPOINT 3.** Apresentar ao desenvolvedor: branch
-> `build/001-marco1-nucleo-fluxo/10-ai-pending-feedback`, o diff, e o resultado de
-> `npm run test -- tests/unit` + `npm run lint` + `npx tsc --noEmit`. **Aguardar o
-> merge manual.** Não iniciar nenhuma outra fatia.
+> `build/001-marco1-nucleo-fluxo/11-criteria-rederivation-guard`, o diff, e o resultado de
+> `tests/unit` + integração (ou a nota de indisponibilidade) + `npm run lint` +
+> `npx tsc --noEmit`. **Aguardar o merge manual.** Não iniciar outra fatia.
 
 ---
 
 ## Self-Review
 
-**1. Cobertura do escopo (slicing §"Fatia 10"):**
-- "estado de pendência nos dois botões síncronos de IA" → Tasks 3 e 4.
-- "desabilita, troca rótulo / spinner" → Task 1 (mecanismo) + Task 2 (spinner CSS).
-- "respeita `prefers-reduced-motion`" → Task 2 Step 2 (regra CSS; nota sobre não ser
-  unit-testável em jsdom).
-- "padrão reusável alinhado a `src/components/ai/`" → `AsyncActionButton` em
-  `src/components/ai/` (Task 1).
-- "testes: desabilita/exibe pendência; volta ao normal em sucesso **e** erro" → Task 1
-  (matriz sucesso/erro/disabled) + Tasks 3/4 (fiação).
-- "não entra: FR-033, job de triagem, Aceitar/Editar/Rejeitar, novos FR" → respeitado;
-  nenhum desses arquivos é tocado.
+**1. Cobertura do escopo (slicing §"Fatia 11"):**
+- **A-11.1** sinal de fase = `protocol.state='locked'` → RPC (Task 1) + pré-checa (Task 2) + UI (Task 3) + página (Task 4).
+- **A-11.2** supersede de `origin='ai' AND pending`, preserva humanos/ratificados → RPC Task 1 `delete`; teste "não dobra" + "preserva ratificados".
+- **A-11.3** dedupe por `normalize_reason_label` contra sobreviventes → RPC Task 1 `not in`; teste "não re-propõe o que já foi decidido".
+- **A-11.4** guarda autoritativa server-side (RPC) + disable UI → Task 1 (raise) + Task 2 (pré-checa) + Task 3 (`disabled`).
+- **A-11.5** pós-trava = bloquear + nota apontando emenda → Task 3 (nota + link para `/protocol`); sem nova UI de emenda.
+- Camada 2 (affordance "Regerar" + confirmação) → Task 3.
 
-**2. Varredura de placeholders:** nenhum "TBD/TODO"; todo passo de código mostra o
-código completo; comandos com saída esperada.
+**2. Varredura de placeholders:** nenhum "TBD/TODO"; todo passo de código mostra o código
+completo; comandos com saída esperada.
 
-**3. Consistência de tipos/nomes:** `AsyncActionButton` usa as props
-`onRun/idleLabel/pendingLabel/disabled/title/className` de forma idêntica em Task 1,
-3 e 4. A classe `.btn-spinner` (Task 2) bate com o `querySelector(".btn-spinner")`
-(Task 1) e com o `<span className="btn-spinner">` do componente. Rótulos de pendência
-("Derivando…", "Rascunhando…") consistentes entre componente e testes.
+**3. Consistência de tipos/nomes:** `regenerate_eligibility_criteria(p_review_id, p_output,
+p_provenance, p_not_found, p_items)` idêntico entre a migration (Task 1), o teste (Task 1) e
+a chamada em `deriveCriteria` (Task 2). `criteriaItemsFromOutput` retorna `{kind,text}[]`
+consumido como `p_items`. `CriterionItem.kind` ∈ {inclusion,exclusion,search_term} = enum
+`criterion_kind`. Prop `locked?: boolean` consistente entre `CriteriaPanel` (Task 3) e a
+página (Task 4). Rótulos "Regerar sugestões"/"Regerando…" consistentes entre componente e
+testes.
