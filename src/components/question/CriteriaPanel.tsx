@@ -9,6 +9,7 @@ import {
   deriveCriteria,
   ratifyCriterion,
 } from "../../../app/reviews/[reviewId]/question/actions";
+import { AsyncActionButton } from "@/components/ai/AsyncActionButton";
 
 const KIND_LABEL = {
   inclusion: "Inclusão",
@@ -34,21 +35,20 @@ export function CriteriaPanel({
         <h2 className="text-lg font-medium text-ink">
           Critérios e termos (sugeridos pela IA)
         </h2>
-        <button
-          type="button"
+        <AsyncActionButton
+          idleLabel="Derivar por IA"
+          pendingLabel="Derivando…"
           disabled={!canDerive}
           title={canDerive ? "" : "Salve a pergunta e cadastre a chave de IA"}
-          onClick={async () => {
+          className="btn-primary disabled:opacity-50"
+          onRun={async () => {
             const r = await deriveCriteria(reviewId);
             setNotFound(!!r.ok && !!r.notFound);
             setMsg(
               r.ok ? "Sugestões geradas." : "error" in r ? r.error : "Erro",
             );
           }}
-          className="btn-primary disabled:opacity-50"
-        >
-          Derivar por IA
-        </button>
+        />
         {msg && <span className="text-xs text-ink-soft">{msg}</span>}
       </div>
 
