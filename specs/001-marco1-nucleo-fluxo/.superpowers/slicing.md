@@ -382,4 +382,4 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 7 — Design System + Polish Visual (CHECKPOINT 3 — mergeada — merge `bc962a8`)
 - [x] Fatia 8 — Motivos de exclusão derivados dos critérios (CHECKPOINT 3 — mergeada — merge `8a55408`)
 - [x] Fatia 9 — Correção da semântica PRISMA (fluxo cumulativo) (CHECKPOINT 3 — mergeada — merge `c9c4e64`)
-- [ ] Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (em planejamento — `writing-plans`)
+- [ ] Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (CHECKPOINT 3 — aguardando merge manual)
