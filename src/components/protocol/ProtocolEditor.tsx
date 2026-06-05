@@ -6,6 +6,7 @@ import {
   saveProtocolDraft,
   lockProtocol,
 } from "../../../app/reviews/[reviewId]/protocol/actions";
+import { AsyncActionButton } from "@/components/ai/AsyncActionButton";
 
 export function ProtocolEditor({
   reviewId,
@@ -24,18 +25,17 @@ export function ProtocolEditor({
   return (
     <section className="flex flex-col gap-2">
       <div className="flex gap-2">
-        <button
-          type="button"
+        <AsyncActionButton
+          idleLabel="Rascunhar por IA"
+          pendingLabel="Rascunhando…"
           disabled={locked || !canDraft}
           title={canDraft ? "" : "Cadastre a chave de IA"}
-          onClick={async () => {
+          className="btn-primary disabled:opacity-50"
+          onRun={async () => {
             const r = await draftProtocol(reviewId);
             setMsg(r.ok ? "Rascunho gerado pela IA." : (r.error ?? "Erro"));
           }}
-          className="btn-primary disabled:opacity-50"
-        >
-          Rascunhar por IA
-        </button>
+        />
         <button
           type="button"
           disabled={locked}

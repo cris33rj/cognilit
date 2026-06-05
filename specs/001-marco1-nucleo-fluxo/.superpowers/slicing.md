@@ -325,6 +325,31 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
   marca "Triagem TC" como `done` com `passedTs>0` e todos decididos
   (`includedTs===0`). `lint` + `tsc` limpos.
 
+### Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (2026-06-05)
+- **Branch:** `build/001-marco1-nucleo-fluxo/10-ai-pending-feedback`
+- **Natureza:** fatia de **melhoria de UX pós-Marco funcional**, acrescentada após
+  constatação do desenvolvedor. **Não** adiciona FR nem altera decisão assinada (D);
+  repagina comportamento existente. Cobre a lacuna de feedback nos dois botões que
+  fazem chamada de LLM **síncrona** (sem job/polling), onde hoje, após o clique, o
+  usuário não sabe se a solicitação está em curso — só percebe quando a resposta é
+  gerada.
+- **Entra:**
+  - Estado de pendência (`useTransition`/`isPending`) em **"Derivar por IA"**
+    ([CriteriaPanel.tsx](../../../src/components/question/CriteriaPanel.tsx)) e
+    **"Rascunhar por IA"**
+    ([ProtocolEditor.tsx](../../../src/components/protocol/ProtocolEditor.tsx)):
+    durante a chamada o botão **desabilita**, troca o rótulo / mostra spinner, e
+    respeita `prefers-reduced-motion` (sem animação quando reduzido). Padrão de
+    feedback reusável, alinhado ao vocabulário visual de IA (`src/components/ai/`).
+- **Não entra:** estimativa de custo prévia (FR-033, já na Fatia 5); job de
+  pré-classificação de triagem (`ai_screening_batch`, já observável por polling);
+  botões Aceitar/Editar/Rejeitar (escritas rápidas de banco); novos FR; dark mode.
+- **Depende de:** Fatia 2 (os dois botões existem) e Fatia 7 (design system) mergeadas.
+- **Skills:** `frontend-design`, `react-best-practices`.
+- **Testes-chave:** unit — botão desabilita e exibe estado de pendência enquanto a
+  action não resolve; volta ao normal após resolver (sucesso **e** erro); rótulo/aria
+  refletem o estado; `prefers-reduced-motion` desliga a animação.
+
 ---
 
 ## Gate de cobertura (verificação — PROTOCOLS §Sessão B)
@@ -356,4 +381,5 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 6 — Shell, trilho & PRISMA vivo + export de auditoria (CHECKPOINT 3 — mergeada)
 - [x] Fatia 7 — Design System + Polish Visual (CHECKPOINT 3 — mergeada — merge `bc962a8`)
 - [x] Fatia 8 — Motivos de exclusão derivados dos critérios (CHECKPOINT 3 — mergeada — merge `8a55408`)
-- [ ] Fatia 9 — Correção da semântica PRISMA (fluxo cumulativo) (em execução)
+- [x] Fatia 9 — Correção da semântica PRISMA (fluxo cumulativo) (CHECKPOINT 3 — mergeada — merge `c9c4e64`)
+- [ ] Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (CHECKPOINT 3 — aguardando merge manual)
