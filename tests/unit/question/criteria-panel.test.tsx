@@ -73,7 +73,11 @@ describe("CriteriaPanel — Fatia 11: regerar / confirmação / trava", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
     render(<CriteriaPanel reviewId="r1" criteria={[aiCriterion]} canDerive />);
-    fireEvent.click(screen.getByRole("button", { name: "Regerar sugestões" }));
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Regerar sugestões" }),
+      );
+    });
 
     expect(confirmSpy).toHaveBeenCalledTimes(1);
     expect(deriveCriteria).not.toHaveBeenCalled();
