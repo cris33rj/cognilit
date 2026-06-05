@@ -21,13 +21,17 @@ export function CriteriaPanel({
   reviewId,
   criteria,
   canDerive,
+  locked = false,
 }: {
   reviewId: string;
   criteria: CriterionRow[];
   canDerive: boolean;
+  locked?: boolean;
 }) {
   const [msg, setMsg] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+
+  const hasAi = criteria.some((c) => c.origin === "ai");
 
   return (
     <section className="flex flex-col gap-3">
@@ -36,12 +40,25 @@ export function CriteriaPanel({
           Critérios e termos (sugeridos pela IA)
         </h2>
         <AsyncActionButton
-          idleLabel="Derivar por IA"
-          pendingLabel="Derivando…"
-          disabled={!canDerive}
-          title={canDerive ? "" : "Salve a pergunta e cadastre a chave de IA"}
+          idleLabel={hasAi ? "Regerar sugestões" : "Derivar por IA"}
+          pendingLabel={hasAi ? "Regerando…" : "Derivando…"}
+          disabled={!canDerive || locked}
+          title={
+            locked
+              ? "Protocolo travado — mudanças de elegibilidade entram como emenda do protocolo"
+              : canDerive
+                ? ""
+                : "Salve a pergunta e cadastre a chave de IA"
+          }
           className="btn-primary disabled:opacity-50"
           onRun={async () => {
+            if (
+              hasAi &&
+              !window.confirm(
+                "Regerar substitui as sugestões ainda não ratificadas; seus critérios aceitos/editados permanecem. Continuar?",
+              )
+            )
+              return;
             const r = await deriveCriteria(reviewId);
             setNotFound(!!r.ok && !!r.notFound);
             setMsg(
@@ -51,6 +68,15 @@ export function CriteriaPanel({
         />
         {msg && <span className="text-xs text-ink-soft">{msg}</span>}
       </div>
+      {locked && (
+        <p className="text-xs text-ink-soft">
+          Protocolo travado: mudanças de elegibilidade entram como{" "}
+          <a href={`/reviews/${reviewId}/protocol`} className="underline">
+            emenda do protocolo
+          </a>
+          .
+        </p>
+      )}
 
       {notFound && <NotFound what="Sugestões de critérios" />}
 
