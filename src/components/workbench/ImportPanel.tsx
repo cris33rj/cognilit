@@ -20,17 +20,29 @@ function formatFromName(name: string): SourceFormat | null {
   return null;
 }
 
-export function ImportPanel({ reviewId }: { reviewId: string }) {
+export function ImportPanel({
+  reviewId,
+  suggestedQuery = "",
+}: {
+  reviewId: string;
+  suggestedQuery?: string;
+}) {
   const [content, setContent] = useState("");
   const [format, setFormat] = useState<SourceFormat | null>(null);
   const [preview, setPreview] = useState<ParsedRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [fileName, setFileName] = useState<string | null>(null);
 
-  const { register, handleSubmit, formState } = useForm<SearchInput>({
+  const { register, handleSubmit, setValue, formState } = useForm<SearchInput>({
     resolver: zodResolver(searchSchema),
-    defaultValues: { queryString: "", database: "", searchedOn: "", hits: 0 },
+    defaultValues: {
+      queryString: suggestedQuery,
+      database: "",
+      searchedOn: "",
+      hits: 0,
+    },
   });
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -38,6 +50,7 @@ export function ImportPanel({ reviewId }: { reviewId: string }) {
     setJobId(null);
     const file = e.target.files?.[0];
     if (!file) return;
+    setFileName(file.name);
     const fmt = formatFromName(file.name.toLowerCase());
     if (!fmt) {
       setError("Formato não suportado. Use .ris, .bib ou .csv.");
@@ -50,6 +63,7 @@ export function ImportPanel({ reviewId }: { reviewId: string }) {
     setFormat(fmt);
     const result = parseContent(fmt, text); // preview client-side (FR-014)
     setPreview(result.records);
+    setValue("hits", result.records.length); // A-13.3 — default editável
     if (result.records.length === 0) {
       setError(
         result.errors[0]?.message ??
@@ -76,15 +90,31 @@ export function ImportPanel({ reviewId }: { reviewId: string }) {
 
   return (
     <section className="flex flex-col gap-4">
-      <div className="flex flex-col gap-1">
-        <label htmlFor="import-file" className="text-sm font-medium">
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium">
           Arquivo de referências (RIS, BibTeX ou CSV)
-        </label>
+        </span>
+        <div className="flex items-center gap-3">
+          <label
+            htmlFor="import-file"
+            className="btn-primary cursor-pointer self-start"
+          >
+            Escolher arquivo
+          </label>
+          <span
+            className="text-sm text-ink-soft"
+            aria-live="polite"
+            data-testid="import-file-name"
+          >
+            {fileName ?? "Nenhum arquivo escolhido"}
+          </span>
+        </div>
         <input
           id="import-file"
           type="file"
           accept=".ris,.bib,.bibtex,.csv"
           onChange={onFile}
+          className="sr-only"
         />
       </div>
 
