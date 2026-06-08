@@ -1,5 +1,6 @@
 import { ModeBar, type WorkbenchMode } from "@/components/workbench/ModeBar";
 import { ImportPanel } from "@/components/workbench/ImportPanel";
+import { getSuggestedQuery } from "@/lib/search/queries";
 import { DuplicatesPanel } from "@/components/workbench/DuplicatesPanel";
 import { ScreeningQueue } from "@/components/workbench/ScreeningQueue";
 import { QueryProvider } from "@/components/providers/QueryProvider";
@@ -38,6 +39,8 @@ export default async function WorkbenchPage({
   const active: WorkbenchMode = VALID.includes(mode as WorkbenchMode)
     ? (mode as WorkbenchMode)
     : "import";
+  const suggestedQuery =
+    active === "import" ? await getSuggestedQuery(reviewId) : "";
 
   return (
     <div className="flex flex-col gap-4">
@@ -47,7 +50,7 @@ export default async function WorkbenchPage({
       <ModeBar reviewId={reviewId} active={active} />
       <QueryProvider>
         {active === "import" ? (
-          <ImportPanel reviewId={reviewId} />
+          <ImportPanel reviewId={reviewId} suggestedQuery={suggestedQuery} />
         ) : active === "duplicates" ? (
           <DuplicatesPanel
             reviewId={reviewId}
