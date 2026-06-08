@@ -1,315 +1,365 @@
-# Fatia 13 — Polish do modo Importar
+# Fatia 14 — Histórico de buscas importadas
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recomendado) ou superpowers:executing-plans para implementar tarefa a tarefa, cada
 > uma em TDD. Os passos usam checkbox (`- [ ]`) para rastreio.
 >
-> **Escopo:** Fatia 13 do Marco 1 (`001-marco1-nucleo-fluxo`), polish de UX pós-Marco.
-> Branch isolado `build/001-marco1-nucleo-fluxo/13-import-mode-polish`. A sessão
+> **Escopo:** Fatia 14 do Marco 1 (`001-marco1-nucleo-fluxo`), leitura pós-Marco.
+> Branch isolado `build/001-marco1-nucleo-fluxo/14-import-history-list`. A sessão
 > **NUNCA** faz `git merge`/`git push` para a feature ou `main`.
 > *(Planos de fatias anteriores permanecem no histórico git e em `.superpowers/`.)*
 
-**Goal:** Corrigir três defeitos de UX do modo Importar do workbench: o seletor de
-arquivo nativo sem estilo, a string de busca vazia (havendo termos já derivados por IA),
-e o campo `hits` em `0` (havendo a contagem do arquivo já conhecida no preview).
+**Goal:** Mostrar, no modo Importar do workbench, uma lista **read-only** das importações
+já feitas — uma linha por busca com base de dados, data da importação (`dd/mm/aaaa`) e
+quantidade de artigos.
 
-**Architecture:** Um controle de arquivo estilizado (label `.btn-primary` + input real
-visualmente oculto via `sr-only`, preservando `id="import-file"`) substitui o input nativo
-em `ImportPanel`. A página server do workbench passa a buscar os termos de busca derivados
-(`getSuggestedQuery`) e injeta como `defaultValue` de `queryString`. A composição do seed é
-uma função pura `composeSuggestedQuery`. Ao parsear o arquivo, `hits` é semeado com a
-contagem de registros via `setValue`. Nenhuma server action, migration ou schema muda.
+**Architecture:** Uma query server `listSearches(reviewId)` lê a tabela `search` com a
+contagem de `record` embutida via PostgREST (`record(count)`) — **sem migration**. Um
+componente de servidor puro `ImportHistory` recebe os dados e renderiza a lista (ou um
+estado vazio). A página server do workbench busca e injeta os dados no modo Importar. As
+server actions de importação já chamam `revalidatePath` do workbench, então a lista
+re-renderiza após uma importação concluir. **Nenhuma reversão/edição** (descartada no
+CHECKPOINT 1): só leitura. Não toca auditoria nem PRISMA.
 
-**Tech Stack:** React 18 + TS strict, Next.js App Router (RSC → client), Tailwind 4
-(classes `.btn-primary`/`.control` + utilitário `sr-only`), `react-hook-form` + `zod`,
-Vitest + Testing Library + `@testing-library/user-event@14` (jsdom). Supabase server client
-para a leitura dos termos.
+**Tech Stack:** Next.js App Router (RSC), TS strict, Tailwind 4 (classes do design system
+`.panel`/`panel-title`/`text-ink*`), Supabase server client (`supabase-js`), Vitest +
+Testing Library (unit) e integração com Supabase local (`tests/integration/helpers/supabase`).
 
-**Decisões herdadas do design (slicing.md §Fatia 13, A-13.x):**
-- A-13.1 — single-file mantido (nenhuma seleção múltipla; 1 arquivo = 1 `search_id`).
-- A-13.2 — `query_string` semeado a partir de `eligibility_criterion kind='search_term'`
-  como sugestão **editável**; só semeia se houver termos.
-- A-13.3 — `hits` semeado com `preview.length` no parse, editável.
-
-**Invariante crítico (não pode quebrar):** o input de arquivo mantém `id="import-file"`;
-o e2e `tests/e2e/import.spec.ts` usa `page.setInputFiles("#import-file", ...)` e
-`getByPlaceholder("String de busca"|"Base consultada"|"Nº de hits")`. `sr-only` (clip, não
-`display:none`) é compatível com `setInputFiles`. Esses placeholders e o id **permanecem**.
+**Decisões herdadas do design (slicing.md §Fatia 14):**
+- **Read-only.** Sem desfazer/reverter importação, sem editar registro de busca, sem
+  expandir artigos, sem paginação/filtro. (A reversão destrutiva fica como possível fatia
+  futura, com regras próprias.)
+- **Single source:** a contagem vem de `record(count)` por `search_id` (estável mesmo após
+  dedup, que altera `corpus_state` e **não** apaga linhas).
+- **Data exibida = `created_at`** da busca (timestamp da importação), formatada
+  `dd/mm/aaaa` com `toLocaleDateString("pt-BR")` (padrão do projeto, cf. `AmendmentList`).
 
 ---
 
 ## Estrutura de arquivos
 
-- **Criar:** `src/lib/search/suggest.ts` — função pura `composeSuggestedQuery(terms: string[]): string`.
-  Responsabilidade única: normalizar (trim, descartar vazios, dedup preservando ordem) e
-  unir os termos com `" OR "`. Sem I/O.
-- **Modificar:** `src/lib/search/queries.ts` — adiciona `getSuggestedQuery(reviewId): Promise<string>`
-  (lê `eligibility_criterion` `kind='search_term'` não-rejeitados via server client e aplica
-  `composeSuggestedQuery`). *(Arquivo já contém o schema `searchSchema`; ver nota na Task 4.)*
-- **Modificar:** `app/reviews/[reviewId]/workbench/page.tsx` — busca `getSuggestedQuery` e
-  passa `suggestedQuery` ao `<ImportPanel>`.
-- **Modificar:** `src/components/workbench/ImportPanel.tsx` — nova prop `suggestedQuery`;
-  controle de arquivo estilizado + nome do arquivo; `defaultValue` do `queryString`;
-  `setValue("hits", ...)` no parse.
-- **Criar:** `tests/unit/search/suggest.test.ts` — testes de `composeSuggestedQuery`.
-- **Criar:** `tests/unit/workbench/import-panel.test.tsx` — testes do controle de arquivo,
-  do seed de `queryString` e do auto-preenchimento de `hits`.
+- **Modificar:** `src/lib/search/queries.ts` — adiciona `SEARCH_SUMMARY_SELECT` (string do
+  select PostgREST, exportada p/ o teste de integração reusar), a interface `SearchSummary`,
+  a função pura `toSearchSummaries`, e a query `listSearches`. (Arquivo já existe — criado na
+  Fatia 13; **acrescentar**, não remover.)
+- **Criar:** `src/components/workbench/ImportHistory.tsx` — componente **de servidor** puro
+  (sem `"use client"`): recebe `searches: SearchSummary[]`, renderiza lista ou estado vazio.
+- **Modificar:** `app/reviews/[reviewId]/workbench/page.tsx` — busca `listSearches` no modo
+  import e renderiza `<ImportHistory>` abaixo do `<ImportPanel>`.
+- **Criar:** `tests/unit/search/import-history-mapper.test.ts` — testes de `toSearchSummaries`.
+- **Criar:** `tests/unit/workbench/import-history.test.tsx` — testes de render do componente.
+- **Criar:** `tests/integration/import-history.test.ts` — prova o embedding `record(count)`
+  contra o Supabase local (uma linha por busca, contagem correta).
 
-> **Nota sobre `src/lib/search/`:** hoje há `src/lib/search/schema.ts` (com `searchSchema`).
-> Confirme se existe `src/lib/search/queries.ts`. Se **não** existir, **crie-o** (a Task 4
-> traz o conteúdo completo, incluindo os imports). Se existir, **adicione** `getSuggestedQuery`
-> sem remover o conteúdo atual.
+> **Pré-requisito de ambiente (execução):** os testes de **integração** precisam do Supabase
+> local rodando e de `.env.local` **dentro do worktree** (arquivos não-versionados não são
+> herdados pelo worktree — copiar da raiz). Se indisponível, registrar como **desvio** no
+> CHECKPOINT 3 (não fingir verde). Os testes **unit** não precisam de Supabase.
 
 ---
 
-## Task 1: `composeSuggestedQuery` (função pura)
+## Task 1: `toSearchSummaries` + tipos + select (pura + contrato da query)
 
 **Files:**
-- Create: `src/lib/search/suggest.ts`
-- Test: `tests/unit/search/suggest.test.ts`
+- Modify: `src/lib/search/queries.ts`
+- Test: `tests/unit/search/import-history-mapper.test.ts`
 
 - [ ] **Step 1: Escrever o teste que falha**
 
-```tsx
-// tests/unit/search/suggest.test.ts
+```ts
+// tests/unit/search/import-history-mapper.test.ts
 import { describe, it, expect } from "vitest";
-import { composeSuggestedQuery } from "@/lib/search/suggest";
+import { toSearchSummaries } from "@/lib/search/queries";
 
-describe("composeSuggestedQuery", () => {
-  it("une termos com ' OR '", () => {
-    expect(
-      composeSuggestedQuery(["active learning", "flipped classroom"]),
-    ).toBe("active learning OR flipped classroom");
+describe("toSearchSummaries", () => {
+  it("mapeia campos e extrai a contagem de record(count)", () => {
+    const out = toSearchSummaries([
+      {
+        id: "s1",
+        database: "ERIC",
+        created_at: "2026-05-30T10:00:00Z",
+        record: [{ count: 12 }],
+      },
+    ]);
+    expect(out).toEqual([
+      {
+        id: "s1",
+        database: "ERIC",
+        createdAt: "2026-05-30T10:00:00Z",
+        recordCount: 12,
+      },
+    ]);
   });
 
-  it("faz trim, descarta vazios e deduplica preservando a ordem", () => {
-    expect(
-      composeSuggestedQuery(["  a ", "", "b", "a", "   ", "b"]),
-    ).toBe("a OR b");
+  it("trata record vazio ou nulo como contagem 0", () => {
+    const out = toSearchSummaries([
+      { id: "a", database: "PubMed", created_at: "2026-01-01T00:00:00Z", record: [] },
+      { id: "b", database: "Scopus", created_at: "2026-01-02T00:00:00Z", record: null },
+    ]);
+    expect(out.map((s) => s.recordCount)).toEqual([0, 0]);
   });
 
-  it("retorna string vazia quando não há termos úteis", () => {
-    expect(composeSuggestedQuery([])).toBe("");
-    expect(composeSuggestedQuery(["", "   "])).toBe("");
-  });
-});
-```
-
-- [ ] **Step 2: Rodar o teste e confirmar a falha**
-
-Run: `npm run test -- tests/unit/search/suggest.test.ts`
-Expected: FAIL — `Cannot find module '@/lib/search/suggest'`.
-
-- [ ] **Step 3: Implementar o mínimo**
-
-```ts
-// src/lib/search/suggest.ts
-
-/**
- * Compõe um seed editável de string de busca a partir de termos derivados por IA
- * (FR-007 / kind='search_term'). NÃO é a query booleana final — é ponto de partida
- * que o pesquisador edita por base. Termos alternativos ⇒ unidos por " OR ".
- */
-export function composeSuggestedQuery(terms: string[]): string {
-  const seen = new Set<string>();
-  const cleaned: string[] = [];
-  for (const t of terms) {
-    const v = t.trim();
-    if (!v || seen.has(v)) continue;
-    seen.add(v);
-    cleaned.push(v);
-  }
-  return cleaned.join(" OR ");
-}
-```
-
-- [ ] **Step 4: Rodar o teste e confirmar verde**
-
-Run: `npm run test -- tests/unit/search/suggest.test.ts`
-Expected: PASS (3 testes).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/search/suggest.ts tests/unit/search/suggest.test.ts
-git commit -m "feat(13): composeSuggestedQuery — seed editável da string de busca"
-```
-
----
-
-## Task 2: `getSuggestedQuery` (leitura server-side)
-
-**Files:**
-- Modify/Create: `src/lib/search/queries.ts`
-
-> Esta função é uma casca fina sobre o Supabase server client; é exercitada de fato
-> pelos testes da página/painel (Tasks 3–5) e pelo e2e existente. Não tem teste unitário
-> dedicado (mockar `createClient` aqui só testaria o mock). A lógica testável já vive em
-> `composeSuggestedQuery` (Task 1).
-
-- [ ] **Step 1: Adicionar (ou criar) `getSuggestedQuery`**
-
-Se `src/lib/search/queries.ts` **não existir**, crie-o com este conteúdo. Se já existir,
-**acrescente** a função e o import (sem remover o que houver):
-
-```ts
-// src/lib/search/queries.ts
-import { createClient } from "@/lib/supabase/server";
-import { composeSuggestedQuery } from "./suggest";
-
-/**
- * Seed da string de busca para o modo Importar: termos de busca derivados por IA
- * (kind='search_term') ainda não rejeitados, compostos como sugestão editável (A-13.2).
- * Retorna "" quando não há termos.
- */
-export async function getSuggestedQuery(reviewId: string): Promise<string> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("eligibility_criterion")
-    .select("text, ratification_state")
-    .eq("review_id", reviewId)
-    .eq("kind", "search_term")
-    .neq("ratification_state", "rejected")
-    .order("created_at", { ascending: true });
-  if (error) throw new Error(error.message);
-  const terms = ((data ?? []) as Array<{ text: string }>).map((r) => r.text);
-  return composeSuggestedQuery(terms);
-}
-```
-
-- [ ] **Step 2: Verificar tipo e lint**
-
-Run: `npx tsc --noEmit && npm run lint`
-Expected: sem erros.
-
-- [ ] **Step 3: Commit**
-
-```bash
-git add src/lib/search/queries.ts
-git commit -m "feat(13): getSuggestedQuery — lê termos search_term e compõe o seed"
-```
-
----
-
-## Task 3: `ImportPanel` aceita `suggestedQuery` e semeia `queryString`
-
-**Files:**
-- Modify: `src/components/workbench/ImportPanel.tsx`
-- Test: `tests/unit/workbench/import-panel.test.tsx`
-
-- [ ] **Step 1: Escrever o teste que falha**
-
-```tsx
-// tests/unit/workbench/import-panel.test.tsx
-import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { ImportPanel } from "@/components/workbench/ImportPanel";
-
-// As server actions importadas pelo painel não devem rodar no jsdom.
-vi.mock("../../../app/reviews/[reviewId]/workbench/actions", () => ({
-  enqueueImport: vi.fn(),
-  runImportWorker: vi.fn(),
-}));
-// JobProgress usa o client Supabase do browser — stub para isolar o painel.
-vi.mock("@/components/workbench/JobProgress", () => ({
-  JobProgress: () => null,
-}));
-
-describe("ImportPanel — seed da string de busca", () => {
-  it("pré-preenche 'String de busca' com suggestedQuery", () => {
-    render(
-      <ImportPanel reviewId="r1" suggestedQuery="active learning OR flipped" />,
-    );
-    expect(screen.getByPlaceholder("String de busca")).toHaveValue(
-      "active learning OR flipped",
-    );
-  });
-
-  it("deixa 'String de busca' vazia quando não há seed", () => {
-    render(<ImportPanel reviewId="r1" suggestedQuery="" />);
-    expect(screen.getByPlaceholder("String de busca")).toHaveValue("");
+  it("preserva a ordem das linhas recebidas", () => {
+    const out = toSearchSummaries([
+      { id: "x", database: "A", created_at: "2026-01-03T00:00:00Z", record: [{ count: 1 }] },
+      { id: "y", database: "B", created_at: "2026-01-02T00:00:00Z", record: [{ count: 2 }] },
+    ]);
+    expect(out.map((s) => s.id)).toEqual(["x", "y"]);
   });
 });
 ```
 
 - [ ] **Step 2: Rodar e confirmar a falha**
 
-Run: `npm run test -- tests/unit/workbench/import-panel.test.tsx`
-Expected: FAIL — `ImportPanel` não aceita `suggestedQuery` (input fica vazio / erro de tipo).
+Run: `npm run test -- tests/unit/search/import-history-mapper.test.ts`
+Expected: FAIL — `toSearchSummaries` não existe.
 
-- [ ] **Step 3: Implementar — assinatura + defaultValue**
+- [ ] **Step 3: Implementar — acrescentar ao fim de `src/lib/search/queries.ts`**
 
-Em `src/components/workbench/ImportPanel.tsx`, altere a assinatura e o `defaultValues`.
-Adicione também `setValue` ao destructuring do `useForm` (será usado na Task 5):
+Não remova nada do arquivo (ele já tem `getSuggestedQuery`/`composeSuggestedQuery`).
+Acrescente:
 
-```tsx
-export function ImportPanel({
-  reviewId,
-  suggestedQuery = "",
-}: {
-  reviewId: string;
-  suggestedQuery?: string;
-}) {
-  const [content, setContent] = useState("");
-  const [format, setFormat] = useState<SourceFormat | null>(null);
-  const [preview, setPreview] = useState<ParsedRecord[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const [fileName, setFileName] = useState<string | null>(null);
+```ts
+/** Select PostgREST do histórico: campos da busca + contagem embutida de records. */
+export const SEARCH_SUMMARY_SELECT = "id, database, created_at, record(count)";
 
-  const { register, handleSubmit, setValue, formState } = useForm<SearchInput>({
-    resolver: zodResolver(searchSchema),
-    defaultValues: {
-      queryString: suggestedQuery,
-      database: "",
-      searchedOn: "",
-      hits: 0,
-    },
-  });
+export interface SearchSummary {
+  id: string;
+  database: string;
+  createdAt: string;
+  recordCount: number;
+}
+
+interface RawSearchRow {
+  id: string;
+  database: string;
+  created_at: string;
+  record: { count: number }[] | null;
+}
+
+/**
+ * Achata as linhas do `SEARCH_SUMMARY_SELECT` em `SearchSummary`. Função pura: extrai a
+ * contagem de `record(count)` (`record[0].count`, ou 0 quando ausente). Sem I/O.
+ */
+export function toSearchSummaries(rows: RawSearchRow[]): SearchSummary[] {
+  return rows.map((r) => ({
+    id: r.id,
+    database: r.database,
+    createdAt: r.created_at,
+    recordCount: r.record?.[0]?.count ?? 0,
+  }));
+}
 ```
 
 - [ ] **Step 4: Rodar e confirmar verde**
 
-Run: `npm run test -- tests/unit/workbench/import-panel.test.tsx`
-Expected: PASS (2 testes desta task).
+Run: `npm run test -- tests/unit/search/import-history-mapper.test.ts`
+Expected: PASS (3 testes).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Verificar tipo e lint**
+
+Run: `npm run typecheck && npm run lint`
+Expected: sem erros.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/components/workbench/ImportPanel.tsx tests/unit/workbench/import-panel.test.tsx
-git commit -m "feat(13): ImportPanel semeia String de busca com termos derivados (A-13.2)"
+git add src/lib/search/queries.ts tests/unit/search/import-history-mapper.test.ts
+git commit -m "feat(14): toSearchSummaries + SEARCH_SUMMARY_SELECT (contagem por busca)"
 ```
 
 ---
 
-## Task 4: Página do workbench injeta `suggestedQuery`
+## Task 2: `listSearches` (leitura server-side)
+
+**Files:**
+- Modify: `src/lib/search/queries.ts`
+
+> Casca fina sobre o Supabase server client (usa `cookies()` indiretamente) — **não** tem
+> teste unitário direto (o mapper já é testado na Task 1; o embedding é provado na Task 5).
+> Segue o padrão de `src/lib/dedup/queries.ts`.
+
+- [ ] **Step 1: Acrescentar `listSearches` ao fim de `src/lib/search/queries.ts`**
+
+```ts
+/**
+ * Histórico de importações da Revisão (Fatia 14, read-only): uma linha por `search`,
+ * mais recente primeiro, com a contagem de `record` associada. RLS cobre por membership.
+ */
+export async function listSearches(reviewId: string): Promise<SearchSummary[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("search")
+    .select(SEARCH_SUMMARY_SELECT)
+    .eq("review_id", reviewId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  // Embedded-count select widens the inferred type além das generics do supabase-js.
+  return toSearchSummaries((data ?? []) as unknown as RawSearchRow[]);
+}
+```
+
+(`createClient` já está importado no topo do arquivo desde a Fatia 13 — não duplicar.)
+
+- [ ] **Step 2: Verificar tipo e lint**
+
+Run: `npm run typecheck && npm run lint`
+Expected: sem erros.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/lib/search/queries.ts
+git commit -m "feat(14): listSearches — histórico de buscas com contagem (read-only)"
+```
+
+---
+
+## Task 3: Componente `ImportHistory` (servidor, puro)
+
+**Files:**
+- Create: `src/components/workbench/ImportHistory.tsx`
+- Test: `tests/unit/workbench/import-history.test.tsx`
+
+- [ ] **Step 1: Escrever o teste que falha**
+
+```tsx
+// tests/unit/workbench/import-history.test.tsx
+import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { ImportHistory } from "@/components/workbench/ImportHistory";
+import type { SearchSummary } from "@/lib/search/queries";
+
+const SEARCHES: SearchSummary[] = [
+  {
+    id: "s1",
+    database: "ERIC",
+    createdAt: "2026-05-30T12:00:00Z",
+    recordCount: 12,
+  },
+  {
+    id: "s2",
+    database: "PubMed",
+    createdAt: "2026-04-02T12:00:00Z",
+    recordCount: 5,
+  },
+];
+
+describe("ImportHistory", () => {
+  it("mostra uma linha por importação com base, data dd/mm/aaaa e contagem", () => {
+    render(<ImportHistory searches={SEARCHES} />);
+    expect(screen.getByText("ERIC")).toBeInTheDocument();
+    expect(screen.getByText("PubMed")).toBeInTheDocument();
+    // datas no formato dd/mm/aaaa (sem fixar TZ — checa o formato e o ano)
+    const dates = screen.getAllByText(/\d{2}\/\d{2}\/\d{4}/);
+    expect(dates).toHaveLength(2);
+    // contagens exibidas
+    expect(screen.getByText(/12/)).toBeInTheDocument();
+    expect(screen.getByText(/5/)).toBeInTheDocument();
+  });
+
+  it("mostra estado vazio quando não há importações", () => {
+    render(<ImportHistory searches={[]} />);
+    expect(screen.getByText("Nenhuma importação ainda.")).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e confirmar a falha**
+
+Run: `npm run test -- tests/unit/workbench/import-history.test.tsx`
+Expected: FAIL — módulo `ImportHistory` não existe.
+
+- [ ] **Step 3: Implementar `src/components/workbench/ImportHistory.tsx`**
+
+Componente **de servidor** (sem `"use client"`), puro. Usa as classes do design system.
+
+```tsx
+import type { SearchSummary } from "@/lib/search/queries";
+
+/**
+ * Histórico read-only das importações (Fatia 14): uma linha por busca, com base de dados,
+ * data da importação (dd/mm/aaaa) e quantidade de artigos. Sem ações.
+ */
+export function ImportHistory({ searches }: { searches: SearchSummary[] }) {
+  return (
+    <section className="panel flex flex-col gap-3" aria-label="Importações anteriores">
+      <h2 className="panel-title">Importações anteriores</h2>
+      {searches.length === 0 ? (
+        <p className="text-sm text-ink-soft">Nenhuma importação ainda.</p>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {searches.map((s) => (
+            <li
+              key={s.id}
+              className="flex items-center justify-between gap-4 border-t border-line pt-2 text-sm first:border-t-0 first:pt-0"
+            >
+              <span className="font-medium text-ink">{s.database}</span>
+              <span className="text-ink-faint">
+                {new Date(s.createdAt).toLocaleDateString("pt-BR")}
+              </span>
+              <span className="text-ink-soft">
+                {s.recordCount} artigo{s.recordCount === 1 ? "" : "s"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+```
+
+- [ ] **Step 4: Rodar e confirmar verde**
+
+Run: `npm run test -- tests/unit/workbench/import-history.test.tsx`
+Expected: PASS (2 testes).
+
+- [ ] **Step 5: Verificar tipo e lint**
+
+Run: `npm run typecheck && npm run lint`
+Expected: sem erros.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/components/workbench/ImportHistory.tsx tests/unit/workbench/import-history.test.tsx
+git commit -m "feat(14): ImportHistory — lista read-only de importações (obs 4)"
+```
+
+---
+
+## Task 4: Wiring na página do workbench
 
 **Files:**
 - Modify: `app/reviews/[reviewId]/workbench/page.tsx`
 
-> Página server async — coberta pelo e2e `import.spec.ts` (que continua verde). Sem
-> teste unitário de RSC (não há harness para Server Components neste projeto).
+> Página server async — coberta pelo e2e existente; sem teste unitário de RSC.
 
-- [ ] **Step 1: Importar e buscar o seed**
+- [ ] **Step 1: Importar `listSearches` e `ImportHistory`**
 
-No topo de `app/reviews/[reviewId]/workbench/page.tsx`, adicione o import:
-
-```tsx
-import { getSuggestedQuery } from "@/lib/search/queries";
-```
-
-Dentro do componente, **após** `const active = ...`, adicione (só é usado no modo import,
-mas a busca é barata e evita branch assíncrono no JSX):
+No topo de `app/reviews/[reviewId]/workbench/page.tsx`, junto aos imports existentes:
 
 ```tsx
-  const suggestedQuery =
-    active === "import" ? await getSuggestedQuery(reviewId) : "";
+import { ImportHistory } from "@/components/workbench/ImportHistory";
+import { getSuggestedQuery, listSearches } from "@/lib/search/queries";
 ```
 
-- [ ] **Step 2: Passar a prop ao painel**
+(Substitui a linha de import atual `import { getSuggestedQuery } from "@/lib/search/queries";`
+por essa que agrega `listSearches`; adiciona o import do componente.)
 
-Troque a renderização do modo import:
+- [ ] **Step 2: Buscar o histórico no modo import**
+
+Logo após a linha `const suggestedQuery = active === "import" ? await getSuggestedQuery(reviewId) : "";`, adicione:
+
+```tsx
+  const searches =
+    active === "import" ? await listSearches(reviewId) : [];
+```
+
+- [ ] **Step 3: Renderizar `<ImportHistory>` abaixo do `<ImportPanel>`**
+
+Troque o ramo do modo import de:
 
 ```tsx
         {active === "import" ? (
@@ -317,243 +367,196 @@ Troque a renderização do modo import:
         ) : active === "duplicates" ? (
 ```
 
-- [ ] **Step 3: Verificar tipo e lint**
+para:
 
-Run: `npx tsc --noEmit && npm run lint`
+```tsx
+        {active === "import" ? (
+          <div className="flex flex-col gap-6">
+            <ImportPanel reviewId={reviewId} suggestedQuery={suggestedQuery} />
+            <ImportHistory searches={searches} />
+          </div>
+        ) : active === "duplicates" ? (
+```
+
+- [ ] **Step 4: Verificar tipo e lint**
+
+Run: `npm run typecheck && npm run lint`
 Expected: sem erros.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add "app/reviews/[reviewId]/workbench/page.tsx"
-git commit -m "feat(13): workbench page injeta suggestedQuery no ImportPanel"
-```
-
----
-
-## Task 5: Auto-preencher `hits` com a contagem do arquivo
-
-**Files:**
-- Modify: `src/components/workbench/ImportPanel.tsx`
-- Test: `tests/unit/workbench/import-panel.test.tsx`
-
-- [ ] **Step 1: Escrever o teste que falha**
-
-Acrescente ao arquivo de teste já criado na Task 3 (mantém os mocks do topo):
-
-```tsx
-import { waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-
-const RIS_TWO = [
-  "TY  - JOUR",
-  "TI  - Estudo Um",
-  "PY  - 2020",
-  "ER  - ",
-  "TY  - JOUR",
-  "TI  - Estudo Dois",
-  "PY  - 2021",
-  "ER  - ",
-  "",
-].join("\n");
-
-describe("ImportPanel — auto-preenchimento de hits", () => {
-  it("preenche 'Nº de hits' com a contagem de registros do arquivo", async () => {
-    const user = userEvent.setup();
-    render(<ImportPanel reviewId="r1" suggestedQuery="" />);
-
-    const file = new File([RIS_TWO], "busca.ris", { type: "text/plain" });
-    const input = document.querySelector<HTMLInputElement>("#import-file")!;
-    await user.upload(input, file);
-
-    await waitFor(() =>
-      expect(screen.getByPlaceholder("Nº de hits")).toHaveValue(2),
-    );
-  });
-
-  it("mostra o nome do arquivo escolhido no controle", async () => {
-    const user = userEvent.setup();
-    render(<ImportPanel reviewId="r1" suggestedQuery="" />);
-
-    const file = new File([RIS_TWO], "busca.ris", { type: "text/plain" });
-    const input = document.querySelector<HTMLInputElement>("#import-file")!;
-    await user.upload(input, file);
-
-    await waitFor(() => expect(screen.getByText("busca.ris")).toBeInTheDocument());
-  });
-});
-```
-
-- [ ] **Step 2: Rodar e confirmar a falha**
-
-Run: `npm run test -- tests/unit/workbench/import-panel.test.tsx`
-Expected: FAIL — `hits` continua 0 e não há texto `busca.ris` (controle ainda nativo).
-
-- [ ] **Step 3: Implementar — `setValue("hits", ...)` e `fileName` no `onFile`**
-
-Em `onFile`, registre o nome do arquivo e semeie `hits` com a contagem. Versão completa
-do handler:
-
-```tsx
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    setError(null);
-    setJobId(null);
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setFileName(file.name);
-    const fmt = formatFromName(file.name.toLowerCase());
-    if (!fmt) {
-      setError("Formato não suportado. Use .ris, .bib ou .csv.");
-      setPreview([]);
-      setFormat(null);
-      return;
-    }
-    const text = await file.text();
-    setContent(text);
-    setFormat(fmt);
-    const result = parseContent(fmt, text); // preview client-side (FR-014)
-    setPreview(result.records);
-    setValue("hits", result.records.length); // A-13.3 — default editável
-    if (result.records.length === 0) {
-      setError(
-        result.errors[0]?.message ??
-          "Nenhum registro reconhecido neste arquivo.",
-      );
-    }
-  }
-```
-
-- [ ] **Step 4: Rodar e confirmar verde**
-
-Run: `npm run test -- tests/unit/workbench/import-panel.test.tsx`
-Expected: PASS — incluindo o teste do nome do arquivo (que só fica verde após a Task 6;
-se rodar isolado agora, o `toHaveValue(2)` passa e o `busca.ris` ainda falha). **Ok seguir
-para a Task 6 antes de exigir verde total deste arquivo.**
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/components/workbench/ImportPanel.tsx tests/unit/workbench/import-panel.test.tsx
-git commit -m "feat(13): auto-preenche Nº de hits com a contagem do arquivo (A-13.3)"
+git add "app/reviews/[reviewId]/workbench/page.tsx"
+git commit -m "feat(14): workbench page renderiza ImportHistory no modo Importar"
 ```
 
 ---
 
-## Task 6: Controle de arquivo estilizado (obs 1)
+## Task 5: Teste de integração — embedding `record(count)`
 
 **Files:**
-- Modify: `src/components/workbench/ImportPanel.tsx`
+- Create: `tests/integration/import-history.test.ts`
 
-> O teste "mostra o nome do arquivo escolhido" (Task 5) fica verde aqui.
+> Prova, contra o Supabase local, que o `SEARCH_SUMMARY_SELECT` retorna **uma linha por
+> busca** com a contagem de records correta. Reusa os helpers e o caminho real de importação
+> (`enqueueImportJob` + `processImportJob`) já usados em `tests/integration/jobs.import.test.ts`.
+> Importa `SEARCH_SUMMARY_SELECT`/`toSearchSummaries` do módulo (apenas importar **não**
+> dispara `cookies()`; só **chamar** `createClient` dispararia — e não o chamamos aqui).
 
-- [ ] **Step 1: Substituir o bloco do input nativo pelo controle estilizado**
+- [ ] **Step 1: Escrever o teste**
 
-Troque o `<div className="flex flex-col gap-1">…</div>` que envolve o `<input type="file">`
-por este bloco. **Preserva** `id="import-file"`, `accept`, `onChange`; o input vira `sr-only`
-e a label `.btn-primary` é a affordance visível; um `<span>` mostra o nome do arquivo ou o
-estado vazio:
+```ts
+// tests/integration/import-history.test.ts
+import { describe, it, expect, beforeAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+import { enqueueImportJob } from "@shared/jobs/enqueue";
+import { processImportJob } from "@shared/jobs/worker";
+import {
+  SEARCH_SUMMARY_SELECT,
+  toSearchSummaries,
+  type SearchSummary,
+} from "@/lib/search/queries";
 
-```tsx
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">
-          Arquivo de referências (RIS, BibTeX ou CSV)
-        </span>
-        <div className="flex items-center gap-3">
-          <label
-            htmlFor="import-file"
-            className="btn-primary cursor-pointer self-start"
-          >
-            Escolher arquivo
-          </label>
-          <span
-            className="text-sm text-ink-soft"
-            aria-live="polite"
-            data-testid="import-file-name"
-          >
-            {fileName ?? "Nenhum arquivo escolhido"}
-          </span>
-        </div>
-        <input
-          id="import-file"
-          type="file"
-          accept=".ris,.bib,.bibtex,.csv"
-          onChange={onFile}
-          className="sr-only"
-        />
-      </div>
+const ris = readFileSync("tests/fixtures/import/sample.ris", "utf8");
+
+async function summaries(reviewId: string): Promise<SearchSummary[]> {
+  const { data, error } = await serviceClient()
+    .from("search")
+    .select(SEARCH_SUMMARY_SELECT)
+    .eq("review_id", reviewId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return toSearchSummaries((data ?? []) as unknown as Parameters<typeof toSearchSummaries>[0]);
+}
+
+describe("histórico de importações — embedding record(count)", () => {
+  let userClient: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+
+  beforeAll(async () => {
+    const stamp = Date.now();
+    const u = await signUpUser(`hist_${stamp}@example.com`, "senha-teste-123");
+    userClient = u.client;
+    const { data: review } = await userClient.rpc("create_review", {
+      p_title: "Histórico",
+    });
+    reviewId = review.id;
+  });
+
+  it("uma importação ⇒ uma linha com a contagem de records (= 2)", async () => {
+    const res = await enqueueImportJob({ supabase: userClient }, reviewId, {
+      format: "ris",
+      content: ris,
+      search: {
+        queryString: "active learning",
+        database: "ERIC",
+        searchedOn: "2026-05-30",
+        hits: 2,
+      },
+    });
+    await processImportJob({ supabase: serviceClient() }, res.job_id);
+
+    const out = await summaries(reviewId);
+    expect(out).toHaveLength(1);
+    expect(out[0].database).toBe("ERIC");
+    expect(out[0].recordCount).toBe(2);
+  });
+
+  it("uma segunda importação ⇒ duas linhas, mais recente primeiro", async () => {
+    const res = await enqueueImportJob({ supabase: userClient }, reviewId, {
+      format: "ris",
+      content: ris,
+      search: {
+        queryString: "flipped classroom",
+        database: "PubMed",
+        searchedOn: "2026-06-01",
+        hits: 2,
+      },
+    });
+    await processImportJob({ supabase: serviceClient() }, res.job_id);
+
+    const out = await summaries(reviewId);
+    expect(out).toHaveLength(2);
+    expect(out[0].database).toBe("PubMed"); // ordenado por created_at desc
+    expect(out.every((s) => s.recordCount === 2)).toBe(true);
+  });
+});
 ```
 
-- [ ] **Step 2: Rodar os testes do painel e confirmar verde total**
+- [ ] **Step 2: Garantir ambiente e rodar**
 
-Run: `npm run test -- tests/unit/workbench/import-panel.test.tsx`
-Expected: PASS — todos os testes do arquivo (seed, hits, nome do arquivo).
+Garanta que o Supabase local está rodando e que o worktree tem `.env.local`
+(copiar da raiz se faltar — ver pré-requisito). Então:
 
-- [ ] **Step 3: Verificar tipo e lint**
+Run: `npm run test -- tests/integration/import-history.test.ts`
+Expected: PASS (2 testes). Se o Supabase local não estiver disponível no ambiente do
+subagente, **PARE e reporte** (status BLOCKED/NEEDS_CONTEXT) — não comente o teste nem
+finja verde.
 
-Run: `npx tsc --noEmit && npm run lint`
-Expected: sem erros.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/components/workbench/ImportPanel.tsx
-git commit -m "feat(13): controle de arquivo estilizado preservando id=import-file (obs 1)"
+git add tests/integration/import-history.test.ts
+git commit -m "test(14): integração prova embedding record(count) no histórico"
 ```
 
 ---
 
-## Task 7: Verificação final da fatia
+## Task 6: Verificação final da fatia (gate)
 
 **Files:** nenhum (gate).
 
 - [ ] **Step 1: Suíte unitária completa**
 
 Run: `npm run test -- tests/unit`
-Expected: PASS — incluindo os arquivos pré-existentes (nada regrediu).
+Expected: PASS — incluindo os pré-existentes (nada regrediu) + os novos (mapper + componente).
 
-- [ ] **Step 2: e2e de importação inalterado**
+- [ ] **Step 2: Integração do histórico**
+
+Run: `npm run test -- tests/integration/import-history.test.ts`
+Expected: PASS (2). (Se ambiente sem Supabase: registrar desvio no CHECKPOINT 3.)
+
+- [ ] **Step 3: e2e de importação inalterado**
 
 Run: `npm run test:e2e -- import.spec.ts`
-Expected: PASS — `#import-file`, placeholders e o contador "Identificados: 2" continuam
-funcionando (o `sr-only` não impede `setInputFiles`; o seed/hits não atrapalham o fluxo,
-pois o teste preenche os campos explicitamente).
+Expected: PASS — a lista não altera o fluxo de importar; `#import-file` e placeholders
+intactos. (Mesma dependência de servidor/Supabase; se indisponível, registrar desvio.)
 
-> Se `npm run test:e2e` exigir o servidor/Supabase local e não estiver disponível no
-> ambiente do subagente, **registre isso como desvio** no CHECKPOINT 3 (não invente verde).
+- [ ] **Step 4: Lint + type-check final**
 
-- [ ] **Step 3: Lint + type-check final**
-
-Run: `npx tsc --noEmit && npm run lint`
+Run: `npm run typecheck && npm run lint`
 Expected: sem erros.
 
-- [ ] **Step 4: Escrever o COMPLETION da fatia**
+- [ ] **Step 5: Escrever o COMPLETION da fatia**
 
-Crie `specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-13.md` registrando:
-branch, commits, o que foi feito (obs 1/2/3), decisões (A-13.x), resultado de
-`test`/`lint`/`tsc` e o estado do e2e. (Mesmo padrão dos `COMPLETION-fatia-N.md`
-anteriores.) Atualize o checklist em `slicing.md`:
-`- [x] Fatia 13 — Polish do modo Importar (CHECKPOINT 3 — aguardando merge manual)`.
+Crie `specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-14.md` (mesmo padrão dos
+anteriores): branch, commits, o que foi feito (obs 4 read-only), decisões, resultado de
+`test`/`integração`/`e2e`/`lint`/`tsc`, e estado do ambiente. Atualize o checklist em
+`slicing.md`:
+`- [x] Fatia 14 — Histórico de buscas importadas (CHECKPOINT 3 — aguardando merge manual)`.
 
-- [ ] **Step 5: Commit do COMPLETION**
+- [ ] **Step 6: Commit do COMPLETION**
 
 ```bash
-git add specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-13.md \
+git add specs/001-marco1-nucleo-fluxo/.superpowers/COMPLETION-fatia-14.md \
         specs/001-marco1-nucleo-fluxo/.superpowers/slicing.md
-git commit -m "docs(13): COMPLETION + slicing state — CHECKPOINT 3, aguardando merge"
+git commit -m "docs(14): COMPLETION + slicing state — CHECKPOINT 3, aguardando merge"
 ```
 
 ---
 
 ## Self-review (cobertura × design)
 
-- **Obs 1 (controle estilizado):** Task 6 — label `.btn-primary` + `sr-only` input,
-  `id="import-file"` preservado; nome do arquivo exibido (Task 5/6). ✔
-- **Obs 2 (seed da string):** Tasks 1–4 — `composeSuggestedQuery` (pura) + `getSuggestedQuery`
-  (server) + injeção na página + `defaultValue` no painel. ✔
-- **Obs 3 (hits auto):** Task 5 — `setValue("hits", result.records.length)`. ✔
-- **A-13.1 (single-file):** nenhuma mudança no `accept`/`files?.[0]`. ✔
-- **Invariante e2e:** `id="import-file"` + placeholders intactos; Task 7 Step 2 valida. ✔
-- **Sem migration / sem schema / sem nova dep:** nada além de leitura de
-  `eligibility_criterion` (já existente). ✔
-- **Consistência de nomes:** `composeSuggestedQuery`, `getSuggestedQuery`, `suggestedQuery`,
-  `fileName`, `setValue`, `import-file` usados de forma idêntica entre tasks. ✔
+- **Obs 4 (lista read-only):** Task 3 (componente) + Task 4 (wiring) — base, data
+  `dd/mm/aaaa`, contagem; estado vazio. ✔
+- **Query/contagem:** Tasks 1–2 (`toSearchSummaries`, `SEARCH_SUMMARY_SELECT`,
+  `listSearches`) + Task 5 (integração prova o embedding). ✔
+- **Sem reversão/edição/paginação (YAGNI):** não há ação no componente. ✔
+- **Sem migration / sem schema / sem nova dep:** só leitura de `search`+`record`. ✔
+- **Princípio V (superfície única):** `ImportHistory` é um painel **no modo Importar** da
+  mesma página; nenhuma rota nova. ✔
+- **Atualização pós-import:** `enqueueImport`/`runImportWorker` já `revalidatePath` do
+  workbench ⇒ re-render server traz a nova busca. ✔
+- **Consistência de nomes:** `SearchSummary`, `toSearchSummaries`, `SEARCH_SUMMARY_SELECT`,
+  `listSearches`, `ImportHistory`, `searches` — idênticos entre tasks. ✔
