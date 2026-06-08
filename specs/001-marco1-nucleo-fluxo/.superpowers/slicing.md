@@ -515,6 +515,66 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
     `dd/mm/aaaa` e contagem; estado vazio quando não há importações.
   - `lint` + `tsc --noEmit` limpos.
 
+### Fatia 15 — Painel de detalhe do registro na triagem T/R (2026-06-08)
+- **Branch:** `build/001-marco1-nucleo-fluxo/15-record-detail-panel`
+- **Natureza:** melhoria de **UX pós-Marco funcional**, acrescentada após constatação do
+  desenvolvedor. **Não** adiciona FR; ao contrário, **cumpre FR-041/D32** — a superfície
+  "detalhe" do mestre-detalhe (DESIGN-DECISIONS §"Anatomia: mestre-detalhe") que as Fatias
+  1–6 deixaram parcial (entregaram só o lado "mestre"/fila). **Sem migration** — o dado já
+  está em `record.metadata` e `record.raw`. Deriva de `spec.md` (FR-041, FR-038) e
+  [docs/DESIGN-DECISIONS.md](../../../docs/DESIGN-DECISIONS.md) §"Anatomia".
+- **Motivação:** hoje a fila de triagem só exibe `title` + `year` por linha
+  ([ScreeningQueue.tsx](../../../src/components/workbench/ScreeningQueue.tsx)); autores,
+  periódico, DOI, idioma, resumo e palavras-chave — presentes no banco — não chegam a ser
+  exibidos. Falta o painel de detalhe que o design canônico prescreve.
+- **Decisões de implementação resolvidas (A-15.x), aprovadas pelo desenvolvedor:**
+  - **A-15.1 — escopo: só Título/Resumo.** O painel aparece apenas no modo `title_abstract`.
+    Texto completo, Duplicatas e Importar ficam **intactos**.
+  - **A-15.2 — layout A (split local, shell intacto).** O `main` do workbench no T/R passa a
+    `[fila | detalhe]`; o `JobsPanel` (Consumo de IA / jobs / Exportar auditoria) permanece na
+    faixa de 268px do shell. **Nenhuma** mudança no `app/reviews/[reviewId]/layout.tsx`
+    compartilhado (layout B — gaveta do JobsPanel / cirurgia no shell — descartado).
+  - **A-15.3 — campos: normalizados + periódico/palavras-chave do `raw`.** Título, autores,
+    ano, DOI, idioma, resumo saem de `metadata`; periódico, palavras-chave (+ volume/issue/
+    páginas quando houver) são extraídos de `record.raw` com leitura **ciente do formato**
+    (RIS `JO`/`JF`/`T2`+`KW`; BibTeX `journal`/`keywords`; CSV cabeçalhos case-insensitive).
+    Sem re-importar (o `raw` já está persistido). **Busca sob demanda ao focar** (TanStack
+    Query, cache por `recordId`) — não incha o payload de ~5.000 linhas (orçamento A2).
+  - **A-15.4 — sem IA no painel; FR-024/D12 preservados intactos.** O painel **não** renderiza
+    sugestão de IA (o revisor lê título+resumo e decide). O **chip de IA inline na fila do
+    T/R** (FR-024/D12, pré-classificação anexada) permanece **exatamente como hoje** — **nada**
+    da IA é tocado, **sem** emenda à Sessão A.
+- **Entra:**
+  - **Módulo puro** `src/lib/record/raw-fields.ts`: `extractRawFields(format, raw)` →
+    `{ journal, keywords[], volume?, issue?, pages? }`, mapas de chave por formato; nulos
+    graciosos. Testável isolado (≥80%, constitution §Testes).
+  - **Query** `getRecordDetail(recordId)` (`src/lib/record/queries.ts`): lê `metadata` +
+    `source_format` + `raw`, aplica a extração; RLS por membership (`requireMember`); server
+    action `fetchRecordDetail`.
+  - **Componente** `src/components/workbench/RecordDetail.tsx`: autores (ano) · título ·
+    periódico · DOI · idioma · palavras-chave · resumo rolável; campos ausentes omitidos;
+    tema do design system; `role`/labels ARIA, foco visível (espírito FR-041).
+  - **`ScreeningQueue` (T/R):** emite o `recordId` focado (já rastreia `focusIdx`) e renderiza
+    o `RecordDetail` ao lado **somente** no estágio `title_abstract`. Sem painel no `full_text`.
+- **Não entra (YAGNI):** painel no Texto completo/Duplicatas/Importar; layout B (gaveta do
+  JobsPanel / cirurgia no shell); edição de metadados; IA no painel ou qualquer mudança no
+  chip inline (seria emenda a D12 → Sessão A); conteúdo de PDF/texto completo (Marco 2); nova FR.
+- **Depende de:** Fatia 3 (`record`/`raw`/workbench/modos), Fatia 5 (`ScreeningQueue`,
+  `focusIdx`, modo T/R), Fatia 7 (design system). **Todas mergeadas.**
+- **Skills:** `frontend-design`, `react-best-practices`, `nextjs-best-practices`.
+- **Testes-chave:**
+  - **unit:** `extractRawFields` por formato — RIS `KW` único vs. array, `JO`/`JF`/`T2`;
+    BibTeX `keywords` (split `;`/`,`) e `journal`; CSV cabeçalho case-insensitive; campos
+    ausentes → nulos.
+  - **integração (banco direto):** `getRecordDetail` devolve normalizados + extraídos do raw;
+    isolamento por review (RLS).
+  - **unit (componente):** `RecordDetail` renderiza os campos, **omite** ausentes, mostra
+    resumo; **sem** bloco de IA. `ScreeningQueue`: focar linha (`j`/`k`) atualiza o detalhe.
+  - **e2e:** T/R foca um registro → painel mostra periódico/palavras-chave; modo `full_text`
+    **sem** painel (inalterado).
+  - **gate:** suites e2e/perf/a11y de triagem (Fatia 5) **verdes e inalteradas**; chip de IA
+    inline preservado; `lint` + `tsc --noEmit` limpos.
+
 ---
 
 ## Gate de cobertura (verificação — PROTOCOLS §Sessão B)
@@ -552,3 +612,4 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 12 — Visualização do markdown no editor de Protocolo (CHECKPOINT 3 — mergeada — merge `21192d3`)
 - [x] Fatia 13 — Polish do modo Importar (CHECKPOINT 3 — mergeada — merge `dc7c84f`)
 - [x] Fatia 14 — Histórico de buscas importadas (CHECKPOINT 3 — mergeada — merge `6d9c355`)
+- [ ] Fatia 15 — Painel de detalhe do registro na triagem T/R (planejada — aguardando `writing-plans`)
