@@ -439,6 +439,81 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
     `role="heading"`; default contextual (travado→preview, rascunho→edit); preview reflete
     edição não salva; HTML cru no markdown **não** vira elemento ativo (sem `rehype-raw`).
   - `lint` + `tsc --noEmit` limpos.
+### Fatia 13 — Polish do modo Importar (2026-06-08)
+- **Branch:** `build/001-marco1-nucleo-fluxo/13-import-mode-polish`
+- **Natureza:** polish de **UX pós-Marco funcional**, acrescentada após constatação do
+  desenvolvedor. **Não** adiciona FR nem altera decisão assinada (D); **sem migration**.
+  Mesmo padrão das Fatias 7/10/12. Cobre três defeitos do modo Importar
+  ([src/components/workbench/ImportPanel.tsx](../../../src/components/workbench/ImportPanel.tsx)).
+- **Motivação:** o modo Importar usa um `<input type="file">` **nativo, sem estilo** (não
+  passou pela repaginação da Fatia 7); a string de busca começa vazia mesmo havendo termos
+  já derivados por IA na Pergunta; e o campo `hits` mostra `0` mesmo após o preview já
+  conhecer a contagem de registros do arquivo.
+- **Decisões de implementação resolvidas (A-13.x), aprovadas pelo desenvolvedor:**
+  - **A-13.1 — single-file mantido.** Não se introduz seleção de múltiplos arquivos; o
+    modelo atual (1 arquivo = 1 registro de busca = 1 `search_id`) permanece.
+  - **A-13.2 — string de busca semeada, não imposta.** O `query_string` é pré-preenchido
+    a partir dos `eligibility_criterion` com `kind='search_term'` do review como **sugestão
+    editável** (ponto de partida; não é a query booleana final por base). Só semeia se
+    houver termos; o autor pode sobrescrever.
+  - **A-13.3 — `hits` semeado pela contagem do arquivo, editável.** Ao parsear, `hits`
+    recebe `preview.length`; o autor pode ajustar (a base pode reportar nº diferente do
+    exportado). Default ≠ trava.
+- **Entra:**
+  - **Controle de arquivo estilizado:** substitui o input nativo por um controle do design
+    system (input real visualmente oculto + label `htmlFor="import-file"` com `.field`/`.btn`),
+    mostrando o nome do arquivo escolhido (ou "Nenhum arquivo escolhido" enquanto vazio).
+    **Mantém** `accept`, `onChange`, single-file e o **`id="import-file"`** (invariante: os
+    e2e de `import.spec.ts` setam o arquivo nesse id — não pode quebrar).
+  - **String de busca semeada (A-13.2):** a página (server) busca os termos e passa
+    `suggestedQuery` ao `ImportPanel`; vira `defaultValue` de `queryString`.
+  - **`hits` auto-preenchido (A-13.3):** `setValue("hits", preview.length)` no parse.
+- **Não entra (YAGNI):** múltiplos arquivos; composição de query booleana por base;
+  edição do registro de busca após confirmar; nova FR; dark mode.
+- **Depende de:** Fatia 2 (`eligibility_criterion`/`search_term`), Fatia 3 (modo Importar,
+  `ImportPanel`, `search`), Fatia 7 (design system). **Todas mergeadas.**
+- **Skills:** `frontend-design`, `react-best-practices`, `nextjs-best-practices`.
+- **Testes-chave:**
+  - **unit (componente):** controle exibe o nome do arquivo escolhido; `queryString`
+    semeado quando há `search_term` (e vazio quando não há); `hits` reflete a contagem
+    após o parse e permanece editável.
+  - **e2e `import.spec.ts` verde e inalterado** (repaginação preserva `id`/atributos).
+  - `lint` + `tsc --noEmit` limpos.
+
+### Fatia 14 — Histórico de buscas importadas (2026-06-08)
+- **Branch:** `build/001-marco1-nucleo-fluxo/14-import-history-list`
+- **Natureza:** **leitura** pós-Marco funcional, acrescentada após constatação do
+  desenvolvedor. **Não** adiciona FR nem altera decisão assinada (D); **sem migration**;
+  **não desfaz nada** — apenas lista. Não toca auditoria (FR-035 append-only) nem PRISMA.
+- **Motivação:** não há hoje nenhuma visão das importações já feitas. O desenvolvedor pediu
+  uma lista simples (sem reversão) para conferir o que já entrou no corpus.
+- **Decisão de escopo (aprovada pelo desenvolvedor):** a ideia original de "desfazer
+  importação" foi **descartada** desta fatia por ser destrutiva e colidir com decisões
+  downstream (dedup/triagem), com a trava do protocolo (FR-010) e com a trilha de auditoria
+  append-only. Fica como possível fatia futura, com regras próprias. Esta fatia é só o
+  **histórico read-only**.
+- **Entra:**
+  - **Query nova** `listSearches(reviewId)` ([src/lib/search/queries.ts](../../../src/lib/search/queries.ts)):
+    lê `search` + contagem de `record` por `search_id` via `select('*, record(count)')` do
+    PostgREST (sem N+1, **sem migration**). RLS já cobre por membership; passa por
+    `requireMember`.
+  - **Painel "Importações anteriores"** no **modo Importar** do workbench (mesma superfície
+    — Princípio V, nenhuma rota nova), **read-only**, uma linha por busca com: **base de
+    dados** (`database`), **data da importação** (`created_at`, exibida `dd/mm/aaaa`) e
+    **quantidade de artigos** (contagem de `record`). Vazio → estado discreto
+    ("Nenhuma importação ainda."). Tema do design system.
+- **Não entra (YAGNI):** desfazer/reverter importação; editar o registro de busca; expandir
+  artigos da busca; paginação/filtro; nova FR.
+- **Depende de:** Fatia 3 (`search`/`record`/workbench/modo Importar), Fatia 7 (design
+  system). **Ambas mergeadas.**
+- **Skills:** `react-best-practices`, `nextjs-best-practices`, `frontend-design`.
+- **Testes-chave:**
+  - **integração (banco direto):** `listSearches` retorna **uma linha por busca** com a
+    contagem de `record` correta (estável mesmo após dedup, que altera `corpus_state` e não
+    apaga linhas); isolamento por review (RLS).
+  - **unit (componente):** painel renderiza uma linha por busca com `database`, data
+    `dd/mm/aaaa` e contagem; estado vazio quando não há importações.
+  - `lint` + `tsc --noEmit` limpos.
 
 ---
 
@@ -474,4 +549,6 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 9 — Correção da semântica PRISMA (fluxo cumulativo) (CHECKPOINT 3 — mergeada — merge `c9c4e64`)
 - [x] Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (CHECKPOINT 3 — mergeada — merge `468f878`)
 - [x] Fatia 11 — Re-derivação segura de critérios (idempotência + guarda de fase) (CHECKPOINT 3 — mergeada — merge `14aa0dc`)
-- [ ] Fatia 12 — Visualização do markdown no editor de Protocolo (CHECKPOINT 3 — aguardando merge manual)
+- [x] Fatia 12 — Visualização do markdown no editor de Protocolo (CHECKPOINT 3 — mergeada — merge `21192d3`)
+- [ ] Fatia 13 — Polish do modo Importar (fatiada — aguardando autorização do `writing-plans`)
+- [ ] Fatia 14 — Histórico de buscas importadas (fatiada — aguardando autorização do `writing-plans`)
