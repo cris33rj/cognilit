@@ -25,8 +25,8 @@ describe("ImportHistory", () => {
     expect(screen.getByText("PubMed")).toBeInTheDocument();
     const dates = screen.getAllByText(/\d{2}\/\d{2}\/\d{4}/);
     expect(dates).toHaveLength(2);
-    expect(screen.getByText(/12/)).toBeInTheDocument();
-    expect(screen.getByText(/5/)).toBeInTheDocument();
+    expect(screen.getByText("12 artigos")).toBeInTheDocument();
+    expect(screen.getByText("5 artigos")).toBeInTheDocument();
   });
 
   it("mostra estado vazio quando não há importações", () => {
