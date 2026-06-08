@@ -34,7 +34,7 @@ export interface SearchSummary {
   recordCount: number;
 }
 
-interface RawSearchRow {
+export interface RawSearchRow {
   id: string;
   database: string;
   created_at: string;
@@ -66,6 +66,6 @@ export async function listSearches(reviewId: string): Promise<SearchSummary[]> {
     .eq("review_id", reviewId)
     .order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
-  // Embedded-count select widens the inferred type além das generics do supabase-js.
+  // Embedded-count select widens the inferred type além das generics do supabase-js; cast via unknown.
   return toSearchSummaries((data ?? []) as unknown as RawSearchRow[]);
 }
