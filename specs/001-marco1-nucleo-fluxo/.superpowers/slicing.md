@@ -550,5 +550,5 @@ Próximo passo: `writing-plans` da Fatia 1 — **apenas sob autorização explí
 - [x] Fatia 10 — Indicador de processamento nos gatilhos síncronos de IA (CHECKPOINT 3 — mergeada — merge `468f878`)
 - [x] Fatia 11 — Re-derivação segura de critérios (idempotência + guarda de fase) (CHECKPOINT 3 — mergeada — merge `14aa0dc`)
 - [x] Fatia 12 — Visualização do markdown no editor de Protocolo (CHECKPOINT 3 — mergeada — merge `21192d3`)
-- [ ] Fatia 13 — Polish do modo Importar (fatiada — aguardando autorização do `writing-plans`)
+- [x] Fatia 13 — Polish do modo Importar (CHECKPOINT 3 — aguardando merge manual)
 - [ ] Fatia 14 — Histórico de buscas importadas (fatiada — aguardando autorização do `writing-plans`)
