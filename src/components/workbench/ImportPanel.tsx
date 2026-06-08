@@ -91,7 +91,7 @@ export function ImportPanel({
   return (
     <section className="flex flex-col gap-4">
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">
+        <span id="import-file-desc" className="text-sm font-medium">
           Arquivo de referências (RIS, BibTeX ou CSV)
         </span>
         <div className="flex items-center gap-3">
@@ -114,6 +114,7 @@ export function ImportPanel({
           type="file"
           accept=".ris,.bib,.bibtex,.csv"
           onChange={onFile}
+          aria-describedby="import-file-desc"
           className="sr-only"
         />
       </div>

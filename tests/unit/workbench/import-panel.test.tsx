@@ -47,7 +47,7 @@ describe("ImportPanel — controle de arquivo e hits", () => {
     render(<ImportPanel reviewId="r1" suggestedQuery="" />);
 
     const file = new File([RIS_TWO], "busca.ris", { type: "text/plain" });
-    const input = document.querySelector<HTMLInputElement>("#import-file")!;
+    const input = screen.getByLabelText("Escolher arquivo");
     await user.upload(input, file);
 
     await waitFor(() =>
@@ -60,7 +60,7 @@ describe("ImportPanel — controle de arquivo e hits", () => {
     render(<ImportPanel reviewId="r1" suggestedQuery="" />);
 
     const file = new File([RIS_TWO], "busca.ris", { type: "text/plain" });
-    const input = document.querySelector<HTMLInputElement>("#import-file")!;
+    const input = screen.getByLabelText("Escolher arquivo");
     await user.upload(input, file);
 
     await waitFor(() =>
