@@ -1,6 +1,10 @@
 import { createClient } from "@/lib/supabase/server";
 import { composeSuggestedQuery } from "./suggest";
 
+interface SearchTermRow {
+  text: string;
+}
+
 /**
  * Seed da string de busca para o modo Importar: termos de busca derivados por IA
  * (kind='search_term') ainda não rejeitados, compostos como sugestão editável (A-13.2).
@@ -16,6 +20,6 @@ export async function getSuggestedQuery(reviewId: string): Promise<string> {
     .neq("ratification_state", "rejected")
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
-  const terms = ((data ?? []) as Array<{ text: string }>).map((r) => r.text);
+  const terms = ((data ?? []) as SearchTermRow[]).map((r) => r.text);
   return composeSuggestedQuery(terms);
 }

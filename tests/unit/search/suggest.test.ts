@@ -18,4 +18,8 @@ describe("composeSuggestedQuery", () => {
     expect(composeSuggestedQuery([])).toBe("");
     expect(composeSuggestedQuery(["", "   "])).toBe("");
   });
+
+  it("um único termo não ganha separador", () => {
+    expect(composeSuggestedQuery(["active learning"])).toBe("active learning");
+  });
 });
