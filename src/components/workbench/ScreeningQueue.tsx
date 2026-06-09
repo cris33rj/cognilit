@@ -6,6 +6,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { SuggestionChip } from "@/components/ai/SuggestionChip";
 import { ShortcutLegend } from "@/components/workbench/ShortcutLegend";
+import { RecordDetail } from "@/components/workbench/RecordDetail";
+import type { RecordDetailData } from "@/lib/record/queries";
 import { DENSITIES, type Density } from "@/lib/screening/config";
 import {
   applyQueueView,
@@ -38,6 +40,10 @@ export interface ScreeningQueueProps {
   }) => Promise<{ ok: boolean }>;
   onReverse: (decisionId: string) => Promise<{ ok: boolean }>;
   onReasonUsage: (reasonId: string) => Promise<ReasonUsage[]>;
+  loadDetail: (
+    reviewId: string,
+    recordId: string,
+  ) => Promise<RecordDetailData | null>;
 }
 
 export function ScreeningQueue({
@@ -50,6 +56,7 @@ export function ScreeningQueue({
   onDecide,
   onReverse,
   onReasonUsage,
+  loadDetail,
 }: ScreeningQueueProps) {
   const qc = useQueryClient();
   const router = useRouter();
@@ -121,6 +128,18 @@ export function ScreeningQueue({
       ),
     [rows, view, stage],
   );
+
+  // Detalhe rico do registro focado — só no T/R, buscado sob demanda (não incha a
+  // fila de ~5.000 linhas). Cache por recordId (Fatia 15).
+  const focusedRecordId = visibleRows[focusIdx]?.recordId ?? null;
+  const detail = useQuery({
+    queryKey: ["record-detail", reviewId, focusedRecordId],
+    queryFn: () => loadDetail(reviewId, focusedRecordId as string),
+    enabled: stage === "title_abstract" && !!focusedRecordId,
+    // O metadado do registro não muda durante a sessão de triagem; evita refetch
+    // de fundo a cada revisita (j/k) num corpus de ~5.000 (review minor).
+    staleTime: 60_000,
+  });
 
   const rowHeight = DENSITIES.find((d) => d.key === density)?.rowHeight ?? 56;
 
@@ -635,112 +654,129 @@ export function ScreeningQueue({
         </div>
       )}
 
-      {/* Grade virtualizada (FR-028, FR-041) */}
+      {/* Grade virtualizada (FR-028, FR-041) + painel de detalhe no T/R (Fatia 15) */}
       <div
-        ref={parentRef}
-        role="grid"
-        aria-label="Fila de triagem"
-        tabIndex={0}
-        className="h-[60vh] overflow-auto rounded border focus:outline focus:outline-2 focus:outline-accent"
+        className={
+          stage === "title_abstract" ? "flex items-start gap-4" : undefined
+        }
       >
-        {queue.isLoading ? (
-          <p className="p-3 text-sm text-ink-faint">Carregando…</p>
-        ) : visibleRows.length === 0 ? (
-          <p className="p-3 text-sm text-ink-faint">
-            Nenhum registro nesta fila.
-          </p>
-        ) : (
-          <div
-            role="rowgroup"
-            style={{ height: virtualizer.getTotalSize(), position: "relative" }}
-          >
-            {virtualizer.getVirtualItems().map((v) => {
-              const row = visibleRows[v.index];
-              if (!row) return null;
-              const focused = v.index === focusIdx;
-              const isSelected = selected.has(row.recordId);
-              return (
-                <div
-                  key={row.recordId}
-                  role="row"
-                  aria-selected={isSelected}
-                  aria-current={focused ? true : undefined}
-                  onClick={() => setFocusIdx(v.index)}
-                  className={`absolute left-0 top-0 flex w-full items-center gap-3 border-b px-3 ${
-                    focused
-                      ? "bg-accent-wash outline outline-2 outline-accent"
-                      : ""
-                  }`}
-                  style={{
-                    height: v.size,
-                    transform: `translateY(${v.start}px)`,
-                  }}
-                >
-                  {/* Checkbox de seleção para ações em lote (FR-039) */}
-                  <input
-                    type="checkbox"
-                    role="gridcell"
-                    aria-label={`Selecionar ${row.title}`}
-                    checked={isSelected}
-                    onChange={() => toggleSelect(row.recordId)}
-                  />
+        <div
+          ref={parentRef}
+          role="grid"
+          aria-label="Fila de triagem"
+          tabIndex={0}
+          className={`h-[60vh] overflow-auto rounded border focus:outline focus:outline-2 focus:outline-accent ${
+            stage === "title_abstract" ? "min-w-0 flex-1" : ""
+          }`}
+        >
+          {queue.isLoading ? (
+            <p className="p-3 text-sm text-ink-faint">Carregando…</p>
+          ) : visibleRows.length === 0 ? (
+            <p className="p-3 text-sm text-ink-faint">
+              Nenhum registro nesta fila.
+            </p>
+          ) : (
+            <div
+              role="rowgroup"
+              style={{
+                height: virtualizer.getTotalSize(),
+                position: "relative",
+              }}
+            >
+              {virtualizer.getVirtualItems().map((v) => {
+                const row = visibleRows[v.index];
+                if (!row) return null;
+                const focused = v.index === focusIdx;
+                const isSelected = selected.has(row.recordId);
+                return (
+                  <div
+                    key={row.recordId}
+                    role="row"
+                    aria-selected={isSelected}
+                    aria-current={focused ? true : undefined}
+                    onClick={() => setFocusIdx(v.index)}
+                    className={`absolute left-0 top-0 flex w-full items-center gap-3 border-b px-3 ${
+                      focused
+                        ? "bg-accent-wash outline outline-2 outline-accent"
+                        : ""
+                    }`}
+                    style={{
+                      height: v.size,
+                      transform: `translateY(${v.start}px)`,
+                    }}
+                  >
+                    {/* Checkbox de seleção para ações em lote (FR-039) */}
+                    <input
+                      type="checkbox"
+                      role="gridcell"
+                      aria-label={`Selecionar ${row.title}`}
+                      checked={isSelected}
+                      onChange={() => toggleSelect(row.recordId)}
+                    />
 
-                  {/* Título e ano */}
-                  <span role="gridcell" className="flex-1 truncate text-sm">
-                    {row.title}{" "}
-                    <span className="text-xs text-ink-faint">
-                      ({row.year ?? "—"})
+                    {/* Título e ano */}
+                    <span role="gridcell" className="flex-1 truncate text-sm">
+                      {row.title}{" "}
+                      <span className="text-xs text-ink-faint">
+                        ({row.year ?? "—"})
+                      </span>
                     </span>
-                  </span>
 
-                  {/* Decisão / estado atual — depende do estágio: no Texto completo
+                    {/* Decisão / estado atual — depende do estágio: no Texto completo
                       todo registro já tem tsDecision='included', então mostrar
                       tsDecision aqui mascararia a decisão de TC (sempre 'included').
                       Por isso exibimos a decisão da etapa corrente. */}
-                  <span role="gridcell" className="text-xs text-ink-soft">
-                    {stage === "full_text"
-                      ? (row.ftDecision ?? row.corpusState)
-                      : (row.tsDecision ?? row.corpusState)}
-                  </span>
+                    <span role="gridcell" className="text-xs text-ink-soft">
+                      {stage === "full_text"
+                        ? (row.ftDecision ?? row.corpusState)
+                        : (row.tsDecision ?? row.corpusState)}
+                    </span>
 
-                  {/* Sugestão de IA — visualmente distinta de dado humano (SC-005).
+                    {/* Sugestão de IA — visualmente distinta de dado humano (SC-005).
                       SuggestionChip aceita apenas { state } (sem children); o
                       texto da recomendação e razão são exibidos junto ao chip. */}
-                  {row.ai && (
-                    <span
-                      role="gridcell"
-                      className="flex items-center gap-1"
-                      title={row.ai.reason ?? undefined}
-                    >
-                      <SuggestionChip state={row.ai.state} />
-                      <span className="text-xs text-ink-soft">
-                        {row.ai.recommendation === "include"
-                          ? "incluir"
-                          : "excluir"}
-                        {row.ai.reason ? ` — ${row.ai.reason}` : ""}
-                      </span>
-                    </span>
-                  )}
-
-                  {/* Desfazer decisão — disponível quando há decisão não revertida (FR-026) */}
-                  {row.decisionId && (
-                    <span role="gridcell">
-                      <button
-                        type="button"
-                        className="rounded border px-2 py-0.5 text-xs text-ink-soft hover:bg-paper-2"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleReverse(row.decisionId!);
-                        }}
+                    {row.ai && (
+                      <span
+                        role="gridcell"
+                        className="flex items-center gap-1"
+                        title={row.ai.reason ?? undefined}
                       >
-                        Desfazer
-                      </button>
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                        <SuggestionChip state={row.ai.state} />
+                        <span className="text-xs text-ink-soft">
+                          {row.ai.recommendation === "include"
+                            ? "incluir"
+                            : "excluir"}
+                          {row.ai.reason ? ` — ${row.ai.reason}` : ""}
+                        </span>
+                      </span>
+                    )}
+
+                    {/* Desfazer decisão — disponível quando há decisão não revertida (FR-026) */}
+                    {row.decisionId && (
+                      <span role="gridcell">
+                        <button
+                          type="button"
+                          className="rounded border px-2 py-0.5 text-xs text-ink-soft hover:bg-paper-2"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleReverse(row.decisionId!);
+                          }}
+                        >
+                          Desfazer
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        {stage === "title_abstract" && (
+          <RecordDetail
+            detail={detail.data ?? null}
+            isLoading={detail.isLoading}
+          />
         )}
       </div>
     </div>

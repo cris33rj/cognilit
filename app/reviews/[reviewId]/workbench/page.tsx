@@ -17,6 +17,7 @@ import {
   removeExclusionReason,
   decideScreening,
   reverseScreening,
+  fetchRecordDetail,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +76,7 @@ export default async function WorkbenchPage({
             onDecide={decideScreening.bind(null, reviewId)}
             onReverse={reverseScreening.bind(null, reviewId)}
             onReasonUsage={fetchReasonUsage.bind(null, reviewId)}
+            loadDetail={fetchRecordDetail}
           />
         ) : (
           <p className="text-sm text-ink-soft">
