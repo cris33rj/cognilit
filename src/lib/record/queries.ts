@@ -3,7 +3,7 @@ import type { SourceFormat } from "@shared/import/types";
 import { extractRawFields } from "./raw-fields";
 
 /** Select reusado pelo teste de integração (deve casar com a query abaixo). */
-export const RECORD_DETAIL_SELECT = "id, source_format, metadata, raw";
+export const RECORD_DETAIL_SELECT = "id, source_format, metadata, raw" as const;
 
 interface RecordMetadata {
   title?: string | null;

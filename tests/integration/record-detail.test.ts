@@ -11,7 +11,7 @@ import {
 
 const ris = readFileSync("tests/fixtures/import/detail-rich.ris", "utf8");
 
-describe("getRecordDetail — extração de periódico/palavras-chave do raw", () => {
+describe("detalhe do registro (integração) — extração de periódico/palavras-chave do raw", () => {
   let userClient: Awaited<ReturnType<typeof signUpUser>>["client"];
   let reviewId: string;
 
