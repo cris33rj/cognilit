@@ -177,3 +177,57 @@ test("Texto completo: gestão de motivos (adicionar e remover inline) — Fatia 
     .click();
   await expect(panel.getByText(novo)).toHaveCount(0, { timeout: 10_000 });
 });
+
+test("triagem T/R: painel de detalhe mostra periódico e palavras-chave do registro focado", async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+
+  // Setup próprio: importa a fixture rica (com JO/KW), não a sample.ris.
+  const email = `e2e_detail_${Date.now()}@example.com`;
+  await page.goto("/signup");
+  await page.getByLabel("E-mail").fill(email);
+  await page.getByLabel("Senha").fill("senha-teste-123");
+  await page.getByRole("button", { name: "Criar conta" }).click();
+  await expect(page).toHaveURL(/\/reviews/);
+
+  await page.getByRole("link", { name: "Nova Revisão" }).click();
+  await page.getByLabel("Título da Revisão").fill("Revisão e2e detalhe");
+  await page.getByRole("button", { name: "Criar Revisão" }).click();
+  await expect(page).toHaveURL(/\/reviews\/[0-9a-f-]+$/);
+  const reviewId = page.url().split("/reviews/")[1]?.split("/")[0];
+  if (!reviewId) throw new Error("reviewId não encontrado na URL");
+
+  await page.getByRole("link", { name: "Importar" }).click();
+  await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
+  await page.setInputFiles(
+    "#import-file",
+    path.resolve("tests/fixtures/import/detail-rich.ris"),
+  );
+  await expect(page.getByText("Edge AI on wearables")).toBeVisible();
+  await page.getByPlaceholder("String de busca").fill("wearables e2e");
+  await page.getByPlaceholder("Base consultada").fill("ERIC");
+  await page.locator('input[type="date"]').fill("2026-05-30");
+  await page.getByPlaceholder("Nº de hits").fill("1");
+  await page.getByRole("button", { name: /confirmar importação/i }).click();
+  await expect(page.getByLabel("Contadores PRISMA")).toContainText(
+    "Identificados: 1",
+    { timeout: 20_000 },
+  );
+
+  // T/R: o primeiro registro fica focado por padrão (focusIdx=0) → painel preenchido.
+  await page.goto(`/reviews/${reviewId}/workbench?mode=title_abstract`);
+  const detail = page.getByLabel("Detalhe do registro");
+  await expect(detail).toBeVisible({ timeout: 15_000 });
+  await expect(detail).toContainText("Journal of Wearable Tech");
+  await expect(detail).toContainText("edge AI");
+
+  // Texto completo: o painel de detalhe NÃO existe.
+  await page.goto(`/reviews/${reviewId}/workbench?mode=full_text`);
+  await expect(
+    page.getByRole("grid", { name: /fila de triagem/i }),
+  ).toBeVisible({
+    timeout: 15_000,
+  });
+  await expect(page.getByLabel("Detalhe do registro")).toHaveCount(0);
+});
