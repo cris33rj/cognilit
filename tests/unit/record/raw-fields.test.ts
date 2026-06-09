@@ -34,6 +34,17 @@ describe("extractRawFields — RIS", () => {
       pages: null,
     });
   });
+
+  it("SP sem EP → pages é só o SP", () => {
+    const out = extractRawFields("ris", { SP: "45" });
+    expect(out.pages).toBe("45");
+  });
+
+  it("campo numérico é coercido para string; T2 é fallback de periódico", () => {
+    const out = extractRawFields("ris", { T2: "Proc. X", VL: 12 });
+    expect(out.journal).toBe("Proc. X");
+    expect(out.volume).toBe("12");
+  });
 });
 
 describe("extractRawFields — BibTeX", () => {
