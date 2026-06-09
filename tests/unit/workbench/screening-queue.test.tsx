@@ -93,6 +93,20 @@ function renderQueue(
         onDecide={vi.fn().mockResolvedValue({ ok: true })}
         onReverse={vi.fn().mockResolvedValue({ ok: true })}
         onReasonUsage={vi.fn().mockResolvedValue([] as ReasonUsage[])}
+        loadDetail={vi.fn().mockResolvedValue({
+          id: "r1",
+          title: "Estudo Alpha",
+          authors: ["Autor X"],
+          year: 2021,
+          doi: null,
+          language: "pt",
+          abstract: "resumo alpha",
+          journal: "Periódico Alpha",
+          keywords: ["tema"],
+          volume: null,
+          issue: null,
+          pages: null,
+        })}
         {...over}
       />
     </QueryClientProvider>,
@@ -377,6 +391,22 @@ describe("ScreeningQueue (US4)", () => {
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /desfazer exclusão de artigo y/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("T/R: mostra o painel de detalhe do registro focado", async () => {
+    renderQueue({ stage: "title_abstract" });
+    expect(
+      await screen.findByLabelText("Detalhe do registro"),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Periódico Alpha")).toBeInTheDocument();
+  });
+
+  it("Texto completo: NÃO mostra o painel de detalhe", async () => {
+    renderQueue({ stage: "full_text" });
+    await screen.findByRole("grid", { name: /fila de triagem/i });
+    expect(
+      screen.queryByLabelText("Detalhe do registro"),
     ).not.toBeInTheDocument();
   });
 });
