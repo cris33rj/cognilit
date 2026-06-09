@@ -136,6 +136,9 @@ export function ScreeningQueue({
     queryKey: ["record-detail", reviewId, focusedRecordId],
     queryFn: () => loadDetail(reviewId, focusedRecordId as string),
     enabled: stage === "title_abstract" && !!focusedRecordId,
+    // O metadado do registro não muda durante a sessão de triagem; evita refetch
+    // de fundo a cada revisita (j/k) num corpus de ~5.000 (review minor).
+    staleTime: 60_000,
   });
 
   const rowHeight = DENSITIES.find((d) => d.key === density)?.rowHeight ?? 56;
