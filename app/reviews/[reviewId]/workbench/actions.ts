@@ -20,6 +20,7 @@ import { runScreeningWorkerWith } from "@/lib/screening/run";
 import { getLLMProvider } from "@/lib/ai/llm";
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { MissingByokError } from "@/lib/ai/llm/types";
+import { getRecordDetail } from "@/lib/record/queries";
 
 async function requireMember(reviewId: string) {
   const supabase = await createClient();
@@ -148,6 +149,12 @@ export async function fetchScreeningQueue(
 ) {
   await requireMember(reviewId);
   return listScreeningQueue(reviewId, stage);
+}
+
+/** Detalhe rico de um registro para o painel mestre-detalhe do T/R (Fatia 15). */
+export async function fetchRecordDetail(reviewId: string, recordId: string) {
+  await requireMember(reviewId);
+  return getRecordDetail(recordId);
 }
 
 export async function fetchExclusionReasons(reviewId: string) {
