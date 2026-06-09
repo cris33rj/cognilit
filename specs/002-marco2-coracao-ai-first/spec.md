@@ -33,6 +33,15 @@ PRISMA renderizado nem exportações (Marco 3); **não** inclui risco de viés n
 Certeza/CERQual (fases opcionais, depois do núcleo); **não** inclui visualizador
 de PDF lado-a-lado (v1.1).
 
+## Clarifications
+
+### Session 2026-06-09
+
+- Q: A extração por IA depende da busca semântica/embeddings para localizar trechos no PDF, ou processa o texto diretamente? → A: **Direta** — a extração lê o texto do documento diretamente (com chunking interno para docs longos, mecanismo decidido no `/plan`); a recuperação semântica (RAG) é capacidade **independente** (US5). US3 (P1) não depende do stack de embeddings (US5, P2).
+- Q: Quantos formulários de extração uma Revisão pode ter? → A: **Um único** formulário de extração por Revisão (análogo à lista de motivos de exclusão do Marco 1). A engine permanece genérica para acomodar futuros instrumentos (risco de viés/CERQual) como fases distintas.
+- Q: Qual o alvo de escala de PDFs por Revisão (para dimensionar o pipeline assíncrono e o gate de performance)? → A: **Centenas (~500 PDFs por Revisão)**, dezenas de páginas cada — fração do corpus de ~5.000 registros do Marco 1 incluída como estudos após o texto completo.
+- Q: Quando a extração por IA é re-executada sobre um estudo que já tem valores validados, o que acontece? → A: As **novas sugestões entram como pendentes ao lado dos valores validados**, sem sobrescrever; o humano decide. Preserva ratificação humana e trilha de auditoria.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Anexar PDFs e extrair seu texto por pipeline assíncrono híbrido (Priority: P1)
@@ -82,8 +91,9 @@ corpus de PDFs com texto pronto para IA.
 
 ### User Story 2 - Montar um formulário de extração configurável (Priority: P1)
 
-O pesquisador monta, para a sua Revisão, um **formulário de extração** composto
-de **campos tipados** (texto, número, data, booleano, escolha de lista, etc.).
+O pesquisador monta, para a sua Revisão, o seu **formulário de extração** (um
+único por Revisão) composto de **campos tipados** (texto, número, data, booleano,
+escolha de lista, etc.).
 Esse formulário define o que a IA vai extrair de cada estudo e o que o humano vai
 validar. A mesma engine de "formulário configurável" é projetada para servir, no
 futuro, ao risco de viés e ao CERQual — mas essas fases não são implementadas
@@ -259,9 +269,9 @@ recuperação de evidência ancorada sobre o corpus da Revisão.
 - **Sugestão de IA indisponível** (falha do provedor ou chave BYOK ausente): a
   extração e a busca semântica sinalizam a indisponibilidade; a extração pode ser
   feita manualmente sobre o formulário; o fluxo não trava.
-- **Reprocessar um PDF já processado**: o reprocessamento é explícito e
-  auditável; sugestões e extrações anteriores não são sobrescritas
-  silenciosamente.
+- **Reprocessar um PDF / re-executar a extração**: o reprocessamento é explícito e
+  auditável; as novas sugestões entram como **pendentes ao lado** dos valores já
+  validados, sem sobrescrever — o humano decide qual prevalece (ver FR-019a).
 - **Editar o formulário após extrações existentes**: mudanças no formulário não
   apagam silenciosamente valores já validados; o sistema mantém a trilha coerente
   e sinaliza campos afetados.
@@ -310,10 +320,11 @@ recuperação de evidência ancorada sobre o corpus da Revisão.
   booleano e escolha de lista; com nome e ordenação por campo.
 - **FR-010**: O sistema MUST permitir editar e remover campos do formulário,
   mantendo o formulário consistente e a mudança registrada.
-- **FR-011**: O formulário de extração MUST pertencer à Revisão (configurável por
-  projeto) e a engine de "formulário configurável" MUST ser projetada para
-  acomodar futuramente risco de viés/CERQual **sem** reescrever o núcleo (essas
-  fases não são implementadas neste marco).
+- **FR-011**: Cada Revisão MUST ter **um único** formulário de extração
+  (configurável por projeto, análogo à lista de motivos de exclusão do Marco 1); a
+  engine de "formulário configurável" MUST ser projetada para acomodar futuramente
+  risco de viés/CERQual como **instrumentos/fases distintos**, **sem** reescrever
+  o núcleo (essas fases não são implementadas neste marco).
 
 **Extração por IA: grounding e proveniência (US3 — D11/D12/D13/D22/D24)**
 
@@ -332,6 +343,11 @@ recuperação de evidência ancorada sobre o corpus da Revisão.
 - **FR-017**: Toda chamada de geração por IA MUST passar pela abstração
   `LLMProvider` (herdada do Marco 1); nenhum código de feature instancia um SDK
   de fornecedor diretamente nem contorna essa camada.
+- **FR-017a**: A extração por IA MUST operar sobre o **texto do documento
+  diretamente** (com chunking interno para documentos longos, mecanismo decidido
+  no `/plan`); ela MUST NOT depender da busca semântica/embeddings (US5) para
+  localizar trechos. A recuperação semântica é capacidade **independente**, de
+  modo que US3 (P1) é testável e entregável sem o stack de embeddings (US5, P2).
 
 **Validação humana no laço (US3 — D11/D12)**
 
@@ -340,6 +356,10 @@ recuperação de evidência ancorada sobre o corpus da Revisão.
   `pendente`/`aceita`/`editada`/`rejeitada`/`inferida` explícitos e visíveis.
 - **FR-019**: A IA MUST NOT finalizar/persistir um valor como final sozinha; o
   valor final de um campo só muda por **ação humana** de ratificação.
+- **FR-019a**: Quando a extração por IA é re-executada sobre um estudo que já tem
+  valores validados, as novas sugestões MUST entrar como **pendentes ao lado** dos
+  valores validados, **sem sobrescrevê-los**; o humano decide qual prevalece. A
+  re-execução e a decisão resultante MUST constar na trilha de auditoria.
 - **FR-020**: As superfícies de sugestão da extração MUST **reusar o vocabulário
   visual de IA do Marco 1** (suggestion chip, provenance popover, grounding
   highlight, accept/edit/reject, badge "inferido"), sem reinventar um sistema
@@ -392,8 +412,8 @@ recuperação de evidência ancorada sobre o corpus da Revisão.
   com **origem de proveniência** (`nativo` | `ocr_ia`). Base do grounding e dos
   embeddings.
 - **Formulário de extração (instrumento configurável)**: conjunto ordenado de
-  **campos tipados** pertencente à Revisão; engine genérica reaproveitável
-  (futuro: risco de viés/CERQual).
+  **campos tipados**, **um por Revisão**; engine genérica reaproveitável como
+  instrumentos distintos no futuro (risco de viés/CERQual).
 - **Campo de extração**: definição (nome, tipo) e, quando preenchido, o valor
   final humano associado à sugestão de IA e seu estado.
 - **Sugestão de IA (extração)**: saída do agente para um campo —
@@ -446,6 +466,10 @@ recuperação de evidência ancorada sobre o corpus da Revisão.
   Revisão (0 vazamentos no armazenamento em testes de isolamento).
 - **SC-012**: O gatilho síncrono de upload nunca executa parsing pesado inline —
   100% do trabalho pesado de texto ocorre no worker assíncrono.
+- **SC-013**: O pipeline de texto, a extração em lote e a geração de embeddings
+  processam um corpus da ordem de **~500 PDFs por Revisão** (dezenas de páginas
+  cada) de forma assíncrona, retomável e resiliente por-item, sem bloquear a
+  interface — verificável como gate de performance dos testes.
 
 ## Assumptions
 
@@ -472,7 +496,12 @@ recuperação de evidência ancorada sobre o corpus da Revisão.
   que a Edge Function só enfileira.
 - **EmbeddingProvider e dimensão do vetor**: default Voyage AI hospedado; o schema
   acomoda dimensão variável; modelo local in-process fica plugável como
-  alternativa **futura** (não implementado aqui).
+  alternativa **futura** (não implementado aqui). A busca semântica (US5) é
+  **independente** da extração (US3): a extração não consome embeddings.
+- **Escala do corpus de PDFs**: o alvo de dimensionamento é **~500 PDFs por
+  Revisão** (dezenas de páginas cada), fração dos ~5.000 registros do Marco 1
+  incluída como estudos após o texto completo. O limite concreto de tamanho/página
+  por arquivo é decisão do `/plan`.
 - **Estimativa de custo é aproximada**: a estimativa prévia de tokens/custo é uma
   aproximação; a contabilidade acumulada reflete o consumo real.
 - **Chave BYOK ausente**: sem a 1ª chave (LLM) a extração roda manualmente; sem a
