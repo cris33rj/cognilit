@@ -41,6 +41,7 @@ de PDF lado-a-lado (v1.1).
 - Q: Quantos formulários de extração uma Revisão pode ter? → A: **Um único** formulário de extração por Revisão (análogo à lista de motivos de exclusão do Marco 1). A engine permanece genérica para acomodar futuros instrumentos (risco de viés/CERQual) como fases distintas.
 - Q: Qual o alvo de escala de PDFs por Revisão (para dimensionar o pipeline assíncrono e o gate de performance)? → A: **Centenas (~500 PDFs por Revisão)**, dezenas de páginas cada — fração do corpus de ~5.000 registros do Marco 1 incluída como estudos após o texto completo.
 - Q: Quando a extração por IA é re-executada sobre um estudo que já tem valores validados, o que acontece? → A: As **novas sugestões entram como pendentes ao lado dos valores validados**, sem sobrescrever; o humano decide. Preserva ratificação humana e trilha de auditoria.
+- Q: Em que ponto do fluxo o PDF é anexado a um registro? → A: Na **etapa de Texto completo da triagem** — o anexo de PDF é uma afordância do **modo Texto completo do workbench** do Marco 1 (registro com `corpus_state ∈ {included_ts, included_ft}`, i.e., que passou em Título/Resumo). Estende o modo existente **sem refragmentar** a triagem (Princípio V). A **extração por IA** (US3) é fase distinta e opera sobre **estudos** (registros incluídos após o Texto completo).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -288,8 +289,13 @@ recuperação de evidência ancorada sobre o corpus da Revisão.
 
 **Ingestão e armazenamento de PDF (US1)**
 
-- **FR-001**: O sistema MUST permitir anexar um ou mais PDFs a um **estudo** (um
-  registro incluído na triagem), associando cada PDF ao estudo dentro da Revisão.
+- **FR-001**: O sistema MUST permitir anexar um ou mais PDFs a um registro **na
+  etapa de Texto completo da triagem** — afordância do **modo Texto completo do
+  workbench** (registro que passou em Título/Resumo, `corpus_state ∈ {included_ts,
+  included_ft}`), associando cada PDF ao registro dentro da Revisão. O anexo
+  **estende** o modo existente, **sem** refragmentar a triagem (Princípio V). A
+  extração por IA (US3) opera depois, sobre **estudos** (incluídos após o Texto
+  completo).
 - **FR-002**: O sistema MUST armazenar os PDFs em armazenamento **escopado por
   Revisão**, de modo que um PDF de uma Revisão nunca seja acessível a partir de
   outra Revisão ou por usuário que não é membro (RLS).
@@ -477,9 +483,15 @@ recuperação de evidência ancorada sobre o corpus da Revisão.
   triado, trilha de auditoria, vocabulário visual de IA e a abstração
   `LLMProvider`/BYOK (1ª chave) já existem e são reaproveitados; este marco não os
   refaz.
-- **PDFs anexam a estudos**: o alvo do anexo de PDF é um **estudo** (registro que
-  passou na triagem do Marco 1), conforme o input. Anexar PDFs a registros ainda
-  não triados está fora de escopo deste marco.
+- **Onde o PDF é anexado**: na **etapa de Texto completo da triagem**, como
+  afordância do **modo Texto completo do workbench** do Marco 1 — para o registro
+  que passou em Título/Resumo (`corpus_state ∈ {included_ts, included_ft}`). É
+  necessário ter o PDF para conduzir a triagem de texto completo. O anexo estende o
+  workbench sem criar tela separada (Princípio V). Anexar PDFs a registros ainda em
+  Título/Resumo (não promovidos a Texto completo) está fora de escopo deste marco.
+- **Extração opera sobre estudos**: a extração por IA (US3) é fase distinta,
+  pós-triagem, e tem como alvo **estudos** (registros com `corpus_state =
+  included_ft`, incluídos após o Texto completo).
 - **Detecção de tipo de PDF**: a distinção entre PDF com camada de texto e PDF
   escaneado é feita automaticamente pelo pipeline; o mecanismo concreto e a
   biblioteca de extração são decisão do `/plan`, validados contra PDFs reais do

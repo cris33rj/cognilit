@@ -57,9 +57,15 @@ RLS transversal: toda tabela nova com `review_id` é acessível só se existe
 - `processing_status` enum `queued | processing | text_ready | failed | partial`
   (máquina de estados abaixo; FR-004).
 - `created_at`
-- **Validação**: anexo só a `record` cujo `corpus_state ∈ {included_ts, included_ft}`
-  (é estudo); arquivo MIME `application/pdf` e íntegro, senão rejeita no enqueue
-  (FR-003) sem persistir `document`.
+- **Validação**: anexo só a `record` que **passou em Título/Resumo** e está na/após
+  a etapa de Texto completo (`corpus_state ∈ {included_ts, included_ft}`); o anexo é
+  afordância do **modo Texto completo do workbench** (clarificação 2026-06-09),
+  estendendo-o sem refragmentar (Princípio V). Arquivo MIME `application/pdf` e
+  íntegro, senão rejeita no enqueue (FR-003) sem persistir `document`.
+- **Alvo da extração (US3)**: a `ai_extraction_batch`/extração opera sobre
+  **estudos** = `record` com `corpus_state = included_ft` (incluído após o Texto
+  completo). PDF anexado em `included_ts` habilita a triagem de texto completo; a
+  extração vem depois da inclusão final.
 - **RLS**: membros da Revisão. **Storage**: política em `storage.objects` (R7).
 
 ### text_layer  *(camada de texto extraída — US1)*

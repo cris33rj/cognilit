@@ -96,7 +96,7 @@ visualizador de PDF lado-a-lado (v1.1).
 | II | Grounding + proveniência | `extractFields` retorna `{value,source_span,page}`/`not_found`; `grounding`→`text_layer` com `origin`; `provenance` obrigatória; campos `inferido` (FR-014). | ✅ |
 | III | Auditabilidade/reprodutibilidade | Anexar/processar/ratificar/reprocessar → `audit_entry` (insert-only); re-extração não sobrescreve (FR-019a). | ✅ |
 | IV | Isolamento + RLS desde a origem | RLS em todas as tabelas novas; **Storage** com policy por `review_id` no path; busca semântica filtra `review_id` (SC-011). | ✅ |
-| V | Triagem unificada (workbench) | Marco 2 **não** toca o workbench de triagem; Extração é **fase distinta** (D19), alcançada pelo trilho de fases — não refragmenta a triagem. | ✅ |
+| V | Triagem unificada (workbench) | O anexo de PDF (US1) **estende** o **modo Texto completo do workbench** existente (afordância de upload), sem criar tela separada nem refragmentar a triagem; a Extração (US3) é **fase distinta** (D19) alcançada pelo trilho de fases. | ✅ |
 | VI | PRISMA vivo | Sem impacto nos contadores (extração é pós-triagem); nada que divirja do PRISMA do Marco 1. | ✅ (n/a) |
 | VII | IA atrás de abstração + BYOK | `LLMProvider` (estendido) e novo `EmbeddingProvider` como pontos únicos; 2ª chave via Vault; estimativa pré-lote (FR-022); vocabulário visual de IA **reusado**. | ✅ |
 | VIII | Trabalho pesado = job assíncrono | `pdf_text_pipeline`/`ai_extraction_batch`/`embedding_batch` como jobs; Edge **só enfileira**; worker `pg_cron` por-item, retomável, resiliente. | ✅ |
@@ -151,7 +151,8 @@ src/
 ├── components/
 │   ├── ai/                 # vocabulário visual de IA do Marco 1 — REUSADO (FR-020)
 │   ├── extraction/         [novo] form builder, grid de campos, painel de validação
-│   └── documents/          [novo] upload de PDF, estado de processamento, lista
+│   └── documents/          [novo] upload de PDF (montado no modo Texto completo do
+│                           #  workbench — estende, não refragmenta), status, lista
 ├── hooks/                  # use*.ts — useExtraction, useDocuments, useSemanticSearch [novos]
 ├── lib/
 │   ├── ai/
@@ -201,7 +202,10 @@ A fatiação é decidida pelo `brainstorming` da Sessão B, mas respeita:
   extensão `vector`/HNSW precedem o código que os consome.
 - **Não-regressão do Marco 1** (Princípio V + diretiva de não-regressão): nenhuma fatia
   refatora o workbench/triagem nem código herdado, exceto onde uma tarefa o exigir
-  explicitamente e com justificativa. Os `ALTER`s a enums são **aditivos**.
+  explicitamente e com justificativa. **Exceção explícita e justificada**: a fatia de
+  ingestão **adiciona** a afordância de upload de PDF ao **modo Texto completo do
+  workbench** (clarificação 2026-06-09) — uma extensão aditiva que **não** refragmenta
+  a triagem (Princípio V preservado). Os `ALTER`s a enums são **aditivos**.
 - **US3 (extração) independente de US5 (busca semântica)** — clarificação Q1: a fatia
   de extração não depende da fatia de embeddings; ordenar US5 depois.
 - **Dependência natural**: ingestão+pipeline de texto (US1) precede extração (US3) e
