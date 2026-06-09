@@ -65,9 +65,9 @@ export function RecordDetail({
 
           {detail.keywords.length > 0 && (
             <div className="flex flex-wrap gap-1" aria-label="Palavras-chave">
-              {detail.keywords.map((kw) => (
+              {detail.keywords.map((kw, i) => (
                 <span
-                  key={kw}
+                  key={`${kw}-${i}`}
                   className="rounded-full border border-line bg-paper-2 px-2 py-0.5 text-xs text-ink-soft"
                 >
                   {kw}
