@@ -18,6 +18,8 @@ import {
   decideScreening,
   reverseScreening,
   fetchRecordDetail,
+  attachPdf,
+  fetchDocuments,
 } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -77,6 +79,8 @@ export default async function WorkbenchPage({
             onReverse={reverseScreening.bind(null, reviewId)}
             onReasonUsage={fetchReasonUsage.bind(null, reviewId)}
             loadDetail={fetchRecordDetail}
+            loadDocuments={fetchDocuments}
+            onAttachPdf={attachPdf.bind(null, reviewId)}
           />
         ) : (
           <p className="text-sm text-ink-soft">
