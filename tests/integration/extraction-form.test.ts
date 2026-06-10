@@ -163,3 +163,49 @@ describe("update_extraction_field — edita campo, audita antes/depois", () => {
     expect(error!.message).toMatch(/options/i);
   });
 });
+
+describe("remove_extraction_field — soft-delete (não apaga linha), audita", () => {
+  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let fieldId: string;
+
+  beforeAll(async () => {
+    const r = await newReview("Form remove campo");
+    client = r.client;
+    reviewId = r.reviewId;
+    await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
+    const { data } = await client.rpc("add_extraction_field", {
+      p_review_id: reviewId,
+      p_name: "Campo temporário",
+      p_type: "text",
+      p_options: null,
+    });
+    fieldId = data.id;
+  });
+
+  it("marca is_active=false mantendo a linha (não apaga silenciosamente) e audita", async () => {
+    const { data, error } = await client.rpc("remove_extraction_field", {
+      p_field_id: fieldId,
+    });
+    expect(error).toBeNull();
+    expect(data.is_active).toBe(false);
+
+    const svc = serviceClient();
+    const { data: row } = await svc
+      .from("extraction_field")
+      .select("id, is_active")
+      .eq("id", fieldId)
+      .single();
+    expect(row).not.toBeNull(); // linha preservada
+    expect(row!.is_active).toBe(false);
+
+    const { data: audit } = await svc
+      .from("audit_entry")
+      .select("before, after")
+      .eq("review_id", reviewId)
+      .eq("action", "remove_extraction_field")
+      .single();
+    expect((audit!.before as { is_active: boolean }).is_active).toBe(true);
+    expect((audit!.after as { is_active: boolean }).is_active).toBe(false);
+  });
+});

@@ -195,3 +195,43 @@ end;
 $$;
 
 grant execute on function public.update_extraction_field(uuid, text, extraction_field_type, jsonb) to authenticated;
+
+-- ============================================================
+-- RPC: remove_extraction_field — soft-delete (is_active=false), audita. NUNCA DELETE
+-- (forward-safe: extraction_value chega na Fatia 4; nada é apagado silenciosamente).
+-- ============================================================
+create or replace function public.remove_extraction_field(p_field_id uuid)
+returns public.extraction_field
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_before public.extraction_field;
+  v_after public.extraction_field;
+begin
+  select * into v_before from public.extraction_field where id = p_field_id;
+  if not found then
+    raise exception 'field not found';
+  end if;
+  if not public.is_review_member(v_before.review_id) then
+    raise exception 'not a member';
+  end if;
+  if not v_before.is_active then
+    return v_before;  -- idempotente
+  end if;
+
+  update public.extraction_field
+     set is_active = false, updated_at = now()
+   where id = p_field_id
+   returning * into v_after;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (v_before.review_id, 'human', auth.uid(), 'remove_extraction_field', 'extraction_field',
+          p_field_id, to_jsonb(v_before), to_jsonb(v_after));
+
+  return v_after;
+end;
+$$;
+
+grant execute on function public.remove_extraction_field(uuid) to authenticated;

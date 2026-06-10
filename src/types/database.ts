@@ -1527,6 +1527,27 @@ export type Database = {
         }
         Returns: number
       }
+      remove_extraction_field: {
+        Args: { p_field_id: string }
+        Returns: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_field"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       reverse_dedup: { Args: { p_decision_id: string }; Returns: undefined }
       reverse_screening: { Args: { p_decision_id: string }; Returns: undefined }
       seed_default_exclusion_reasons: {
