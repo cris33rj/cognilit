@@ -21,6 +21,8 @@ import { getLLMProvider } from "@/lib/ai/llm";
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { MissingByokError } from "@/lib/ai/llm/types";
 import { getRecordDetail } from "@/lib/record/queries";
+import { attachPdfDocument } from "@/lib/documents/attach";
+import { listDocuments } from "@/lib/documents/queries";
 
 async function requireMember(reviewId: string) {
   const supabase = await createClient();
@@ -266,4 +268,26 @@ export async function runScreeningWorker(reviewId: string) {
   await runScreeningWorkerWith(admin, provider, reviewId, criteria);
   revalidatePath(`/reviews/${reviewId}/workbench`);
   return { ok: true as const };
+}
+
+// ---- Ingestão de PDF (Fatia 1 / US1) — anexo no modo Texto completo ----
+export async function attachPdf(reviewId: string, formData: FormData) {
+  const { supabase } = await requireMember(reviewId);
+  const recordId = String(formData.get("recordId") ?? "");
+  const file = formData.get("file");
+  if (!recordId || !(file instanceof File)) {
+    return { ok: false as const, error: "Arquivo ou estudo ausente." };
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const res = await attachPdfDocument(
+    { supabase },
+    { reviewId, recordId, filename: file.name, bytes },
+  );
+  if (res.ok) revalidatePath(`/reviews/${reviewId}/workbench`);
+  return res;
+}
+
+export async function fetchDocuments(reviewId: string, recordId: string) {
+  const { supabase } = await requireMember(reviewId);
+  return listDocuments({ supabase }, reviewId, recordId);
 }
