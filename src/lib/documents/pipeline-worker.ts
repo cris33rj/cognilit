@@ -65,6 +65,10 @@ export async function processPdfPipelineJob(
         .update({ processing_status: "processing" })
         .eq("id", documentId);
 
+      // Idempotência: limpa camadas de uma execução anterior interrompida deste
+      // mesmo PDF (item ainda 'pending' após crash) antes de reextrair (retomável).
+      await supabase.from("text_layer").delete().eq("document_id", documentId);
+
       const { data: doc, error: docErr } = await supabase
         .from("document")
         .select("storage_path")
@@ -105,8 +109,13 @@ export async function processPdfPipelineJob(
             origin,
           });
           if (tlErr) throw new Error(tlErr.message);
-        } catch {
-          pageFailures += 1; // página falha não derruba o PDF (→ partial)
+        } catch (pageErr) {
+          // Página falha não derruba o PDF (→ partial); registra para observabilidade.
+          console.error(
+            `[pipeline-worker] página ${p.page} falhou no documento ${documentId}:`,
+            pageErr,
+          );
+          pageFailures += 1;
         }
       }
 
