@@ -83,3 +83,61 @@ end;
 $$;
 
 grant execute on function public.ensure_extraction_form(uuid) to authenticated;
+
+-- ============================================================
+-- RPC: add_extraction_field — valida (name + select⇒options), anexa ao fim, audita.
+-- ============================================================
+create or replace function public.add_extraction_field(
+  p_review_id uuid,
+  p_name text,
+  p_type extraction_field_type,
+  p_options jsonb
+)
+returns public.extraction_field
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_form public.extraction_form;
+  v_field public.extraction_field;
+  v_options jsonb;
+  v_next int;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+  if coalesce(btrim(p_name), '') = '' then
+    raise exception 'name required';
+  end if;
+
+  if p_type = 'select' then
+    if p_options is null or jsonb_typeof(p_options) <> 'array' or jsonb_array_length(p_options) = 0 then
+      raise exception 'select requires non-empty options';
+    end if;
+    v_options := p_options;
+  else
+    v_options := null;  -- não-select nunca guarda options (decisão 4)
+  end if;
+
+  select * into v_form from public.extraction_form where review_id = p_review_id;
+  if not found then
+    raise exception 'extraction form not found';
+  end if;
+
+  select coalesce(max(sort_order), 0) + 1 into v_next
+    from public.extraction_field where form_id = v_form.id and is_active;
+
+  insert into public.extraction_field (review_id, form_id, name, type, options, sort_order)
+  values (p_review_id, v_form.id, btrim(p_name), p_type, v_options, v_next)
+  returning * into v_field;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (p_review_id, 'human', auth.uid(), 'add_extraction_field', 'extraction_field', v_field.id,
+          null, to_jsonb(v_field));
+
+  return v_field;
+end;
+$$;
+
+grant execute on function public.add_extraction_field(uuid, text, extraction_field_type, jsonb) to authenticated;

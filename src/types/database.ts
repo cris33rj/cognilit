@@ -1273,6 +1273,32 @@ export type Database = {
         Args: { p_label: string; p_review_id: string }
         Returns: string
       }
+      add_extraction_field: {
+        Args: {
+          p_name: string
+          p_options: Json
+          p_review_id: string
+          p_type: Database["public"]["Enums"]["extraction_field_type"]
+        }
+        Returns: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_field"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       add_protocol_amendment: {
         Args: { p_change: Json; p_review_id: string }
         Returns: {
