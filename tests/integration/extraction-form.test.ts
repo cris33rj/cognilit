@@ -73,7 +73,7 @@ describe("add_extraction_field — cria campo tipado, valida, audita", () => {
       .eq("review_id", reviewId)
       .eq("action", "add_extraction_field");
     expect(audit!.length).toBe(1);
-    expect(audit![0].entity_id).toBe(data.id);
+    expect(audit![0]!.entity_id).toBe(data.id);
   });
 
   it("rejeita select sem options", async () => {
