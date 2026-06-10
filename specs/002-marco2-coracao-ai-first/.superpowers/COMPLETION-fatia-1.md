@@ -1,8 +1,9 @@
 # Fatia 1 — Ingestão de PDF (US1-A) — COMPLETION
 
-**Branch:** `build/002-marco2-coracao-ai-first/1-ingestao-pdf`
+**Branch:** `build/002-marco2-coracao-ai-first/1-ingestao-pdf` (tip `f4c3bf9`)
 **Base:** feature HEAD `8613cdd` (Marco 1 + artefatos da Sessão A)
-**Estado:** ✅ Completa, aguardando **merge manual** (CHECKPOINT 3).
+**Estado:** ✅ Completa e **mergeada** na feature `002-marco2-coracao-ai-first`
+(merge commit `0736b8c`, 2026-06-10). CHECKPOINT 3 concluído — dev fez o merge manual.
 
 ## O que foi entregue
 

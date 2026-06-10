@@ -12,6 +12,22 @@
 
 ---
 
+## Estado de execução das fatias
+
+> Tracking vivo (atualizar ao fim de cada CHECKPOINT 3 / merge). Detalhe por fatia em
+> `COMPLETION-fatia-<n>.md`.
+
+| Fatia | Branch | Estado | Merge |
+|---|---|---|---|
+| **F1** — Ingestão de PDF | `…/1-ingestao-pdf` | ✅ mergeada | `0736b8c` (2026-06-10) |
+| **F2** — Pipeline de texto | `…/2-pipeline-texto` | ⏭️ próxima (writing-plans) | — |
+| **F3** — Formulário de extração | `…/3-formulario-extracao` | ⬜ pendente | — |
+| **F4** — Extração por IA | `…/4-extracao-ia` | ⬜ pendente | — |
+| **F5** — Extração em lote | `…/5-extracao-lote` | ⬜ pendente | — |
+| **F6** — Busca semântica/RAG | `…/6-busca-semantica` | ⬜ pendente | — |
+
+---
+
 ## Resolução dos itens A1–A4 (esclarecidos no brainstorming, 2026-06-09)
 
 ### A1 — Padrão de worker dos jobs de IA → **server-side Node (espelhar screening)**
