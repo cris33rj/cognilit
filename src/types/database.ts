@@ -1392,6 +1392,21 @@ export type Database = {
         Args: { p_review_id: string }
         Returns: undefined
       }
+      ensure_extraction_form: {
+        Args: { p_review_id: string }
+        Returns: {
+          created_at: string
+          id: string
+          review_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_form"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       get_byok_secret: {
         Args: { p_review_id: string }
         Returns: {

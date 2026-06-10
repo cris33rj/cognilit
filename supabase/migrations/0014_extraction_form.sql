@@ -49,3 +49,37 @@ create policy extraction_form_select on public.extraction_form
   for select using (public.is_review_member(review_id));
 create policy extraction_field_select on public.extraction_field
   for select using (public.is_review_member(review_id));
+
+-- ============================================================
+-- RPC: ensure_extraction_form — cria (idempotente) o form 1:1 da Revisão; audita só na criação.
+-- ============================================================
+create or replace function public.ensure_extraction_form(p_review_id uuid)
+returns public.extraction_form
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_form public.extraction_form;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  select * into v_form from public.extraction_form where review_id = p_review_id;
+  if found then
+    return v_form;
+  end if;
+
+  insert into public.extraction_form (review_id) values (p_review_id)
+  returning * into v_form;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (p_review_id, 'human', auth.uid(), 'ensure_extraction_form', 'extraction_form', v_form.id,
+          null, to_jsonb(v_form));
+
+  return v_form;
+end;
+$$;
+
+grant execute on function public.ensure_extraction_form(uuid) to authenticated;
