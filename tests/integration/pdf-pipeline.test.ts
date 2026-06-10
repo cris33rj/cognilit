@@ -5,10 +5,11 @@ import { signUpUser, serviceClient } from "./helpers/supabase";
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { processPdfPipelineJob } from "@/lib/documents/pipeline-worker";
 import { runPdfPipelineWorkerWith } from "@/lib/documents/run";
+import type { RasterizePage } from "@/lib/documents/rasterize";
 
-const fakeRasterize = async (_b: Uint8Array, _page: number) => ({
+const fakeRasterize: RasterizePage = async (_bytes, _page) => ({
   imageBase64: "ZmFrZQ==",
-  mediaType: "image/png" as const,
+  mediaType: "image/png",
 });
 
 /** Cria review + record included_ft e anexa um PDF (via RPC), devolvendo ids. */
@@ -33,12 +34,10 @@ async function seedDocument(
   const recordId = rec!.id as string;
   const documentId = crypto.randomUUID();
   const storagePath = `review/${reviewId}/record/${recordId}/${documentId}.pdf`;
-  const up = await svc.storage
-    .from("pdfs")
-    .upload(storagePath, bytes, {
-      contentType: "application/pdf",
-      upsert: true,
-    });
+  const up = await svc.storage.from("pdfs").upload(storagePath, bytes, {
+    contentType: "application/pdf",
+    upsert: true,
+  });
   if (up.error) throw new Error(up.error.message);
   const { data: job, error } = await owner.rpc("create_pdf_pipeline_job", {
     p_review_id: reviewId,
@@ -85,6 +84,7 @@ describe("pdf_text_pipeline — PDF nativo (FR-007/008)", () => {
         supabase: svc,
         provider: new MockLLMProvider(),
         rasterize: fakeRasterize,
+        scanThreshold: 0,
       },
       jobId,
     );
@@ -181,6 +181,13 @@ describe("pdf_text_pipeline — resiliência por-item + retomável (FR-006)", ()
       .eq("id", bad.jobId)
       .single();
     expect(["failed", "completed_with_errors"]).toContain(badJob!.status);
+
+    const { data: goodJob } = await svc
+      .from("job")
+      .select("status")
+      .eq("id", good.jobId)
+      .single();
+    expect(goodJob!.status).toBe("completed");
   });
 });
 
