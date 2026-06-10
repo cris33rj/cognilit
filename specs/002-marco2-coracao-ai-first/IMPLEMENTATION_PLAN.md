@@ -1,1351 +1,971 @@
-# Fatia 1 — Ingestão de PDF (Storage + anexo no workbench) — Implementation Plan
+# Fatia 2 — Pipeline de texto assíncrono híbrido (US1-B) — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Escopo:** apenas a **Fatia 1** do `slicing.md` (US1-A). Entrega anexar PDFs a um
-> estudo no **modo Texto completo do workbench**, guardados em Storage escopado por
-> Revisão, com validação síncrona e enfileiramento do job `pdf_text_pipeline` (estado
-> `queued`). **NÃO** processa texto (isso é a Fatia 2). Não refragmenta a triagem
-> (Princípio V): o upload é afordância **aditiva** do modo `full_text` existente.
+> **Escopo:** apenas a **Fatia 2** do `slicing.md` (US1-B). Processa os PDFs anexados na
+> Fatia 1 (job `pdf_text_pipeline` em `queued`): worker **server-side Node** que extrai
+> texto **nativo determinístico** por página, detecta páginas escaneadas por **limiar de
+> densidade** e faz **OCR multimodal** via novo `LLMProvider.ocrPage`, gravando `text_layer`
+> com `origin ∈ {nativo, ocr_ia}` e movendo `document.processing_status`
+> `queued → processing → text_ready | partial | failed`. **Não** mexe em extração por IA
+> (Fatia 4), formulário (Fatia 3) nem embeddings (Fatia 6).
 
-**Goal:** Pesquisador anexa PDFs a um estudo (`record` com `corpus_state ∈
-{included_ts, included_ft}`) pelo modo Texto completo; o arquivo é validado
-(MIME + tamanho ≤ 50 MiB), guardado no Storage escopado por Revisão (RLS por path) e um
-job `pdf_text_pipeline` é enfileirado — tudo sem parsing pesado inline (§VIII/FR-005).
+**Goal:** Cada PDF anexado vira texto pronto para IA: o worker baixa o binário do Storage,
+extrai texto nativo por página, faz OCR multimodal nas páginas escaneadas, e persiste a
+camada de texto com proveniência (`origin`) por página — retomável e resiliente por-item/página.
 
-**Architecture:** Server Action fina (`attachPdf`) sobre uma função de lib testável
-(`attachPdfDocument`) que valida (pura), faz upload server-side ao bucket privado `pdfs`
-e chama a RPC atômica `create_pdf_pipeline_job` (security definer) — espelhando o padrão
-Marco 1 `enqueueScreeningBatch`→`enqueueScreeningJob`/`create_screening_job`. Frontend:
-um `DocumentsPanel` (upload + lista + polling de status, espelhando `JobProgress`)
-renderizado ao lado da fila **só no modo `full_text`**, espelhando o painel `RecordDetail`
-do modo `title_abstract`.
+**Architecture:** Espelha o worker de screening do Marco 1 (`src/lib/screening/worker.ts` +
+`run.ts`): `runPdfPipelineWorkerWith(admin, provider, reviewId, deps?)` varre os jobs
+`pdf_text_pipeline` ativos; `processPdfPipelineJob` processa **1 job_item = 1 PDF** com
+commit por item (retomável) e páginas como sub-passos (resiliente por-página → `partial`).
+A extração nativa (`unpdf`) e a rasterização para OCR ficam atrás de **funções injetáveis**,
+para que a lógica do worker seja testável com o `MockLLMProvider` e um rasterizador falso;
+a lib real e o limiar de densidade são calibrados contra PDFs reais (A1/D31). Server Action
+`runPdfPipelineWorker` espelha `runScreeningWorker` (resolve provider BYOK, fallback Mock).
 
-**Tech Stack:** Next.js 14 App Router (Server Actions), Supabase (Postgres + RLS +
-Storage + RPC security definer), TanStack Query (polling), Vitest (unit/integração),
-Playwright (e2e). Sem novas dependências nesta fatia.
+**Tech Stack:** Next.js 14 App Router (Server Actions), Supabase (Postgres + RLS + Storage,
+service-role no worker), **`unpdf`** (extração nativa + rasterização de página — nova dep por
+tarefa explícita, constitution §Portões), `LLMProvider` multimodal (Claude) para OCR, Vitest
+(unit/integração). Sem novas dependências além de `unpdf`.
 
 **Pré-requisitos do executor:**
-- Supabase local rodando (`supabase start`); `npm run gen:types` requer o DB local.
-- Branch de trabalho: `build/002-marco2-coracao-ai-first/1-ingestao-pdf` (criado via
-  `superpowers:using-git-worktrees` antes de executar).
-- Migrations atuais vão até `0011`; esta fatia adiciona **0012**.
-- Enums relevantes (verificados): `corpus_state` inclui `included_ts`/`included_ft`;
-  `job_type` = (`import_parse`,`ai_screening_batch`) — ALTER aditivo aqui;
-  `audit_actor_type` = (`human`,`ai`,`system`); helper `public.is_review_member(uuid)`
-  (SECURITY DEFINER) já existe (0001).
+- Worktree isolado já criado (skill `using-git-worktrees`); baseline aplicado (`.env.local`
+  copiado, `npm install`, `supabase start && supabase db reset`, shebang do husky) —
+  ver memória "Worktree baseline setup".
+- Supabase local rodando; `npm run gen:types` requer o DB local.
+- Base: feature `002-marco2-coracao-ai-first` com a Fatia 1 já mergeada (migration `0012`,
+  tabela `document`, bucket `pdfs`, job type `pdf_text_pipeline`, RPC `create_pdf_pipeline_job`).
+- Testes de integração batem na camada de dados direto (`serviceClient()` / client de membro),
+  nunca no `createClient()` server (memória "Integration tests can't call server client wrappers").
 
 ---
 
 ## File Structure
 
-**Criar:**
-- `supabase/migrations/0012_documents_storage.sql` — enum `document_status`, tabela
-  `document` + RLS, bucket `pdfs` + policies em `storage.objects`, `ALTER TYPE job_type`,
-  RPC `create_pdf_pipeline_job`.
-- `src/lib/documents/validate.ts` — validação pura (MIME/tamanho) + constantes.
-- `src/lib/documents/attach.ts` — `attachPdfDocument(deps, input)` (lib testável).
-- `src/lib/documents/queries.ts` — `listDocuments(reviewId, recordId)`.
-- `src/components/documents/DocumentsPanel.tsx` — upload + lista + polling de status.
-- `tests/unit/documents/validate.test.ts`
-- `tests/unit/documents/documents-panel.test.tsx`
-- `tests/integration/rls.documents.test.ts`
-- `tests/integration/documents.attach.test.ts`
-- `tests/e2e/documents.spec.ts`
-- `tests/fixtures/sample.pdf` — PDF mínimo válido (header + EOF).
-
-**Modificar:**
-- `app/reviews/[reviewId]/workbench/actions.ts` — Server Actions `attachPdf` +
-  `fetchDocuments` (finas, sobre as libs).
-- `src/components/workbench/ScreeningQueue.tsx` — props opcionais `loadDocuments`/
-  `onAttachPdf`; renderizar `DocumentsPanel` ao lado da fila no `full_text`.
-- `app/reviews/[reviewId]/workbench/page.tsx` — passar os novos props/ações no `full_text`.
-- `next.config.*` — `serverActions.bodySizeLimit` para aceitar upload ≤ 50 MiB.
+| Arquivo | Responsabilidade |
+|---|---|
+| `supabase/migrations/0013_text_layer.sql` | **Criar:** enum `text_origin` + tabela `text_layer` + RLS (select/insert membro). |
+| `src/types/database.ts` | **Modificar (regen):** tipos de `text_layer`. |
+| `src/lib/documents/extract.ts` | **Criar:** `extractNativeText(bytes)` (unpdf, por página) + `isScannedPage(content, threshold)` (densidade). |
+| `src/lib/documents/rasterize.ts` | **Criar:** `rasterizePage(bytes, page)` (unpdf `renderPageAsImage` → base64 PNG) — isolado/injetável (calibração D31). |
+| `src/lib/ai/llm/types.ts` | **Modificar:** adicionar `ocrPage(...)` ao contrato `LLMProvider` + tipo `OcrResult`. |
+| `src/lib/ai/llm/mock.ts` | **Modificar:** `ocrPage` determinístico no `MockLLMProvider`. |
+| `src/lib/ai/llm/anthropic.ts` | **Modificar:** `ocrPage` multimodal (bloco de imagem). |
+| `src/lib/documents/pipeline-worker.ts` | **Criar:** `processPdfPipelineJob(deps, jobId)` — 1 PDF/item, páginas como sub-passos, state machine, resiliência. |
+| `src/lib/documents/run.ts` | **Criar:** `runPdfPipelineWorkerWith(supabase, provider, reviewId, deps?)`. |
+| `app/reviews/[reviewId]/workbench/actions.ts` | **Modificar:** Server Action `runPdfPipelineWorker(reviewId)`. |
+| `src/components/documents/DocumentsPanel.tsx` | **Modificar:** disparar `runPdfPipelineWorker` após upload bem-sucedido (aditivo). |
+| `tests/unit/documents/extract.test.ts` | **Criar:** densidade + extração nativa (fixture). |
+| `tests/unit/ai/ocr-page.test.ts` | **Criar:** `MockLLMProvider.ocrPage` determinístico. |
+| `tests/integration/pdf-pipeline.test.ts` | **Criar:** pipeline ponta-a-ponta (nativo/ocr/partial/retomável/RLS). |
 
 ---
 
-## Task 1: Migração 0012 — tabela `document` + enum + RLS + Storage
+## Task 1: Migração 0013 — `text_layer` + RLS
 
 **Files:**
-- Create: `supabase/migrations/0012_documents_storage.sql`
-- Test: `tests/integration/rls.documents.test.ts`
+- Create: `supabase/migrations/0013_text_layer.sql`
+- Modify: `src/types/database.ts` (via `npm run gen:types`)
+- Test: `tests/integration/pdf-pipeline.test.ts` (RLS coberto na Task 6)
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Escrever a migration**
+
+Create `supabase/migrations/0013_text_layer.sql`:
+
+```sql
+-- ============================================================
+-- Marco 2 / Fatia 2 — Pipeline de texto: camada de texto extraída (text_layer).
+-- Escrita só pelo worker (service-role bypassa RLS); membros leem. NÃO processa
+-- aqui — o worker server-side Node grava (§VIII). data-model.md §text_layer.
+-- ============================================================
+
+-- proveniência da camada (FR-008): determinística (nativo) vs OCR multimodal (ocr_ia)
+create type text_origin as enum ('nativo', 'ocr_ia');
+
+create table public.text_layer (
+  id uuid primary key default gen_random_uuid(),
+  review_id uuid not null references public.review (id) on delete cascade,
+  document_id uuid not null references public.document (id) on delete cascade,
+  page integer not null check (page >= 1),          -- 1-based (FR-008)
+  char_start integer not null check (char_start >= 0),
+  char_end integer not null check (char_end >= char_start),
+  content text not null,                              -- idioma original (D24/FR-015)
+  origin text_origin not null,
+  created_at timestamptz not null default now()
+);
+create index text_layer_document_idx on public.text_layer (document_id, page);
+create index text_layer_review_idx on public.text_layer (review_id);
+
+alter table public.text_layer enable row level security;
+
+-- Leitura por membros da Revisão; a escrita real é do worker service-role (bypassa RLS).
+create policy text_layer_select_member on public.text_layer
+  for select using (public.is_review_member(review_id));
+```
+
+- [ ] **Step 2: Aplicar e regenerar tipos**
+
+Run:
+```bash
+supabase db reset
+npm run gen:types
+```
+Expected: reset sem erro; `src/types/database.ts` passa a conter `text_layer` e o enum `text_origin`.
+
+- [ ] **Step 3: Type-check**
+
+Run: `npx tsc --noEmit`
+Expected: 0 erros.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add supabase/migrations/0013_text_layer.sql src/types/database.ts
+git commit -m "feat(002-f2): migration 0013 text_layer + RLS (US1-B)"
+```
+
+---
+
+## Task 2: Extração nativa por página + classificador de densidade
+
+> Nova dependência **por tarefa explícita** (constitution §Portões): `unpdf` (wrapper de
+> pdf.js compatível com Node/serverless, R1). O limiar de densidade tem um **default**
+> calibrável contra PDFs reais (A1/D31).
+
+**Files:**
+- Create: `src/lib/documents/extract.ts`
+- Test: `tests/unit/documents/extract.test.ts`
+
+- [ ] **Step 1: Adicionar a dependência**
+
+Run:
+```bash
+npm install unpdf
+```
+Expected: `unpdf` em `dependencies` do `package.json`.
+
+- [ ] **Step 2: Escrever o teste de falha (densidade + extração)**
+
+Create `tests/unit/documents/extract.test.ts`:
 
 ```ts
-// tests/integration/rls.documents.test.ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { serviceClient, signUpUser } from "./helpers/supabase";
+import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { extractNativeText, isScannedPage } from "@/lib/documents/extract";
 
-async function newReview(client: Awaited<ReturnType<typeof signUpUser>>["client"], title: string) {
-  const { data, error } = await client.rpc("create_review", { p_title: title });
-  if (error) throw new Error(error.message);
-  return data.id as string;
+describe("isScannedPage — limiar de densidade (A1/D31)", () => {
+  it("página vazia/curta é tratada como escaneada", () => {
+    expect(isScannedPage("", 30)).toBe(true);
+    expect(isScannedPage("   \n  ", 30)).toBe(true);
+    expect(isScannedPage("ab cd", 30)).toBe(true);
+  });
+  it("página com texto denso é nativa", () => {
+    const dense = "palavra ".repeat(50);
+    expect(isScannedPage(dense, 30)).toBe(false);
+  });
+});
+
+describe("extractNativeText — por página (R1)", () => {
+  it("extrai páginas do PDF nativo de fixture com conteúdo 1-based", async () => {
+    const bytes = new Uint8Array(
+      readFileSync(join(process.cwd(), "tests/fixtures/sample.pdf")),
+    );
+    const { totalPages, pages } = await extractNativeText(bytes);
+    expect(totalPages).toBeGreaterThanOrEqual(1);
+    expect(pages.length).toBe(totalPages);
+    expect(pages[0]!.page).toBe(1);
+    expect(typeof pages[0]!.content).toBe("string");
+  });
+});
+```
+
+- [ ] **Step 3: Rodar o teste e ver falhar**
+
+Run: `npx vitest run tests/unit/documents/extract.test.ts`
+Expected: FAIL — `Cannot find module '@/lib/documents/extract'`.
+
+- [ ] **Step 4: Implementar a extração**
+
+Create `src/lib/documents/extract.ts`:
+
+```ts
+import { extractText, getDocumentProxy } from "unpdf";
+
+export interface PageText {
+  page: number; // 1-based
+  content: string;
 }
 
-async function seedRecord(reviewId: string, corpusState: string): Promise<string> {
+export interface NativeExtraction {
+  totalPages: number;
+  pages: PageText[];
+}
+
+/**
+ * Limiar default de caracteres não-brancos por página abaixo do qual a página é
+ * considerada "escaneada" (sem camada de texto útil) e vai para OCR (R2/A1).
+ * CALIBRAR contra PDFs reais do corpus-alvo (D31) — ajustável sem mudar schema.
+ */
+export const DEFAULT_SCAN_THRESHOLD = 30;
+
+export function isScannedPage(content: string, threshold = DEFAULT_SCAN_THRESHOLD): boolean {
+  const meaningful = content.replace(/\s+/g, "").length;
+  return meaningful < threshold;
+}
+
+/** Extração nativa determinística por página (R1, FR-007). Roda no worker (§VIII). */
+export async function extractNativeText(bytes: Uint8Array): Promise<NativeExtraction> {
+  const pdf = await getDocumentProxy(bytes);
+  const { totalPages, text } = await extractText(pdf, { mergePages: false });
+  const arr = Array.isArray(text) ? text : [text];
+  const pages: PageText[] = arr.map((content, i) => ({
+    page: i + 1,
+    content: content ?? "",
+  }));
+  return { totalPages, pages };
+}
+```
+
+- [ ] **Step 5: Rodar o teste e ver passar**
+
+Run: `npx vitest run tests/unit/documents/extract.test.ts`
+Expected: PASS (3 testes de densidade + 1 de extração).
+
+> Se `extractNativeText` falhar contra a fixture (API do `unpdf` divergente da versão
+> instalada), inspecionar o retorno real de `extractText(..., { mergePages: false })` e
+> ajustar o mapeamento. NÃO trocar de biblioteca sem registrar (R1, dep por tarefa explícita).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add package.json package-lock.json src/lib/documents/extract.ts tests/unit/documents/extract.test.ts
+git commit -m "feat(002-f2): native PDF text extraction + scan density classifier (R1/A1)"
+```
+
+---
+
+## Task 3: Estender `LLMProvider` com `ocrPage` (OCR multimodal)
+
+**Files:**
+- Modify: `src/lib/ai/llm/types.ts`
+- Modify: `src/lib/ai/llm/mock.ts`
+- Modify: `src/lib/ai/llm/anthropic.ts`
+- Test: `tests/unit/ai/ocr-page.test.ts`
+
+- [ ] **Step 1: Escrever o teste de falha (mock determinístico)**
+
+Create `tests/unit/ai/ocr-page.test.ts`:
+
+```ts
+import { describe, it, expect } from "vitest";
+import { MockLLMProvider } from "@/lib/ai/llm/mock";
+
+describe("MockLLMProvider.ocrPage (R2)", () => {
+  it("retorna texto determinístico com proveniência e estado pending", async () => {
+    const provider = new MockLLMProvider();
+    const res = await provider.ocrPage({
+      imageBase64: "ZmFrZQ==",
+      mediaType: "image/png",
+      page: 3,
+    });
+    expect(res.output.text).toContain("[OCR p.3]");
+    expect(res.provenance).toHaveProperty("model");
+    expect(res.state).toBe("pending");
+    expect(res.not_found).toBe(false);
+  });
+});
+```
+
+- [ ] **Step 2: Rodar o teste e ver falhar**
+
+Run: `npx vitest run tests/unit/ai/ocr-page.test.ts`
+Expected: FAIL — `provider.ocrPage is not a function`.
+
+- [ ] **Step 3: Estender o contrato `LLMProvider`**
+
+In `src/lib/ai/llm/types.ts`, add the `OcrResult` interface after `ScreeningPreclassification` (around line 49):
+
+```ts
+export interface OcrResult {
+  text: string; // texto OCR da página, no idioma original (FR-015)
+}
+```
+
+And add the method to the `LLMProvider` interface (after `preclassifyScreening`, before `estimateCost`):
+
+```ts
+  /** OCR multimodal de uma página rasterizada (R2/FR-007/FR-008). Saída no idioma original. */
+  ocrPage(input: {
+    imageBase64: string;
+    mediaType: "image/png" | "image/jpeg";
+    page: number;
+  }): Promise<LlmSuggestion<OcrResult>>;
+```
+
+- [ ] **Step 4: Implementar no `MockLLMProvider`**
+
+In `src/lib/ai/llm/mock.ts`, add to the `OcrResult` import list and add the method inside the class (after `preclassifyScreening`):
+
+```ts
+  async ocrPage(input: {
+    imageBase64: string;
+    mediaType: "image/png" | "image/jpeg";
+    page: number;
+  }): Promise<LlmSuggestion<OcrResult>> {
+    return suggestion<OcrResult>(
+      { text: `[OCR p.${input.page}] texto simulado` },
+      `ocr:p${input.page}`,
+    );
+  }
+```
+
+Update the type import at the top of `mock.ts` to include `OcrResult`:
+
+```ts
+import type {
+  CostEstimate,
+  EligibilityDerivation,
+  LLMProvider,
+  LlmSuggestion,
+  OcrResult,
+  ProtocolDraft,
+  ProviderIdentity,
+  ScreeningPreclassification,
+} from "./types";
+```
+
+- [ ] **Step 5: Implementar no `AnthropicProvider`**
+
+In `src/lib/ai/llm/anthropic.ts`, add `OcrResult` to the type import and add the method inside the class (after `preclassifyScreening`, before `estimateCost`):
+
+```ts
+  async ocrPage(input: {
+    imageBase64: string;
+    mediaType: "image/png" | "image/jpeg";
+    page: number;
+  }): Promise<LlmSuggestion<OcrResult>> {
+    const prompt = `Transcreva fielmente TODO o texto desta página de PDF escaneada (página ${input.page}). Preserve o idioma original. Responda só com o texto, sem comentários.`;
+    const msg = await this.client.messages.create({
+      model: MODEL,
+      max_tokens: 4000,
+      system: `${PT_BR}\nVocê faz OCR fiel; não traduz, não resume.`,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: input.mediaType, data: input.imageBase64 },
+            },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    });
+    const text = textOf(msg);
+    return {
+      output: { text },
+      provenance: { model: MODEL, version: MODEL, prompt_or_span: prompt, timestamp: nowIso() },
+      state: "pending",
+      not_found: text.trim() === "",
+    };
+  }
+```
+
+Update the type import block at the top of `anthropic.ts` to include `OcrResult`.
+
+- [ ] **Step 6: Rodar testes + type-check**
+
+Run: `npx vitest run tests/unit/ai/ocr-page.test.ts && npx tsc --noEmit`
+Expected: PASS; 0 erros de tipo (todas as implementações de `LLMProvider` ganharam `ocrPage`).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/lib/ai/llm/types.ts src/lib/ai/llm/mock.ts src/lib/ai/llm/anthropic.ts tests/unit/ai/ocr-page.test.ts
+git commit -m "feat(002-f2): LLMProvider.ocrPage multimodal OCR (R2/FR-008)"
+```
+
+---
+
+## Task 4: Rasterizador de página (isolado/injetável)
+
+> Ponto de risco A1/D31: a rasterização real depende do backend de canvas do `unpdf` no
+> Node. Fica **isolada** num módulo e é **injetável** no worker — a lógica do worker é
+> testada com um rasterizador falso; a rasterização real é validada contra PDFs escaneados
+> reais (calibração D31). Falha de rasterização de uma página é tratada como falha de
+> sub-passo (→ `partial`), não derruba o PDF nem o job.
+
+**Files:**
+- Create: `src/lib/documents/rasterize.ts`
+
+- [ ] **Step 1: Implementar o rasterizador real (sem teste unitário de rede/canvas)**
+
+Create `src/lib/documents/rasterize.ts`:
+
+```ts
+import { renderPageAsImage } from "unpdf";
+
+export interface RasterizedPage {
+  imageBase64: string;
+  mediaType: "image/png";
+}
+
+/**
+ * Rasteriza uma página do PDF em PNG base64 para OCR multimodal (R2).
+ * Tipo da função de seam injetada no worker (permite fake nos testes).
+ * A implementação real depende do backend de canvas do unpdf no Node — CALIBRAR
+ * contra PDFs escaneados reais (D31). Erros aqui viram falha de sub-passo no worker.
+ */
+export type RasterizePage = (bytes: Uint8Array, page: number) => Promise<RasterizedPage>;
+
+export const rasterizePage: RasterizePage = async (bytes, page) => {
+  const result = await renderPageAsImage(bytes, page, { scale: 2 });
+  const buf = Buffer.from(result as ArrayBuffer);
+  return { imageBase64: buf.toString("base64"), mediaType: "image/png" };
+};
+```
+
+- [ ] **Step 2: Type-check**
+
+Run: `npx tsc --noEmit`
+Expected: 0 erros.
+
+> Se a assinatura de `renderPageAsImage` divergir da versão instalada do `unpdf`,
+> ajustar a conversão para base64 conforme o retorno real (ArrayBuffer/Uint8Array).
+> Não bloquear: a lógica do worker (Task 5/6) não depende deste módulo nos testes.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/lib/documents/rasterize.ts
+git commit -m "feat(002-f2): page rasterizer for OCR (unpdf renderPageAsImage, D31 seam)"
+```
+
+---
+
+## Task 5: Worker do pipeline — `processPdfPipelineJob`
+
+> Espelha `src/lib/screening/worker.ts`. 1 `job_item` = 1 PDF; páginas como sub-passos.
+> Resiliência: PDF que não abre/baixa ⇒ item `failed` + `document.failed`; páginas que
+> falham (OCR) ⇒ `document.partial`, item `done`. Commit por item ⇒ retomável (só pega
+> itens `pending`/`failed`).
+
+**Files:**
+- Create: `src/lib/documents/pipeline-worker.ts`
+- Test: coberto na Task 6 (integração)
+
+- [ ] **Step 1: Implementar o worker**
+
+Create `src/lib/documents/pipeline-worker.ts`:
+
+```ts
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { LLMProvider } from "@/lib/ai/llm/types";
+import { extractNativeText, isScannedPage, DEFAULT_SCAN_THRESHOLD } from "./extract";
+import { rasterizePage as defaultRasterize, type RasterizePage } from "./rasterize";
+
+interface PipelineItem {
+  id: string;
+  payload: { document_id: string };
+  review_id: string;
+  attempts: number;
+}
+
+export interface PipelineWorkerDeps {
+  supabase: SupabaseClient; // service-role (bypassa RLS p/ Storage + writes)
+  provider: LLMProvider;
+  rasterize?: RasterizePage; // injetável p/ testes (default: unpdf)
+  scanThreshold?: number; // injetável p/ calibração (default: DEFAULT_SCAN_THRESHOLD)
+}
+
+export interface PipelineWorkerResult {
+  job_id: string;
+  status: "completed" | "completed_with_errors" | "failed";
+  done: number;
+  failed: number;
+}
+
+/**
+ * Processa um job pdf_text_pipeline item-a-item (§VIII): baixa o PDF do Storage,
+ * extrai texto nativo por página, faz OCR multimodal nas páginas escaneadas, grava
+ * text_layer (origin nativo|ocr_ia) e atualiza document.processing_status + page_count.
+ * Resiliente por-item/página; retomável (só pega job_item 'pending').
+ */
+export async function processPdfPipelineJob(
+  deps: PipelineWorkerDeps,
+  jobId: string,
+): Promise<PipelineWorkerResult> {
+  const { supabase, provider } = deps;
+  const rasterize = deps.rasterize ?? defaultRasterize;
+  const threshold = deps.scanThreshold ?? DEFAULT_SCAN_THRESHOLD;
+
+  await supabase
+    .from("job")
+    .update({ status: "running", started_at: new Date().toISOString() })
+    .eq("id", jobId);
+
+  const { data: items, error } = await supabase
+    .from("job_item")
+    .select("id, payload, review_id, attempts")
+    .eq("job_id", jobId)
+    .eq("status", "pending");
+  if (error) throw new Error(error.message);
+
+  for (const it of (items ?? []) as PipelineItem[]) {
+    const documentId = it.payload.document_id;
+    try {
+      await supabase
+        .from("document")
+        .update({ processing_status: "processing" })
+        .eq("id", documentId);
+
+      const { data: doc, error: docErr } = await supabase
+        .from("document")
+        .select("storage_path")
+        .eq("id", documentId)
+        .single();
+      if (docErr) throw new Error(docErr.message);
+
+      const dl = await supabase.storage.from("pdfs").download(doc!.storage_path);
+      if (dl.error) throw new Error(dl.error.message);
+      const bytes = new Uint8Array(await dl.data.arrayBuffer());
+
+      const { totalPages, pages } = await extractNativeText(bytes);
+      let pageFailures = 0;
+
+      for (const p of pages) {
+        try {
+          let content = p.content;
+          let origin: "nativo" | "ocr_ia" = "nativo";
+          if (isScannedPage(p.content, threshold)) {
+            const img = await rasterize(bytes, p.page);
+            const ocr = await provider.ocrPage({
+              imageBase64: img.imageBase64,
+              mediaType: img.mediaType,
+              page: p.page,
+            });
+            content = ocr.output.text;
+            origin = "ocr_ia";
+          }
+          const { error: tlErr } = await supabase.from("text_layer").insert({
+            review_id: it.review_id,
+            document_id: documentId,
+            page: p.page,
+            char_start: 0,
+            char_end: content.length,
+            content,
+            origin,
+          });
+          if (tlErr) throw new Error(tlErr.message);
+        } catch {
+          pageFailures += 1; // página falha não derruba o PDF (→ partial)
+        }
+      }
+
+      const status = pageFailures > 0 ? "partial" : "text_ready";
+      await supabase
+        .from("document")
+        .update({ processing_status: status, page_count: totalPages })
+        .eq("id", documentId);
+
+      await supabase.from("job_item").update({ status: "done" }).eq("id", it.id);
+    } catch (e) {
+      // Falha estrutural (download/abertura do PDF): item failed + document failed.
+      await supabase
+        .from("document")
+        .update({ processing_status: "failed" })
+        .eq("id", documentId);
+      await supabase
+        .from("job_item")
+        .update({
+          status: "failed",
+          error: (e as Error).message,
+          attempts: (it.attempts ?? 0) + 1,
+        })
+        .eq("id", it.id);
+    }
+  }
+
+  const { data: counts, error: cErr } = await supabase
+    .from("job_item")
+    .select("status")
+    .eq("job_id", jobId);
+  if (cErr) throw new Error(cErr.message);
+
+  const all = (counts ?? []) as { status: string }[];
+  const total = all.length;
+  const done = all.filter((i) => i.status === "done").length;
+  const failed = all.filter((i) => i.status === "failed").length;
+  const status =
+    failed > 0 ? (done > 0 ? "completed_with_errors" : "failed") : "completed";
+
+  await supabase
+    .from("job")
+    .update({
+      status,
+      progress: total ? Math.round((done / total) * 100) : 100,
+    })
+    .eq("id", jobId);
+
+  return { job_id: jobId, status, done, failed };
+}
+```
+
+- [ ] **Step 2: Type-check**
+
+Run: `npx tsc --noEmit`
+Expected: 0 erros.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/lib/documents/pipeline-worker.ts
+git commit -m "feat(002-f2): pdf_text_pipeline worker — native+OCR per page, resilient (FR-006/007/008)"
+```
+
+---
+
+## Task 6: Runner `runPdfPipelineWorkerWith` + testes de integração
+
+**Files:**
+- Create: `src/lib/documents/run.ts`
+- Test: `tests/integration/pdf-pipeline.test.ts`
+
+- [ ] **Step 1: Implementar o runner**
+
+Create `src/lib/documents/run.ts` (espelha `src/lib/screening/run.ts`):
+
+```ts
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { LLMProvider } from "@/lib/ai/llm/types";
+import { processPdfPipelineJob, type PipelineWorkerDeps } from "./pipeline-worker";
+
+/**
+ * Processa todos os jobs pdf_text_pipeline ativos da Revisão (espelha o screening).
+ * Recebe o client (service-role) e o provider já resolvidos. `extra` permite injetar
+ * rasterizador/limiar nos testes.
+ */
+export async function runPdfPipelineWorkerWith(
+  supabase: SupabaseClient,
+  provider: LLMProvider,
+  reviewId: string,
+  extra?: Pick<PipelineWorkerDeps, "rasterize" | "scanThreshold">,
+): Promise<void> {
+  const { data: jobs, error } = await supabase
+    .from("job")
+    .select("id")
+    .eq("review_id", reviewId)
+    .eq("type", "pdf_text_pipeline")
+    .in("status", ["queued", "running"]);
+  if (error) throw new Error(error.message);
+  for (const j of (jobs ?? []) as Array<{ id: string }>) {
+    await processPdfPipelineJob({ supabase, provider, ...extra }, j.id);
+  }
+}
+```
+
+- [ ] **Step 2: Escrever os testes de integração (falham primeiro)**
+
+Create `tests/integration/pdf-pipeline.test.ts`. Helpers `signUpUser`/`serviceClient` já existem
+(`tests/integration/helpers/supabase`). Estes testes batem na camada de dados direto e injetam
+um rasterizador falso (sem canvas/rede).
+
+```ts
+import { describe, it, expect, beforeAll } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+import { MockLLMProvider } from "@/lib/ai/llm/mock";
+import { processPdfPipelineJob } from "@/lib/documents/pipeline-worker";
+import { runPdfPipelineWorkerWith } from "@/lib/documents/run";
+
+const fakeRasterize = async (_b: Uint8Array, page: number) => ({
+  imageBase64: "ZmFrZQ==",
+  mediaType: "image/png" as const,
+});
+
+/** Cria review + record included_ft e anexa um PDF (via RPC), devolvendo ids. */
+async function seedDocument(
+  owner: Awaited<ReturnType<typeof signUpUser>>["client"],
+  reviewId: string,
+  bytes: Uint8Array,
+) {
   const svc = serviceClient();
-  const { data, error } = await svc
+  const { data: rec } = await svc
     .from("record")
     .insert({
       review_id: reviewId,
       source_format: "ris",
       raw: {},
       metadata: { title: "Estudo PDF" },
-      corpus_state: corpusState,
+      title_norm: "estudo pdf",
+      corpus_state: "included_ft",
     })
     .select("id")
     .single();
-  if (error) throw new Error(error.message);
-  return data.id as string;
-}
-
-describe("RLS — document (Fatia 1, SC-011)", () => {
-  let aClient: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let bClient: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewA: string;
-  let recordA: string;
-  let docId: string;
-
-  beforeAll(async () => {
-    const s = Date.now();
-    aClient = (await signUpUser(`doca_${s}@example.com`, "senha-teste-123")).client;
-    bClient = (await signUpUser(`docb_${s}@example.com`, "senha-teste-123")).client;
-    reviewA = await newReview(aClient, "Revisão A");
-    recordA = await seedRecord(reviewA, "included_ft");
-
-    // Insere um document diretamente (service role) para testar leitura sob RLS.
-    const svc = serviceClient();
-    const { data, error } = await svc
-      .from("document")
-      .insert({
-        review_id: reviewA,
-        record_id: recordA,
-        storage_path: `review/${reviewA}/record/${recordA}/seed.pdf`,
-        filename: "seed.pdf",
-        byte_size: 1234,
-      })
-      .select("id")
-      .single();
-    if (error) throw new Error(error.message);
-    docId = data.id;
-  });
-
-  it("membro da Revisão lê o document", async () => {
-    const { data, error } = await aClient
-      .from("document")
-      .select("id, processing_status")
-      .eq("id", docId)
-      .maybeSingle();
-    expect(error).toBeNull();
-    expect(data?.processing_status).toBe("queued");
-  });
-
-  it("não-membro NÃO lê o document de outra Revisão", async () => {
-    const { data } = await bClient
-      .from("document")
-      .select("id")
-      .eq("id", docId)
-      .maybeSingle();
-    expect(data).toBeNull();
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test -- tests/integration/rls.documents.test.ts`
-Expected: FAIL — `relation "public.document" does not exist`.
-
-- [ ] **Step 3: Write the migration (schema + RLS + Storage)**
-
-```sql
--- supabase/migrations/0012_documents_storage.sql
--- ============================================================
--- Marco 2 / Fatia 1 — Ingestão de PDF: document + Storage (RLS desde a origem).
--- NÃO processa texto (Fatia 2). Edge/Action só valida/persiste/enfileira (§VIII).
--- ============================================================
-
--- enum de estado de processamento do PDF (máquina de estados — data-model.md)
-create type document_status as enum (
-  'queued', 'processing', 'text_ready', 'partial', 'failed'
-);
-
--- ---------- document (PDF anexado a um estudo — US1) ----------
-create table public.document (
-  id uuid primary key default gen_random_uuid(),
-  review_id uuid not null references public.review (id) on delete cascade,
-  record_id uuid not null references public.record (id) on delete cascade,
-  storage_path text not null,
-  filename text not null,
-  byte_size integer not null check (byte_size > 0),
-  page_count integer,                    -- null até processar (Fatia 2)
-  processing_status document_status not null default 'queued',
-  created_at timestamptz not null default now()
-);
-create index document_review_idx on public.document (review_id, created_at desc);
-create index document_record_idx on public.document (record_id);
-
-alter table public.document enable row level security;
-
--- Leitura/escrita por membros da Revisão (escrita direta de status só pelo worker
--- service-role na Fatia 2; aqui o insert vem da RPC SECURITY DEFINER).
-create policy document_select_member on public.document
-  for select using (public.is_review_member(review_id));
-create policy document_insert_member on public.document
-  for insert with check (public.is_review_member(review_id));
-
--- ---------- Storage: bucket privado + policies por path ----------
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('pdfs', 'pdfs', false, 52428800, array['application/pdf'])
-on conflict (id) do nothing;
-
--- path: review/<review_id>/record/<record_id>/<document_id>.pdf
--- foldername(name) => {review, <review_id>, record, <record_id>}; [2] = review_id (R7).
-create policy pdfs_select_member on storage.objects
-  for select using (
-    bucket_id = 'pdfs'
-    and public.is_review_member(((storage.foldername(name))[2])::uuid)
-  );
-create policy pdfs_insert_member on storage.objects
-  for insert with check (
-    bucket_id = 'pdfs'
-    and public.is_review_member(((storage.foldername(name))[2])::uuid)
-  );
-create policy pdfs_delete_member on storage.objects
-  for delete using (
-    bucket_id = 'pdfs'
-    and public.is_review_member(((storage.foldername(name))[2])::uuid)
-  );
-```
-
-- [ ] **Step 4: Reset DB and run test to verify it passes**
-
-Run: `supabase db reset && npm test -- tests/integration/rls.documents.test.ts`
-Expected: PASS (both tests green).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add supabase/migrations/0012_documents_storage.sql tests/integration/rls.documents.test.ts
-git commit -m "feat(002-f1): document table + Storage bucket with RLS (US1)"
-```
-
----
-
-## Task 2: Migração 0012 — `ALTER job_type` + RPC `create_pdf_pipeline_job`
-
-**Files:**
-- Modify: `supabase/migrations/0012_documents_storage.sql` (append)
-- Modify: `src/types/database.ts` (regenerated)
-- Test: `tests/integration/documents.attach.test.ts` (RPC portion)
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// tests/integration/documents.attach.test.ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { serviceClient, signUpUser } from "./helpers/supabase";
-
-async function newReview(client: Awaited<ReturnType<typeof signUpUser>>["client"], title: string) {
-  const { data, error } = await client.rpc("create_review", { p_title: title });
-  if (error) throw new Error(error.message);
-  return data.id as string;
-}
-
-async function seedRecord(reviewId: string, corpusState: string): Promise<string> {
-  const svc = serviceClient();
-  const { data, error } = await svc
-    .from("record")
-    .insert({ review_id: reviewId, source_format: "ris", raw: {}, metadata: { title: "Estudo" }, corpus_state: corpusState })
-    .select("id").single();
-  if (error) throw new Error(error.message);
-  return data.id as string;
-}
-
-describe("RPC create_pdf_pipeline_job (Fatia 1, FR-001/005)", () => {
-  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-  let recordFt: string;
-
-  beforeAll(async () => {
-    const s = Date.now();
-    owner = (await signUpUser(`rpc_${s}@example.com`, "senha-teste-123")).client;
-    reviewId = await newReview(owner, "RPC Revisão");
-    recordFt = await seedRecord(reviewId, "included_ft");
-  });
-
-  it("cria document(queued) + job(pdf_text_pipeline) + job_item + audit_entry", async () => {
-    const docId = crypto.randomUUID();
-    const { data, error } = await owner.rpc("create_pdf_pipeline_job", {
-      p_review_id: reviewId,
-      p_record_id: recordFt,
-      p_document_id: docId,
-      p_storage_path: `review/${reviewId}/record/${recordFt}/${docId}.pdf`,
-      p_filename: "estudo.pdf",
-      p_byte_size: 4096,
-    });
-    expect(error).toBeNull();
-    expect(data.job_id).toBeTruthy();
-    expect(data.document_id).toBe(docId);
-
-    const svc = serviceClient();
-    const doc = await svc.from("document").select("processing_status, record_id").eq("id", docId).single();
-    expect(doc.data!.processing_status).toBe("queued");
-
-    const job = await svc.from("job").select("type, status").eq("id", data.job_id).single();
-    expect(job.data!.type).toBe("pdf_text_pipeline");
-    expect(job.data!.status).toBe("queued");
-
-    const items = await svc.from("job_item").select("payload").eq("job_id", data.job_id);
-    expect(items.data!.length).toBe(1);
-    expect((items.data![0].payload as { document_id: string }).document_id).toBe(docId);
-
-    const audit = await svc.from("audit_entry").select("action").eq("review_id", reviewId).eq("entity", "document");
-    expect((audit.data ?? []).some((a) => a.action === "attach_pdf")).toBe(true);
-  });
-
-  it("rejeita record que NÃO passou em Título/Resumo (corpus_state inválido)", async () => {
-    const recActive = await seedRecord(reviewId, "active");
-    const docId = crypto.randomUUID();
-    const { error } = await owner.rpc("create_pdf_pipeline_job", {
-      p_review_id: reviewId, p_record_id: recActive, p_document_id: docId,
-      p_storage_path: `review/${reviewId}/record/${recActive}/${docId}.pdf`,
-      p_filename: "x.pdf", p_byte_size: 10,
-    });
-    expect(error).not.toBeNull();
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test -- tests/integration/documents.attach.test.ts`
-Expected: FAIL — `function public.create_pdf_pipeline_job(...) does not exist`.
-
-- [ ] **Step 3: Append the ALTER + RPC to the migration**
-
-```sql
--- (append ao final de supabase/migrations/0012_documents_storage.sql)
-
--- ---------- novo type de job (aditivo) ----------
-alter type job_type add value if not exists 'pdf_text_pipeline';
-
--- ============================================================
--- RPC: create_pdf_pipeline_job — cria document(queued) + job + job_item + audit
--- (atômico, §VIII: só enfileira; nunca processa). Valida estudo (passou T/R).
--- O binário já foi enviado ao Storage pela Action ANTES desta chamada.
--- ============================================================
-create or replace function public.create_pdf_pipeline_job(
-  p_review_id uuid,
-  p_record_id uuid,
-  p_document_id uuid,
-  p_storage_path text,
-  p_filename text,
-  p_byte_size integer
-)
-returns jsonb
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_job public.job;
-  v_state corpus_state;
-begin
-  if not public.is_review_member(p_review_id) then
-    raise exception 'not a member';
-  end if;
-
-  select corpus_state into v_state
-  from public.record
-  where id = p_record_id and review_id = p_review_id;
-  if v_state is null then
-    raise exception 'record not found in review';
-  end if;
-  if v_state not in ('included_ts', 'included_ft') then
-    raise exception 'record must have passed title/abstract screening';
-  end if;
-
-  insert into public.document (id, review_id, record_id, storage_path, filename, byte_size)
-  values (p_document_id, p_review_id, p_record_id, p_storage_path, p_filename, p_byte_size);
-
-  insert into public.job (review_id, type, status)
-  values (p_review_id, 'pdf_text_pipeline', 'queued')
-  returning * into v_job;
-
-  insert into public.job_item (job_id, review_id, status, payload)
-  values (v_job.id, p_review_id, 'pending', jsonb_build_object('document_id', p_document_id));
-
-  insert into public.audit_entry (
-    review_id, actor_type, actor_id, action, entity, entity_id, before, after
-  ) values (
-    p_review_id, 'human', auth.uid(), 'attach_pdf', 'document', p_document_id,
-    null, jsonb_build_object('job_id', v_job.id, 'filename', p_filename)
-  );
-
-  return jsonb_build_object('document_id', p_document_id, 'job_id', v_job.id);
-end;
-$$;
-
-grant execute on function public.create_pdf_pipeline_job(uuid, uuid, uuid, text, text, integer) to authenticated;
-```
-
-> **Note (executor):** `alter type ... add value` não pode rodar dentro do mesmo bloco que
-> *usa* o novo valor. Aqui o valor só é usado em tempo de execução da RPC (depois do
-> commit da migração), então é seguro. Se `supabase db reset` reclamar, mova o `ALTER TYPE`
-> para o topo do arquivo (antes das tabelas).
-
-- [ ] **Step 4: Regenerate types, reset, run test**
-
-Run: `supabase db reset && npm run gen:types && npm test -- tests/integration/documents.attach.test.ts`
-Expected: PASS (both tests green); `src/types/database.ts` now includes `document`,
-`document_status`, `create_pdf_pipeline_job`, and `pdf_text_pipeline` in `job_type`.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add supabase/migrations/0012_documents_storage.sql src/types/database.ts tests/integration/documents.attach.test.ts
-git commit -m "feat(002-f1): create_pdf_pipeline_job RPC + pdf_text_pipeline job type (FR-005)"
-```
-
----
-
-## Task 3: Validação pura de PDF (`validate.ts`)
-
-**Files:**
-- Create: `src/lib/documents/validate.ts`
-- Test: `tests/unit/documents/validate.test.ts`
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-// tests/unit/documents/validate.test.ts
-import { describe, it, expect } from "vitest";
-import { validatePdfUpload, MAX_PDF_BYTES, MAX_PDF_PAGES } from "@/lib/documents/validate";
-
-function pdfBytes(body = "1 0 obj<<>>endobj"): Uint8Array {
-  return new TextEncoder().encode(`%PDF-1.4\n${body}\n%%EOF\n`);
-}
-
-describe("validatePdfUpload (FR-003, A4)", () => {
-  it("aceita um PDF com header e trailer válidos dentro do limite", () => {
-    const bytes = pdfBytes();
-    const res = validatePdfUpload({ bytes, byteSize: bytes.byteLength });
-    expect(res.ok).toBe(true);
-  });
-
-  it("rejeita arquivo sem header %PDF-", () => {
-    const bytes = new TextEncoder().encode("not a pdf\n%%EOF");
-    const res = validatePdfUpload({ bytes, byteSize: bytes.byteLength });
-    expect(res.ok).toBe(false);
-  });
-
-  it("rejeita arquivo truncado (sem %%EOF)", () => {
-    const bytes = new TextEncoder().encode("%PDF-1.4\n1 0 obj");
-    const res = validatePdfUpload({ bytes, byteSize: bytes.byteLength });
-    expect(res.ok).toBe(false);
-  });
-
-  it("rejeita arquivo acima do teto de 50 MiB", () => {
-    const bytes = pdfBytes();
-    const res = validatePdfUpload({ bytes, byteSize: MAX_PDF_BYTES + 1 });
-    expect(res.ok).toBe(false);
-  });
-
-  it("expõe o teto de páginas para a Fatia 2", () => {
-    expect(MAX_PDF_PAGES).toBe(300);
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test -- tests/unit/documents/validate.test.ts`
-Expected: FAIL — module `@/lib/documents/validate` not found.
-
-- [ ] **Step 3: Write the implementation**
-
-```ts
-// src/lib/documents/validate.ts
-/** Teto de bytes por PDF (50 MiB — A4). Protege o worker e limita custo de OCR. */
-export const MAX_PDF_BYTES = 50 * 1024 * 1024;
-/** Teto de páginas por PDF (A4). Aplicado na Fatia 2 (page_count só existe após
- *  abrir o PDF no worker); declarado aqui como contrato único. */
-export const MAX_PDF_PAGES = 300;
-
-export type PdfValidation = { ok: true } | { ok: false; error: string };
-
-const HEADER = new TextEncoder().encode("%PDF-");
-
-function startsWithHeader(bytes: Uint8Array): boolean {
-  if (bytes.byteLength < HEADER.length) return false;
-  for (let i = 0; i < HEADER.length; i++) if (bytes[i] !== HEADER[i]) return false;
-  return true;
-}
-
-function hasEofTrailer(bytes: Uint8Array): boolean {
-  // %%EOF aparece nos últimos ~1KB de um PDF íntegro.
-  const tail = bytes.subarray(Math.max(0, bytes.byteLength - 1024));
-  return new TextDecoder("latin1").decode(tail).includes("%%EOF");
-}
-
-/** Validação SÍNCRONA e leve (sem parsing pesado, §VIII/FR-005): MIME por magic
- *  bytes, tamanho e integridade estrutural básica. Não conta páginas (Fatia 2). */
-export function validatePdfUpload(input: {
-  bytes: Uint8Array;
-  byteSize: number;
-}): PdfValidation {
-  if (input.byteSize <= 0) return { ok: false, error: "Arquivo vazio." };
-  if (input.byteSize > MAX_PDF_BYTES)
-    return { ok: false, error: "PDF acima do limite de 50 MB." };
-  if (!startsWithHeader(input.bytes))
-    return { ok: false, error: "Arquivo não é um PDF válido." };
-  if (!hasEofTrailer(input.bytes))
-    return { ok: false, error: "PDF corrompido ou incompleto." };
-  return { ok: true };
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm test -- tests/unit/documents/validate.test.ts`
-Expected: PASS (5 tests green).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/documents/validate.ts tests/unit/documents/validate.test.ts
-git commit -m "feat(002-f1): synchronous PDF validation (MIME/size, FR-003/A4)"
-```
-
----
-
-## Task 4: Função de lib `attachPdfDocument` (validar + upload + RPC)
-
-**Files:**
-- Create: `src/lib/documents/attach.ts`
-- Test: `tests/integration/documents.attach.test.ts` (append novo describe)
-
-- [ ] **Step 1: Write the failing test (append ao arquivo da Task 2)**
-
-```ts
-// (append em tests/integration/documents.attach.test.ts)
-import { attachPdfDocument } from "@/lib/documents/attach";
-import { anonClient } from "./helpers/supabase";
-
-describe("attachPdfDocument — validar + upload Storage + RPC (FR-001/002/003)", () => {
-  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-  let recordFt: string;
-
-  function pdf(): Uint8Array {
-    return new TextEncoder().encode("%PDF-1.4\n1 0 obj<<>>endobj\n%%EOF\n");
-  }
-
-  beforeAll(async () => {
-    const s = Date.now();
-    const u = await signUpUser(`att_${s}@example.com`, "senha-teste-123");
-    owner = u.client;
-    reviewId = await newReview(owner, "Anexo Revisão");
-    recordFt = await seedRecord(reviewId, "included_ft");
-  });
-
-  it("guarda o PDF e enfileira o job (estado queued)", async () => {
-    const res = await attachPdfDocument(
-      { supabase: owner },
-      { reviewId, recordId: recordFt, filename: "estudo.pdf", bytes: pdf() },
-    );
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    const svc = serviceClient();
-    const doc = await svc.from("document").select("storage_path, processing_status").eq("id", res.documentId).single();
-    expect(doc.data!.processing_status).toBe("queued");
-    expect(doc.data!.storage_path).toContain(`review/${reviewId}/record/${recordFt}/`);
-    // O objeto existe no Storage:
-    const obj = await svc.storage.from("pdfs").download(doc.data!.storage_path);
-    expect(obj.data).not.toBeNull();
-  });
-
-  it("rejeita arquivo não-PDF sem persistir document (FR-003)", async () => {
-    const before = (await serviceClient().from("document").select("id").eq("review_id", reviewId)).data?.length ?? 0;
-    const res = await attachPdfDocument(
-      { supabase: owner },
-      { reviewId, recordId: recordFt, filename: "x.txt", bytes: new TextEncoder().encode("hello") },
-    );
-    expect(res.ok).toBe(false);
-    const after = (await serviceClient().from("document").select("id").eq("review_id", reviewId)).data?.length ?? 0;
-    expect(after).toBe(before);
-  });
-
-  it("não-membro não consegue ler o objeto no Storage (SC-011)", async () => {
-    const res = await attachPdfDocument(
-      { supabase: owner },
-      { reviewId, recordId: recordFt, filename: "estudo2.pdf", bytes: pdf() },
-    );
-    expect(res.ok).toBe(true);
-    if (!res.ok) return;
-    const stranger = anonClient();
-    const { data } = await stranger.storage.from("pdfs").download(
-      `review/${reviewId}/record/${recordFt}/${res.documentId}.pdf`,
-    );
-    expect(data).toBeNull();
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test -- tests/integration/documents.attach.test.ts`
-Expected: FAIL — module `@/lib/documents/attach` not found.
-
-- [ ] **Step 3: Write the implementation**
-
-```ts
-// src/lib/documents/attach.ts
-import type { SupabaseClient } from "@supabase/supabase-js";
-import { validatePdfUpload } from "./validate";
-
-export interface AttachDeps {
-  supabase: SupabaseClient;
-}
-
-export interface AttachInput {
-  reviewId: string;
-  recordId: string;
-  filename: string;
-  bytes: Uint8Array;
-}
-
-export type AttachResult =
-  | { ok: true; documentId: string; jobId: string }
-  | { ok: false; error: string };
-
-/**
- * Valida (síncrono, §VIII), envia o binário ao bucket privado `pdfs` (path escopado
- * por Revisão, R7) e chama a RPC atômica que cria document(queued)+job+job_item+audit.
- * NÃO processa texto. O `supabase` injetado carrega a sessão do membro (RLS no Storage
- * e na RPC). Testável com client de membro.
- */
-export async function attachPdfDocument(
-  deps: AttachDeps,
-  input: AttachInput,
-): Promise<AttachResult> {
-  const valid = validatePdfUpload({ bytes: input.bytes, byteSize: input.bytes.byteLength });
-  if (!valid.ok) return { ok: false, error: valid.error };
-
+  const recordId = rec!.id as string;
   const documentId = crypto.randomUUID();
-  const storagePath = `review/${input.reviewId}/record/${input.recordId}/${documentId}.pdf`;
-
-  const up = await deps.supabase.storage
+  const storagePath = `review/${reviewId}/record/${recordId}/${documentId}.pdf`;
+  const up = await svc.storage
     .from("pdfs")
-    .upload(storagePath, input.bytes, { contentType: "application/pdf", upsert: false });
-  if (up.error) return { ok: false, error: up.error.message };
-
-  const { data, error } = await deps.supabase.rpc("create_pdf_pipeline_job", {
-    p_review_id: input.reviewId,
-    p_record_id: input.recordId,
+    .upload(storagePath, bytes, { contentType: "application/pdf", upsert: true });
+  if (up.error) throw new Error(up.error.message);
+  const { data: job, error } = await owner.rpc("create_pdf_pipeline_job", {
+    p_review_id: reviewId,
+    p_record_id: recordId,
     p_document_id: documentId,
     p_storage_path: storagePath,
-    p_filename: input.filename,
-    p_byte_size: input.bytes.byteLength,
+    p_filename: "estudo.pdf",
+    p_byte_size: bytes.byteLength,
   });
-  if (error) {
-    // Limpeza: remove o objeto órfão para não deixar nada parcial (FR-003).
-    await deps.supabase.storage.from("pdfs").remove([storagePath]);
-    return { ok: false, error: error.message };
-  }
-
-  const out = data as { document_id: string; job_id: string };
-  return { ok: true, documentId: out.document_id, jobId: out.job_id };
+  if (error) throw new Error(error.message);
+  return { recordId, documentId, jobId: (job as { job_id: string }).job_id };
 }
-```
 
-- [ ] **Step 4: Run test to verify it passes**
+const samplePdf = () =>
+  new Uint8Array(readFileSync(join(process.cwd(), "tests/fixtures/sample.pdf")));
 
-Run: `npm test -- tests/integration/documents.attach.test.ts`
-Expected: PASS (all describes green).
+describe("pdf_text_pipeline — PDF nativo (FR-007/008)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let documentId: string;
+  let jobId: string;
 
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/documents/attach.ts tests/integration/documents.attach.test.ts
-git commit -m "feat(002-f1): attachPdfDocument — validate + Storage upload + enqueue (US1)"
-```
-
----
-
-## Task 5: Query `listDocuments`
-
-**Files:**
-- Create: `src/lib/documents/queries.ts`
-- Test: `tests/integration/documents.attach.test.ts` (append) — reusa o setup
-
-- [ ] **Step 1: Write the failing test (append)**
-
-```ts
-// (append em tests/integration/documents.attach.test.ts)
-import { listDocuments } from "@/lib/documents/queries";
-
-describe("listDocuments (FR-004)", () => {
-  it("lista os PDFs de um estudo com seu estado de processamento", async () => {
+  beforeAll(async () => {
     const s = Date.now();
-    const owner2 = (await signUpUser(`list_${s}@example.com`, "senha-teste-123")).client;
-    const rev = await newReview(owner2, "Lista Revisão");
-    const rec = await seedRecord(rev, "included_ft");
-    await attachPdfDocument(
-      { supabase: owner2 },
-      { reviewId: rev, recordId: rec, filename: "a.pdf", bytes: new TextEncoder().encode("%PDF-1.4\nx\n%%EOF\n") },
+    owner = (await signUpUser(`pdf_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", { p_title: "Pipeline" });
+    reviewId = review.id;
+    ({ documentId, jobId } = await seedDocument(owner, reviewId, samplePdf()));
+  });
+
+  it("grava text_layer origin='nativo' e move document p/ text_ready com page_count", async () => {
+    const svc = serviceClient();
+    await processPdfPipelineJob(
+      { supabase: svc, provider: new MockLLMProvider(), rasterize: fakeRasterize },
+      jobId,
     );
-    const docs = await listDocuments({ supabase: owner2 }, rev, rec);
-    expect(docs.length).toBe(1);
-    expect(docs[0].filename).toBe("a.pdf");
-    expect(docs[0].processing_status).toBe("queued");
+    const { data: layers } = await svc
+      .from("text_layer")
+      .select("origin, page")
+      .eq("document_id", documentId);
+    expect((layers ?? []).length).toBeGreaterThanOrEqual(1);
+    expect(layers!.every((l) => l.origin === "nativo")).toBe(true);
+
+    const { data: doc } = await svc
+      .from("document")
+      .select("processing_status, page_count")
+      .eq("id", documentId)
+      .single();
+    expect(doc!.processing_status).toBe("text_ready");
+    expect(doc!.page_count).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("pdf_text_pipeline — página escaneada → OCR (origin='ocr_ia')", () => {
+  it("limiar alto força todas as páginas a OCR via provider", async () => {
+    const s = Date.now();
+    const owner = (await signUpUser(`ocr_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", { p_title: "OCR" });
+    const reviewId = review.id;
+    const { documentId, jobId } = await seedDocument(owner, reviewId, samplePdf());
+    const svc = serviceClient();
+    await processPdfPipelineJob(
+      {
+        supabase: svc,
+        provider: new MockLLMProvider(),
+        rasterize: fakeRasterize,
+        scanThreshold: 100000, // força isScannedPage=true em toda página
+      },
+      jobId,
+    );
+    const { data: layers } = await svc
+      .from("text_layer")
+      .select("origin, content")
+      .eq("document_id", documentId);
+    expect(layers!.length).toBeGreaterThanOrEqual(1);
+    expect(layers!.every((l) => l.origin === "ocr_ia")).toBe(true);
+    expect(layers![0]!.content).toContain("[OCR p.1]");
+  });
+});
+
+describe("pdf_text_pipeline — resiliência por-item + retomável (FR-006)", () => {
+  it("PDF inválido ⇒ document.failed + job_item failed; PDF válido na mesma fila ⇒ done", async () => {
+    const s = Date.now();
+    const owner = (await signUpUser(`res_${s}@example.com`, "senha-teste-123")).client;
+    const { data: review } = await owner.rpc("create_review", { p_title: "Resiliência" });
+    const reviewId = review.id;
+    const bad = await seedDocument(owner, reviewId, new Uint8Array([1, 2, 3, 4]));
+    const good = await seedDocument(owner, reviewId, samplePdf());
+    const svc = serviceClient();
+
+    await runPdfPipelineWorkerWith(svc, new MockLLMProvider(), reviewId, {
+      rasterize: fakeRasterize,
+    });
+
+    const docBad = await svc
+      .from("document")
+      .select("processing_status")
+      .eq("id", bad.documentId)
+      .single();
+    const docGood = await svc
+      .from("document")
+      .select("processing_status")
+      .eq("id", good.documentId)
+      .single();
+    expect(docBad.data!.processing_status).toBe("failed");
+    expect(["text_ready", "partial"]).toContain(docGood.data!.processing_status);
+
+    // Job do PDF bom termina sem falha estrutural do job; job do ruim sinaliza falha.
+    const { data: badJob } = await svc
+      .from("job")
+      .select("status")
+      .eq("id", bad.jobId)
+      .single();
+    expect(["failed", "completed_with_errors"]).toContain(badJob!.status);
+  });
+});
+
+describe("pdf_text_pipeline — RLS de text_layer (SC-011)", () => {
+  it("membro de outra Revisão não lê text_layer alheio", async () => {
+    const s = Date.now();
+    const a = (await signUpUser(`tla_${s}@example.com`, "senha-teste-123")).client;
+    const b = (await signUpUser(`tlb_${s}@example.com`, "senha-teste-123")).client;
+    const { data: reviewA } = await a.rpc("create_review", { p_title: "A" });
+    const reviewId = reviewA.id;
+    const { documentId, jobId } = await seedDocument(a, reviewId, samplePdf());
+    await processPdfPipelineJob(
+      { supabase: serviceClient(), provider: new MockLLMProvider(), rasterize: fakeRasterize },
+      jobId,
+    );
+    const { data: seenByB } = await b
+      .from("text_layer")
+      .select("id")
+      .eq("document_id", documentId);
+    expect((seenByB ?? []).length).toBe(0);
   });
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **Step 3: Rodar os testes e ver falhar/passar**
 
-Run: `npm test -- tests/integration/documents.attach.test.ts`
-Expected: FAIL — module `@/lib/documents/queries` not found.
+Run: `npx vitest run tests/integration/pdf-pipeline.test.ts`
+Expected: tudo PASS (após o runner existir). Se a fixture `sample.pdf` tiver só texto
+nativo, o teste de OCR usa `scanThreshold` alto para forçar o caminho `ocr_ia`.
 
-- [ ] **Step 3: Write the implementation**
-
-```ts
-// src/lib/documents/queries.ts
-import type { SupabaseClient } from "@supabase/supabase-js";
-
-export interface DocumentRow {
-  id: string;
-  filename: string;
-  byte_size: number;
-  processing_status: "queued" | "processing" | "text_ready" | "partial" | "failed";
-  created_at: string;
-}
-
-/** PDFs de um estudo, mais novos primeiro (RLS escopa por membro). */
-export async function listDocuments(
-  deps: { supabase: SupabaseClient },
-  reviewId: string,
-  recordId: string,
-): Promise<DocumentRow[]> {
-  const { data, error } = await deps.supabase
-    .from("document")
-    .select("id, filename, byte_size, processing_status, created_at")
-    .eq("review_id", reviewId)
-    .eq("record_id", recordId)
-    .order("created_at", { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data ?? []) as DocumentRow[];
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm test -- tests/integration/documents.attach.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git add src/lib/documents/queries.ts tests/integration/documents.attach.test.ts
-git commit -m "feat(002-f1): listDocuments query (FR-004)"
+git add src/lib/documents/run.ts tests/integration/pdf-pipeline.test.ts
+git commit -m "test(002-f2): pdf pipeline worker integration — native/OCR/partial/RLS (FR-006/007/008, SC-011)"
 ```
 
 ---
 
-## Task 6: Server Actions `attachPdf` + `fetchDocuments` + bodySizeLimit
+## Task 7: Server Action `runPdfPipelineWorker` + disparo no painel
 
 **Files:**
 - Modify: `app/reviews/[reviewId]/workbench/actions.ts`
-- Modify: `next.config.mjs` (ou `next.config.js`/`.ts` — usar o existente)
+- Modify: `src/components/documents/DocumentsPanel.tsx`
 
-> Server Actions não são testadas em unidade (dependem de contexto de request; ver
-> memória do projeto). São finas sobre as libs já testadas; cobertas pelo e2e (Task 9).
+- [ ] **Step 1: Adicionar a Server Action**
 
-- [ ] **Step 1: Add the bodySizeLimit config**
-
-O `next.config.mjs` da raiz já tem um bloco `experimental` com `staleTimes`. **Mescle**
-`serverActions.bodySizeLimit` nesse bloco (não substitua) — o default 1 MB é insuficiente
-para PDFs ≤ 50 MiB. Resultado:
-
-```js
-// next.config.mjs
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  reactStrictMode: true,
-  experimental: {
-    // Disable client-side router cache so server components always re-render
-    // on soft navigation. Needed for dynamic pages like /reviews/[reviewId].
-    staleTimes: {
-      dynamic: 0,
-    },
-    serverActions: {
-      bodySizeLimit: "51mb", // aceita upload de PDF ≤ 50 MiB (A4)
-    },
-  },
-};
-
-export default nextConfig;
-```
-
-- [ ] **Step 2: Add the Server Actions**
-
-Acrescente ao topo de imports de `app/reviews/[reviewId]/workbench/actions.ts`:
+In `app/reviews/[reviewId]/workbench/actions.ts`, add the import near the other lib imports:
 
 ```ts
-import { attachPdfDocument } from "@/lib/documents/attach";
-import { listDocuments } from "@/lib/documents/queries";
+import { runPdfPipelineWorkerWith } from "@/lib/documents/run";
 ```
 
-Acrescente as duas ações (ao final do arquivo), espelhando o padrão `enqueueScreeningBatch`:
+And add the action (after `runScreeningWorker`, espelhando-o):
 
 ```ts
-// ---- Ingestão de PDF (Fatia 1 / US1) — anexo no modo Texto completo ----
-export async function attachPdf(reviewId: string, formData: FormData) {
+export async function runPdfPipelineWorker(reviewId: string) {
   const { supabase } = await requireMember(reviewId);
-  const recordId = String(formData.get("recordId") ?? "");
-  const file = formData.get("file");
-  if (!recordId || !(file instanceof File)) {
-    return { ok: false as const, error: "Arquivo ou estudo ausente." };
+  void supabase; // membership checada; o worker usa service-role
+  const admin = createAdminClient();
+  // Provider: BYOK quando há chave; senão Mock determinístico (local/e2e).
+  let provider;
+  try {
+    provider = await getLLMProvider(reviewId);
+  } catch (e) {
+    if (e instanceof MissingByokError) provider = new MockLLMProvider();
+    else throw e;
   }
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  const res = await attachPdfDocument(
-    { supabase },
-    { reviewId, recordId, filename: file.name, bytes },
-  );
-  if (res.ok) revalidatePath(`/reviews/${reviewId}/workbench`);
-  return res;
-}
-
-export async function fetchDocuments(reviewId: string, recordId: string) {
-  const { supabase } = await requireMember(reviewId);
-  return listDocuments({ supabase }, reviewId, recordId);
+  await runPdfPipelineWorkerWith(admin, provider, reviewId);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
 }
 ```
 
-- [ ] **Step 3: Verify type-check passes**
+- [ ] **Step 2: Disparar o worker após upload no painel**
 
-Run: `npm run typecheck`
-Expected: PASS (no errors).
+In `src/components/documents/DocumentsPanel.tsx`, after a successful `attachPdf` (where the
+panel currently re-fetches the list / invalidates the query), call the new action so o PDF
+recém-anexado seja processado, mantendo o polling de status já existente. Concretely, where
+the upload handler awaits `attachPdf(...)` and checks `res.ok`, add:
+
+```tsx
+// após upload OK: dispara o pipeline (fire-and-forget; o status é observado por polling)
+await runPdfPipelineWorker(reviewId);
+```
+
+Import the action at the top of the file alongside the existing `attachPdf`/`fetchDocuments`
+imports:
+
+```tsx
+import { runPdfPipelineWorker } from "@/app/reviews/[reviewId]/workbench/actions";
+```
+
+> Se o `DocumentsPanel` receber as ações por props (padrão da Fatia 1, ver
+> `workbench/page.tsx` wiring), adicionar `runPdfPipelineWorker` como prop opcional e
+> passá-la no `page.tsx`, em vez de importar diretamente — seguir o padrão de wiring
+> existente da Fatia 1 (não refragmentar; Princípio V).
+
+- [ ] **Step 3: Verificação de portões**
+
+Run:
+```bash
+npm run lint && npx tsc --noEmit && npx vitest run
+```
+Expected: lint limpo; 0 erros de tipo; toda a suíte verde (baseline da Fatia 1 + novos testes da Fatia 2).
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add app/reviews/[reviewId]/workbench/actions.ts next.config.mjs
-git commit -m "feat(002-f1): attachPdf/fetchDocuments server actions + bodySizeLimit"
+git add app/reviews/[reviewId]/workbench/actions.ts src/components/documents/DocumentsPanel.tsx
+git commit -m "feat(002-f2): runPdfPipelineWorker action + trigger after upload (US1-B)"
 ```
 
 ---
 
-## Task 7: Componente `DocumentsPanel` (upload + lista + polling)
+## Self-Review (cobertura da spec)
 
-**Files:**
-- Create: `src/components/documents/DocumentsPanel.tsx`
-- Test: `tests/unit/documents/documents-panel.test.tsx`
+| Requisito (Fatia 2 / slicing) | Coberto por |
+|---|---|
+| **FR-006** (worker retomável, resiliente por-item) | Task 5 (commit por item, só pega `pending`) + Task 6 (teste de resiliência/retomável) |
+| **FR-007** (extração nativa determinística + híbrido) | Task 2 (`extractNativeText`) + Task 5 (nativo/OCR por densidade) |
+| **FR-008** (`text_layer.origin` nativo/ocr_ia, página 1-based) | Task 1 (enum/schema) + Task 5 (gravação) + Task 6 (asserts de `origin`) |
+| **FR-005** (encerra a parte assíncrona: trabalho pesado no worker, §VIII) | Task 5 (download+parse no worker, nunca inline) |
+| **A1** (lib nativa + limiar de densidade, calibrar D31) | Task 2 (`unpdf` por tarefa explícita, `DEFAULT_SCAN_THRESHOLD` calibrável) |
+| **R2** (OCR multimodal via `LLMProvider`) | Task 3 (`ocrPage`) + Task 4 (rasterizador) + Task 5 (caminho OCR) |
+| State machine `processing_status` (queued→processing→text_ready/partial/failed) | Task 5 (transições) + Task 6 (asserts de estado) |
+| Isolamento por Revisão (SC-011) | Task 1 (RLS `text_layer`) + Task 6 (teste RLS) |
 
-- [ ] **Step 1: Write the failing test**
-
-```tsx
-// tests/unit/documents/documents-panel.test.tsx
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { DocumentsPanel } from "@/components/documents/DocumentsPanel";
-
-function wrap(ui: React.ReactNode) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
-}
-
-describe("DocumentsPanel (FR-004)", () => {
-  it("lista os PDFs do estudo com seu estado", async () => {
-    const loadDocuments = vi.fn().mockResolvedValue([
-      { id: "d1", filename: "estudo.pdf", byte_size: 2048, processing_status: "queued", created_at: "2026-06-09T00:00:00Z" },
-    ]);
-    const onAttach = vi.fn();
-    wrap(
-      <DocumentsPanel reviewId="r1" recordId="rec1" loadDocuments={loadDocuments} onAttach={onAttach} />,
-    );
-    expect(await screen.findByText("estudo.pdf")).toBeInTheDocument();
-    expect(screen.getByText(/enfileirado/i)).toBeInTheDocument();
-  });
-
-  it("mostra mensagem quando o estudo não tem PDF", async () => {
-    const loadDocuments = vi.fn().mockResolvedValue([]);
-    wrap(
-      <DocumentsPanel reviewId="r1" recordId="rec1" loadDocuments={loadDocuments} onAttach={vi.fn()} />,
-    );
-    await waitFor(() => expect(screen.getByText(/nenhum pdf anexado/i)).toBeInTheDocument());
-  });
-
-  it("desabilita o anexo quando nenhum estudo está selecionado", () => {
-    wrap(
-      <DocumentsPanel reviewId="r1" recordId={null} loadDocuments={vi.fn()} onAttach={vi.fn()} />,
-    );
-    expect(screen.getByText(/selecione um registro/i)).toBeInTheDocument();
-  });
-});
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test -- tests/unit/documents/documents-panel.test.tsx`
-Expected: FAIL — module `@/components/documents/DocumentsPanel` not found.
-
-- [ ] **Step 3: Write the implementation**
-
-```tsx
-// src/components/documents/DocumentsPanel.tsx
-"use client";
-
-import { useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { DocumentRow } from "@/lib/documents/queries";
-
-const STATUS_LABEL: Record<DocumentRow["processing_status"], string> = {
-  queued: "enfileirado",
-  processing: "processando",
-  text_ready: "texto pronto",
-  partial: "parcial",
-  failed: "falhou",
-};
-
-const PENDING = new Set(["queued", "processing"]);
-
-export interface DocumentsPanelProps {
-  reviewId: string;
-  recordId: string | null;
-  loadDocuments: (reviewId: string, recordId: string) => Promise<DocumentRow[]>;
-  onAttach: (formData: FormData) => Promise<{ ok: boolean; error?: string }>;
-}
-
-/**
- * Afordância de anexo de PDF no modo Texto completo (US1). Estende o workbench sem
- * refragmentar a triagem (Princípio V). Lista + polling de status enquanto há item
- * não-terminal (espelha JobProgress). SEM vocabulário de IA (não é sugestão).
- */
-export function DocumentsPanel({ reviewId, recordId, loadDocuments, onAttach }: DocumentsPanelProps) {
-  const qc = useQueryClient();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const docs = useQuery({
-    queryKey: ["documents", reviewId, recordId],
-    queryFn: () => loadDocuments(reviewId, recordId as string),
-    enabled: !!recordId,
-    refetchInterval: (q) =>
-      (q.state.data ?? []).some((d) => PENDING.has(d.processing_status)) ? 1000 : false,
-  });
-
-  async function handleFile(file: File) {
-    if (!recordId) return;
-    setError(null);
-    setBusy(true);
-    try {
-      const fd = new FormData();
-      fd.set("recordId", recordId);
-      fd.set("file", file);
-      const res = await onAttach(fd);
-      if (!res.ok) setError(res.error ?? "Falha ao anexar o PDF.");
-      else await qc.invalidateQueries({ queryKey: ["documents", reviewId, recordId] });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao anexar o PDF.");
-    } finally {
-      setBusy(false);
-      if (inputRef.current) inputRef.current.value = "";
-    }
-  }
-
-  return (
-    <aside className="panel flex w-[360px] shrink-0 flex-col gap-3 self-start" aria-label="PDFs do estudo">
-      <h2 className="panel-title">PDFs do estudo</h2>
-      {!recordId ? (
-        <p className="text-sm text-ink-faint">Selecione um registro para anexar PDFs.</p>
-      ) : (
-        <>
-          <div className="flex items-center gap-2">
-            <input
-              ref={inputRef}
-              type="file"
-              accept="application/pdf"
-              aria-label="Anexar PDF"
-              disabled={busy}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void handleFile(f);
-              }}
-              className="text-sm"
-            />
-            {busy && <span className="text-xs text-ink-faint">enviando…</span>}
-          </div>
-          {error && <p role="alert" className="text-sm text-red-600">{error}</p>}
-          {docs.isLoading ? (
-            <p className="text-sm text-ink-faint">Carregando…</p>
-          ) : (docs.data ?? []).length === 0 ? (
-            <p className="text-sm text-ink-faint">Nenhum PDF anexado.</p>
-          ) : (
-            <ul className="flex flex-col gap-1 text-sm" aria-label="Lista de PDFs">
-              {(docs.data ?? []).map((d) => (
-                <li key={d.id} className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate text-ink">{d.filename}</span>
-                  <span className="shrink-0 text-xs text-ink-soft" aria-live="polite">
-                    {STATUS_LABEL[d.processing_status]}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-    </aside>
-  );
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm test -- tests/unit/documents/documents-panel.test.tsx`
-Expected: PASS (3 tests green).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/components/documents/DocumentsPanel.tsx tests/unit/documents/documents-panel.test.tsx
-git commit -m "feat(002-f1): DocumentsPanel — upload + list + status polling (FR-004)"
-```
+**Pontos sinalizados para calibração (não bloqueiam a fatia, D31):** o valor real de
+`DEFAULT_SCAN_THRESHOLD` e a assinatura exata de `unpdf` (`extractText` per-página e
+`renderPageAsImage`) devem ser validados contra PDFs reais do corpus na execução; ambos
+estão isolados atrás de seams injetáveis para não acoplar a lógica do worker.
 
 ---
 
-## Task 8: Integrar o `DocumentsPanel` no modo `full_text` do `ScreeningQueue`
-
-**Files:**
-- Modify: `src/components/workbench/ScreeningQueue.tsx`
-- Test: `tests/unit/workbench/screening-queue.test.tsx` (append)
-
-> Espelha o painel `RecordDetail` do modo `title_abstract`: props opcionais de
-> documentos e um painel lateral renderizado **só no `full_text`**. Não altera a fila
-> nem a lógica de triagem (Princípio V).
-
-- [ ] **Step 1: Write the failing test (append ao describe existente)**
-
-O arquivo `tests/unit/workbench/screening-queue.test.tsx` já tem o helper `renderQueue(over)`
-(monta `ScreeningQueue` com `QueryClientProvider`; `over` sobrescreve props). Os props
-`loadDocuments`/`onAttachPdf` são opcionais, então `renderQueue()` segue válido. Acrescente
-estes dois casos ao final do `describe("ScreeningQueue (US4)", …)`:
-
-```tsx
-  it("Fatia 1 — full_text renderiza o painel de PDFs do estudo (US1)", async () => {
-    renderQueue({
-      stage: "full_text",
-      loadDocuments: vi.fn().mockResolvedValue([]),
-      onAttachPdf: vi.fn().mockResolvedValue({ ok: true }),
-    });
-    expect(await screen.findByText("PDFs do estudo")).toBeInTheDocument();
-    // Sem PDFs ainda, mas com um registro focado (r1): mensagem de vazio.
-    expect(await screen.findByText(/nenhum pdf anexado/i)).toBeInTheDocument();
-  });
-
-  it("Fatia 1 — title_abstract NÃO mostra o painel de PDFs", async () => {
-    renderQueue({ stage: "title_abstract" });
-    await screen.findByText("Estudo Alpha");
-    expect(screen.queryByText("PDFs do estudo")).not.toBeInTheDocument();
-  });
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npm test -- tests/unit/workbench/screening-queue.test.tsx`
-Expected: FAIL — "PDFs do estudo" não encontrado (painel ainda não existe).
-
-- [ ] **Step 3: Add the props and render the panel**
-
-Em `src/components/workbench/ScreeningQueue.tsx`:
-
-1. Adicione o import:
-
-```tsx
-import { DocumentsPanel } from "@/components/documents/DocumentsPanel";
-import type { DocumentRow } from "@/lib/documents/queries";
-```
-
-2. Estenda `ScreeningQueueProps` com dois props **opcionais** (não quebram chamadas atuais):
-
-```tsx
-  loadDocuments?: (reviewId: string, recordId: string) => Promise<DocumentRow[]>;
-  onAttachPdf?: (formData: FormData) => Promise<{ ok: boolean; error?: string }>;
-```
-
-3. Receba-os na desestruturação de props da função `ScreeningQueue` (junto de
-   `loadDetail`): `, loadDocuments, onAttachPdf`.
-
-4. No `return`, dentro do contêiner da grade
-   (`<div className={stage === "title_abstract" ? "flex items-start gap-4" : undefined}>`),
-   troque esse `className` para também aplicar o layout lado-a-lado no `full_text`:
-
-```tsx
-        className={
-          stage === "title_abstract" || stage === "full_text"
-            ? "flex items-start gap-4"
-            : undefined
-        }
-```
-
-   e ajuste a `className` da `<div ref={parentRef} ...>` para ocupar o espaço flexível
-   também no `full_text`:
-
-```tsx
-          className={`h-[60vh] overflow-auto rounded border focus:outline focus:outline-2 focus:outline-accent ${
-            stage === "title_abstract" || stage === "full_text" ? "min-w-0 flex-1" : ""
-          }`}
-```
-
-5. Logo após o bloco `{stage === "title_abstract" && (<RecordDetail ... />)}`, acrescente:
-
-```tsx
-        {stage === "full_text" && loadDocuments && onAttachPdf && (
-          <DocumentsPanel
-            reviewId={reviewId}
-            recordId={focusedRecordId}
-            loadDocuments={loadDocuments}
-            onAttach={onAttachPdf}
-          />
-        )}
-```
-
-> `focusedRecordId` já existe no componente (linha do `const focusedRecordId = ...`).
-> Garanta que ele é computado independente do estágio (hoje é; o `useQuery` de detalhe
-> é que está restrito a `title_abstract`). Nenhuma mudança na lógica de triagem.
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npm test -- tests/unit/workbench/screening-queue.test.tsx`
-Expected: PASS (novos casos verdes; casos existentes seguem verdes).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/components/workbench/ScreeningQueue.tsx tests/unit/workbench/screening-queue.test.tsx
-git commit -m "feat(002-f1): render DocumentsPanel in full_text mode (Princípio V preserved)"
-```
-
----
-
-## Task 9: Passar as ações no `workbench/page.tsx`
-
-**Files:**
-- Modify: `app/reviews/[reviewId]/workbench/page.tsx`
-
-- [ ] **Step 1: Import the new actions**
-
-No bloco de import de `./actions`, acrescente `attachPdf` e `fetchDocuments`:
-
-```tsx
-import {
-  decideFuzzy,
-  reverseDedup,
-  fetchExactRemovals,
-  fetchFuzzyCandidates,
-  fetchScreeningQueue,
-  fetchExclusionReasons,
-  fetchReasonUsage,
-  addExclusionReason,
-  removeExclusionReason,
-  decideScreening,
-  reverseScreening,
-  fetchRecordDetail,
-  attachPdf,
-  fetchDocuments,
-} from "./actions";
-```
-
-- [ ] **Step 2: Wire the props into the ScreeningQueue render**
-
-No JSX `<ScreeningQueue ... />` (ramo `title_abstract || full_text`), acrescente os dois props:
-
-```tsx
-            loadDetail={fetchRecordDetail}
-            loadDocuments={fetchDocuments}
-            onAttachPdf={attachPdf.bind(null, reviewId)}
-```
-
-- [ ] **Step 3: Verify type-check + lint pass**
-
-Run: `npm run typecheck && npm run lint`
-Expected: PASS.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add app/reviews/[reviewId]/workbench/page.tsx
-git commit -m "feat(002-f1): wire attachPdf/fetchDocuments into full_text workbench"
-```
-
----
-
-## Task 10: E2E — anexar PDF no modo Texto completo
-
-**Files:**
-- Create: `tests/e2e/documents.spec.ts`
-- Create: `tests/fixtures/sample.pdf`
-
-> Espelha o padrão de `tests/e2e/screening.spec.ts` (login + criar Revisão + navegar ao
-> workbench). Verifica o caminho feliz mínimo de US1-A: anexar um PDF a um estudo
-> `included_ft` e vê-lo listado com estado `enfileirado`.
-
-- [ ] **Step 1: Create the minimal valid PDF fixture**
-
-Crie `tests/fixtures/sample.pdf` com este conteúdo (header + objeto + trailer + `%%EOF`):
-
-```text
-%PDF-1.4
-1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
-2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
-3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]>>endobj
-trailer<</Root 1 0 R>>
-%%EOF
-```
-
-- [ ] **Step 2: Write the failing e2e test**
-
-Espelha `setupScreeningCorpus` de `tests/e2e/screening.spec.ts` (signup → criar Revisão →
-importar `sample.ris` → worker) e o passo de incluir 1 registro no T/R para que ele apareça
-no modo `full_text` (a fila de TC só mostra `included_ts`).
-
-```ts
-// tests/e2e/documents.spec.ts
-import { test, expect, type Page } from "@playwright/test";
-import path from "node:path";
-
-async function setupCorpus(page: Page): Promise<string> {
-  const email = `e2e_docs_${Date.now()}@example.com`;
-  await page.goto("/signup");
-  await page.getByLabel("E-mail").fill(email);
-  await page.getByLabel("Senha").fill("senha-teste-123");
-  await page.getByRole("button", { name: "Criar conta" }).click();
-  await expect(page).toHaveURL(/\/reviews/);
-
-  await page.getByRole("link", { name: "Nova Revisão" }).click();
-  await page.getByLabel("Título da Revisão").fill("Revisão e2e PDFs");
-  await page.getByRole("button", { name: "Criar Revisão" }).click();
-  await expect(page).toHaveURL(/\/reviews\/[0-9a-f-]+$/);
-  const reviewId = page.url().split("/reviews/")[1]?.split("/")[0];
-  if (!reviewId) throw new Error("reviewId não encontrado na URL");
-
-  await page.getByRole("link", { name: "Importar" }).click();
-  await expect(page.getByRole("heading", { name: "Workbench" })).toBeVisible();
-  await page.setInputFiles("#import-file", path.resolve("tests/fixtures/import/sample.ris"));
-  await expect(page.getByText("Aprendizagem ativa em sala")).toBeVisible();
-  await page.getByPlaceholder("String de busca").fill("active learning e2e");
-  await page.getByPlaceholder("Base consultada").fill("PubMed");
-  await page.locator('input[type="date"]').fill("2026-05-30");
-  await page.getByPlaceholder("Nº de hits").fill("2");
-  await page.getByRole("button", { name: /confirmar importação/i }).click();
-  await expect(page.getByLabel("Contadores PRISMA")).toContainText("Identificados: 2", {
-    timeout: 20_000,
-  });
-  return reviewId;
-}
-
-test("anexa um PDF a um estudo no modo Texto completo (US1)", async ({ page }) => {
-  test.setTimeout(90_000);
-  const reviewId = await setupCorpus(page);
-
-  // Incluir 1 registro no T/R para que ele entre na fila de Texto completo.
-  await page.goto(`/reviews/${reviewId}/workbench?mode=title_abstract`);
-  await expect(page.getByRole("grid", { name: /fila de triagem/i })).toBeVisible({
-    timeout: 15_000,
-  });
-  await expect(page.getByRole("row").first()).toBeVisible({ timeout: 10_000 });
-  await page.keyboard.press("i");
-  await expect(page.getByRole("button", { name: /desfazer/i }).first()).toBeVisible({
-    timeout: 10_000,
-  });
-
-  // Modo Texto completo: o registro incluído está na fila e focado (focusIdx=0).
-  await page.goto(`/reviews/${reviewId}/workbench?mode=full_text`);
-  await expect(page.getByRole("grid", { name: /fila de triagem/i })).toBeVisible({
-    timeout: 15_000,
-  });
-  await expect(page.getByText("PDFs do estudo")).toBeVisible({ timeout: 10_000 });
-
-  // Anexar o PDF (input com aria-label "Anexar PDF").
-  await page
-    .getByLabel("Anexar PDF")
-    .setInputFiles(path.resolve("tests/fixtures/sample.pdf"));
-
-  // O PDF aparece na lista com estado de processamento visível (FR-004).
-  await expect(page.getByText("sample.pdf")).toBeVisible({ timeout: 15_000 });
-  await expect(
-    page.getByText(/enfileirado|processando|texto pronto/),
-  ).toBeVisible({ timeout: 15_000 });
-});
-```
-
-- [ ] **Step 3: Run test to verify it fails (then passes after wiring)**
-
-Run: `npm run test:e2e -- documents.spec.ts`
-Expected: inicialmente FAIL no setup até espelhar o helper; depois PASS no caminho de anexo.
-
-- [ ] **Step 4: Commit**
-
-```bash
-git add tests/e2e/documents.spec.ts tests/fixtures/sample.pdf
-git commit -m "test(002-f1): e2e attach PDF in full_text mode (US1)"
-```
-
----
-
-## Task 11: Verificação final da fatia (portões — CHECKPOINT 3)
-
-**Files:** nenhum (verificação).
-
-- [ ] **Step 1: Run the full quality gates**
-
-Run: `npm run lint && npm run typecheck && npm test`
-Expected: lint limpo, `tsc --noEmit` sem erros, todos os testes unit/integração verdes.
-
-- [ ] **Step 2: Run e2e**
-
-Run: `npm run test:e2e -- documents.spec.ts`
-Expected: PASS.
-
-- [ ] **Step 3: Confirm scope & non-regression**
-
-Verifique manualmente:
-- Nenhum arquivo do Marco 1 foi refatorado além das extensões **aditivas** previstas
-  (`ScreeningQueue.tsx` props opcionais; `workbench/page.tsx` props extras;
-  `workbench/actions.ts` ações novas; `next.config` bodySizeLimit). A triagem
-  (`decide*`, fila, atalhos) está intacta (Princípio V).
-- Migração é **0012** e os `ALTER`s de enum são aditivos.
-- O gatilho síncrono **não** faz parsing pesado (só valida/persiste/enfileira; §VIII).
-
-- [ ] **Step 4: PARAR (CHECKPOINT 3)**
-
-Não fazer `merge`/`push`. Apresentar ao desenvolvedor: branch
-`build/002-marco2-coracao-ai-first/1-ingestao-pdf`, o diff, e a saída dos portões.
-Aguardar o **merge manual** antes de iniciar a Fatia 2.
-
----
-
-## Self-review (cobertura da Fatia 1 vs. slicing.md)
-
-- **FR-001** (anexar no modo Texto completo, `corpus_state ∈ {included_ts,included_ft}`):
-  RPC valida estado (Task 2); UI no `full_text` (Tasks 7–9). ✅
-- **FR-002** (Storage escopado por Revisão, RLS por path): bucket + policies (Task 1);
-  isolamento testado (Tasks 1, 4). ✅
-- **FR-003** (rejeita não-PDF/corrompido, nada parcial): `validate.ts` (Task 3); cleanup
-  de órfão na falha da RPC (Task 4). ✅
-- **FR-004** (estado de processamento visível): `processing_status` + `listDocuments` +
-  `DocumentsPanel` com polling (Tasks 5, 7). ✅
-- **FR-005** (gatilho síncrono só valida/persiste/enfileira; sem parsing inline): Action
-  fina + RPC que só cria `queued` (Tasks 2, 4, 6); **A4** teto 50 MiB (Task 3). ✅
-- **FR-029** (auditoria): `audit_entry action='attach_pdf'` na RPC (Task 2). ✅
-- **Não-regressão / Princípio V**: extensões aditivas; triagem intocada (Task 11). ✅
-
-**Fora desta fatia (Fatia 2):** extração de texto, `text_layer`, OCR, `page_count`,
-teto de 300 páginas (aplicado ao abrir o PDF no worker), transições de
-`processing_status` além de `queued`.
+## Regime / CHECKPOINT 3
+
+Ao concluir as 7 tasks no branch isolado `build/002-marco2-coracao-ai-first/2-pipeline-texto`:
+**PARAR** e apresentar ao desenvolvedor — branch, diff, e evidência de
+`npm run lint` + `npx tsc --noEmit` + `npx vitest run` (+ e2e se aplicável). Escrever
+`COMPLETION-fatia-2.md` em `.superpowers/`, atualizar a tabela "Estado de execução das
+fatias" no `slicing.md`, e **aguardar o merge manual** do desenvolvedor antes da Fatia 3.
+**Nunca** `merge`/`push` para a feature ou `main`.
