@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { serviceClient, signUpUser, anonClient } from "./helpers/supabase";
 import { attachPdfDocument } from "@/lib/documents/attach";
+import { listDocuments } from "@/lib/documents/queries";
 
 async function newReview(
   client: Awaited<ReturnType<typeof signUpUser>>["client"],
@@ -219,5 +220,29 @@ describe("attachPdfDocument — validar + upload Storage + RPC (FR-001/002/003)"
     expect(res.ok).toBe(false);
     const after = (await svc.storage.from("pdfs").list(prefix)).data ?? [];
     expect(after.length).toBe(before.length);
+  });
+});
+
+describe("listDocuments (FR-004)", () => {
+  it("lista os PDFs de um estudo com seu estado de processamento", async () => {
+    const s = Date.now();
+    const owner2 = (
+      await signUpUser(`list_${s}@example.com`, "senha-teste-123")
+    ).client;
+    const rev = await newReview(owner2, "Lista Revisão");
+    const rec = await seedRecord(rev, "included_ft");
+    await attachPdfDocument(
+      { supabase: owner2 },
+      {
+        reviewId: rev,
+        recordId: rec,
+        filename: "a.pdf",
+        bytes: new TextEncoder().encode("%PDF-1.4\nx\n%%EOF\n"),
+      },
+    );
+    const docs = await listDocuments({ supabase: owner2 }, rev, rec);
+    expect(docs.length).toBe(1);
+    expect(docs[0].filename).toBe("a.pdf");
+    expect(docs[0].processing_status).toBe("queued");
   });
 });
