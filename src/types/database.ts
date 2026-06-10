@@ -1071,6 +1071,64 @@ export type Database = {
           },
         ]
       }
+      text_layer: {
+        Row: {
+          char_end: number
+          char_start: number
+          content: string
+          created_at: string
+          document_id: string
+          id: string
+          origin: Database["public"]["Enums"]["text_origin"]
+          page: number
+          review_id: string
+        }
+        Insert: {
+          char_end: number
+          char_start: number
+          content: string
+          created_at?: string
+          document_id: string
+          id?: string
+          origin: Database["public"]["Enums"]["text_origin"]
+          page: number
+          review_id: string
+        }
+        Update: {
+          char_end?: number
+          char_start?: number
+          content?: string
+          created_at?: string
+          document_id?: string
+          id?: string
+          origin?: Database["public"]["Enums"]["text_origin"]
+          page?: number
+          review_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "text_layer_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "document"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "text_layer_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "text_layer_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       prisma_counter: {
@@ -1416,6 +1474,7 @@ export type Database = {
         | "edited"
         | "rejected"
         | "inferred"
+      text_origin: "nativo" | "ocr_ia"
       ts_decision_state: "included" | "excluded" | "maybe"
     }
     CompositeTypes: {
@@ -1598,6 +1657,7 @@ export const Constants = {
         "rejected",
         "inferred",
       ],
+      text_origin: ["nativo", "ocr_ia"],
       ts_decision_state: ["included", "excluded", "maybe"],
     },
   },
