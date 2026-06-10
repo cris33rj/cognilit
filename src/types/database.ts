@@ -481,6 +481,103 @@ export type Database = {
           },
         ]
       }
+      extraction_field: {
+        Row: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          form_id: string
+          id?: string
+          is_active?: boolean
+          name: string
+          options?: Json | null
+          review_id: string
+          sort_order?: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          form_id?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          options?: Json | null
+          review_id?: string
+          sort_order?: number
+          type?: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_field_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_form"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_field_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "extraction_field_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      extraction_form: {
+        Row: {
+          created_at: string
+          id: string
+          review_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          review_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          review_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_form_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "extraction_form_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job: {
         Row: {
           actual_cost: Json | null
@@ -1176,6 +1273,32 @@ export type Database = {
         Args: { p_label: string; p_review_id: string }
         Returns: string
       }
+      add_extraction_field: {
+        Args: {
+          p_name: string
+          p_options: Json
+          p_review_id: string
+          p_type: Database["public"]["Enums"]["extraction_field_type"]
+        }
+        Returns: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_field"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       add_protocol_amendment: {
         Args: { p_change: Json; p_review_id: string }
         Returns: {
@@ -1295,6 +1418,21 @@ export type Database = {
         Args: { p_review_id: string }
         Returns: undefined
       }
+      ensure_extraction_form: {
+        Args: { p_review_id: string }
+        Returns: {
+          created_at: string
+          id: string
+          review_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_form"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       get_byok_secret: {
         Args: { p_review_id: string }
         Returns: {
@@ -1389,6 +1527,31 @@ export type Database = {
         }
         Returns: number
       }
+      remove_extraction_field: {
+        Args: { p_field_id: string }
+        Returns: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_field"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      reorder_extraction_fields: {
+        Args: { p_field_ids: string[]; p_review_id: string }
+        Returns: undefined
+      }
       reverse_dedup: { Args: { p_decision_id: string }; Returns: undefined }
       reverse_screening: { Args: { p_decision_id: string }; Returns: undefined }
       seed_default_exclusion_reasons: {
@@ -1425,6 +1588,32 @@ export type Database = {
         Args: { p_review_id: string }
         Returns: undefined
       }
+      update_extraction_field: {
+        Args: {
+          p_field_id: string
+          p_name: string
+          p_options: Json
+          p_type: Database["public"]["Enums"]["extraction_field_type"]
+        }
+        Returns: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_field"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       ai_target_kind: "eligibility" | "protocol_draft" | "screening"
@@ -1450,6 +1639,7 @@ export type Database = {
         | "text_ready"
         | "partial"
         | "failed"
+      extraction_field_type: "text" | "number" | "date" | "boolean" | "select"
       ft_decision_state: "included" | "excluded"
       job_item_status: "pending" | "done" | "failed"
       job_status:
@@ -1631,6 +1821,7 @@ export const Constants = {
         "partial",
         "failed",
       ],
+      extraction_field_type: ["text", "number", "date", "boolean", "select"],
       ft_decision_state: ["included", "excluded"],
       job_item_status: ["pending", "done", "failed"],
       job_status: [
