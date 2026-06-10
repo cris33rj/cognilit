@@ -25,7 +25,14 @@ export function isScannedPage(
   return meaningful < threshold;
 }
 
-/** Extração nativa determinística por página (R1, FR-007). Roda no worker (§VIII). */
+/**
+ * Extração nativa determinística por página (R1, FR-007). Roda no worker (§VIII).
+ *
+ * @throws Propaga erros de `unpdf` (e.g. PDF corrompido, criptografado ou truncado)
+ *   sem capturá-los. O chamador — o pipeline worker (Task 5) — é responsável por
+ *   capturar e converter em falha por-item (`document.failed`). Isso é intencional:
+ *   modelo de resiliência §VIII/FR-006. NÃO adicione try/catch aqui.
+ */
 export async function extractNativeText(
   bytes: Uint8Array,
 ): Promise<NativeExtraction> {

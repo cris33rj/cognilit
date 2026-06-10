@@ -13,6 +13,10 @@ describe("isScannedPage — limiar de densidade (A1/D31)", () => {
     const dense = "palavra ".repeat(50);
     expect(isScannedPage(dense, 30)).toBe(false);
   });
+  it("limiar exato: 29 chars não-brancos → escaneada; 30 → nativa", () => {
+    expect(isScannedPage("x".repeat(29), 30)).toBe(true);
+    expect(isScannedPage("x".repeat(30), 30)).toBe(false);
+  });
 });
 
 describe("extractNativeText — por página (R1)", () => {
@@ -25,5 +29,6 @@ describe("extractNativeText — por página (R1)", () => {
     expect(pages.length).toBe(totalPages);
     expect(pages[0]!.page).toBe(1);
     expect(typeof pages[0]!.content).toBe("string");
+    expect(pages[0]!.content.length).toBeGreaterThan(0);
   });
 });
