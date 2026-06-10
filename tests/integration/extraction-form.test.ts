@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { signUpUser, serviceClient } from "./helpers/supabase";
+import {
+  getExtractionForm,
+  listExtractionFields,
+} from "@/lib/extraction/queries";
 
 async function newReview(title: string) {
   const { client } = await signUpUser(
@@ -260,5 +264,46 @@ describe("reorder_extraction_fields — reescreve sort_order pela ordem do array
       .eq("review_id", reviewId)
       .eq("action", "reorder_extraction_fields");
     expect(audit!.length).toBe(1);
+  });
+});
+
+describe("queries — getExtractionForm + listExtractionFields (só ativos, ordenados)", () => {
+  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let keepId: string;
+  let dropId: string;
+
+  beforeAll(async () => {
+    const r = await newReview("Form queries");
+    client = r.client;
+    reviewId = r.reviewId;
+    await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
+    keepId = (
+      await client.rpc("add_extraction_field", {
+        p_review_id: reviewId,
+        p_name: "Mantido",
+        p_type: "text",
+        p_options: null,
+      })
+    ).data.id;
+    dropId = (
+      await client.rpc("add_extraction_field", {
+        p_review_id: reviewId,
+        p_name: "Removido",
+        p_type: "text",
+        p_options: null,
+      })
+    ).data.id;
+    await client.rpc("remove_extraction_field", { p_field_id: dropId });
+  });
+
+  it("retorna o form 1:1 e só os campos ativos, em ordem", async () => {
+    const svc = serviceClient();
+    const form = await getExtractionForm({ supabase: svc }, reviewId);
+    expect(form).not.toBeNull();
+
+    const fields = await listExtractionFields({ supabase: svc }, reviewId);
+    expect(fields.map((f) => f.id)).toEqual([keepId]);
+    expect(fields[0]!.name).toBe("Mantido");
   });
 });
