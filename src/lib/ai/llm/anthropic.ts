@@ -145,7 +145,7 @@ export class AnthropicProvider implements LLMProvider {
     const msg = await this.client.messages.create({
       model: MODEL,
       max_tokens: 4000,
-      system: `${PT_BR}\nVocê faz OCR fiel; não traduz, não resume.`,
+      system: "Você faz OCR fiel; não traduz, não resume.",
       messages: [
         {
           role: "user",
@@ -173,7 +173,7 @@ export class AnthropicProvider implements LLMProvider {
         timestamp: nowIso(),
       },
       state: "pending",
-      not_found: text.trim() === "",
+      not_found: text.trim() === "", // página em branco ou OCR sem texto
     };
   }
 
