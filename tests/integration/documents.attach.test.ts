@@ -81,7 +81,7 @@ describe("RPC create_pdf_pipeline_job (Fatia 1, FR-001/005)", () => {
       .eq("job_id", data.job_id);
     expect(items.data!.length).toBe(1);
     expect(
-      (items.data![0].payload as { document_id: string }).document_id,
+      (items.data![0]!.payload as { document_id: string }).document_id,
     ).toBe(docId);
 
     const audit = await svc
@@ -242,7 +242,7 @@ describe("listDocuments (FR-004)", () => {
     );
     const docs = await listDocuments({ supabase: owner2 }, rev, rec);
     expect(docs.length).toBe(1);
-    expect(docs[0].filename).toBe("a.pdf");
-    expect(docs[0].processing_status).toBe("queued");
+    expect(docs[0]!.filename).toBe("a.pdf");
+    expect(docs[0]!.processing_status).toBe("queued");
   });
 });
