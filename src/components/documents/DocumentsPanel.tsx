@@ -63,7 +63,12 @@ export function DocumentsPanel({
         await qc.invalidateQueries({
           queryKey: ["documents", reviewId, recordId],
         });
-        if (onRunPdfPipeline) void onRunPdfPipeline();
+        if (onRunPdfPipeline) {
+          onRunPdfPipeline().catch((err) => {
+            // Disparo do pipeline falhou; o polling de status não inicia. Observável p/ Sentry.
+            console.error("[pdf-pipeline] disparo falhou:", err);
+          });
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao anexar o PDF.");
