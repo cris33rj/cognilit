@@ -141,3 +141,57 @@ end;
 $$;
 
 grant execute on function public.add_extraction_field(uuid, text, extraction_field_type, jsonb) to authenticated;
+
+-- ============================================================
+-- RPC: update_extraction_field — valida, atualiza, audita before/after.
+-- ============================================================
+create or replace function public.update_extraction_field(
+  p_field_id uuid,
+  p_name text,
+  p_type extraction_field_type,
+  p_options jsonb
+)
+returns public.extraction_field
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_before public.extraction_field;
+  v_after public.extraction_field;
+  v_options jsonb;
+begin
+  select * into v_before from public.extraction_field where id = p_field_id;
+  if not found then
+    raise exception 'field not found';
+  end if;
+  if not public.is_review_member(v_before.review_id) then
+    raise exception 'not a member';
+  end if;
+  if coalesce(btrim(p_name), '') = '' then
+    raise exception 'name required';
+  end if;
+
+  if p_type = 'select' then
+    if p_options is null or jsonb_typeof(p_options) <> 'array' or jsonb_array_length(p_options) = 0 then
+      raise exception 'select requires non-empty options';
+    end if;
+    v_options := p_options;
+  else
+    v_options := null;
+  end if;
+
+  update public.extraction_field
+     set name = btrim(p_name), type = p_type, options = v_options, updated_at = now()
+   where id = p_field_id
+   returning * into v_after;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (v_before.review_id, 'human', auth.uid(), 'update_extraction_field', 'extraction_field',
+          p_field_id, to_jsonb(v_before), to_jsonb(v_after));
+
+  return v_after;
+end;
+$$;
+
+grant execute on function public.update_extraction_field(uuid, text, extraction_field_type, jsonb) to authenticated;

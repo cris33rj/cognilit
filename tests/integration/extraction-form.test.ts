@@ -110,3 +110,56 @@ describe("add_extraction_field — cria campo tipado, valida, audita", () => {
     expect(first.data.options).toEqual(["RCT", "Coorte", "Caso-controle"]);
   });
 });
+
+describe("update_extraction_field — edita campo, audita antes/depois", () => {
+  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let fieldId: string;
+
+  beforeAll(async () => {
+    const r = await newReview("Form edit campo");
+    client = r.client;
+    reviewId = r.reviewId;
+    await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
+    const { data } = await client.rpc("add_extraction_field", {
+      p_review_id: reviewId,
+      p_name: "Ano",
+      p_type: "text",
+      p_options: null,
+    });
+    fieldId = data.id;
+  });
+
+  it("atualiza nome/tipo e grava before/after", async () => {
+    const { data, error } = await client.rpc("update_extraction_field", {
+      p_field_id: fieldId,
+      p_name: "Ano de publicação",
+      p_type: "number",
+      p_options: null,
+    });
+    expect(error).toBeNull();
+    expect(data.name).toBe("Ano de publicação");
+    expect(data.type).toBe("number");
+
+    const svc = serviceClient();
+    const { data: audit } = await svc
+      .from("audit_entry")
+      .select("before, after")
+      .eq("review_id", reviewId)
+      .eq("action", "update_extraction_field")
+      .single();
+    expect((audit!.before as { name: string }).name).toBe("Ano");
+    expect((audit!.after as { name: string }).name).toBe("Ano de publicação");
+  });
+
+  it("rejeita virar select sem options", async () => {
+    const { error } = await client.rpc("update_extraction_field", {
+      p_field_id: fieldId,
+      p_name: "Ano de publicação",
+      p_type: "select",
+      p_options: null,
+    });
+    expect(error).not.toBeNull();
+    expect(error!.message).toMatch(/options/i);
+  });
+});

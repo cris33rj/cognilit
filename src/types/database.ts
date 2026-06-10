@@ -1563,6 +1563,32 @@ export type Database = {
         Args: { p_review_id: string }
         Returns: undefined
       }
+      update_extraction_field: {
+        Args: {
+          p_field_id: string
+          p_name: string
+          p_options: Json
+          p_type: Database["public"]["Enums"]["extraction_field_type"]
+        }
+        Returns: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_field"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
       ai_target_kind: "eligibility" | "protocol_draft" | "screening"
