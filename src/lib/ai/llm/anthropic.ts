@@ -4,6 +4,7 @@ import type {
   EligibilityDerivation,
   LLMProvider,
   LlmSuggestion,
+  OcrResult,
   ProtocolDraft,
   ProviderIdentity,
   ScreeningPreclassification,
@@ -132,6 +133,47 @@ export class AnthropicProvider implements LLMProvider {
       },
       state: "pending",
       not_found: false,
+    };
+  }
+
+  async ocrPage(input: {
+    imageBase64: string;
+    mediaType: "image/png" | "image/jpeg";
+    page: number;
+  }): Promise<LlmSuggestion<OcrResult>> {
+    const prompt = `Transcreva fielmente TODO o texto desta página de PDF escaneada (página ${input.page}). Preserve o idioma original. Responda só com o texto, sem comentários.`;
+    const msg = await this.client.messages.create({
+      model: MODEL,
+      max_tokens: 4000,
+      system: `${PT_BR}\nVocê faz OCR fiel; não traduz, não resume.`,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: input.mediaType,
+                data: input.imageBase64,
+              },
+            },
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    });
+    const text = textOf(msg);
+    return {
+      output: { text },
+      provenance: {
+        model: MODEL,
+        version: MODEL,
+        prompt_or_span: prompt,
+        timestamp: nowIso(),
+      },
+      state: "pending",
+      not_found: text.trim() === "",
     };
   }
 

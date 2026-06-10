@@ -3,6 +3,7 @@ import type {
   EligibilityDerivation,
   LLMProvider,
   LlmSuggestion,
+  OcrResult,
   ProtocolDraft,
   ProviderIdentity,
   ScreeningPreclassification,
@@ -82,6 +83,17 @@ export class MockLLMProvider implements LLMProvider {
         reason: "Sugestão simulada",
       },
       "preclassify",
+    );
+  }
+
+  async ocrPage(input: {
+    imageBase64: string;
+    mediaType: "image/png" | "image/jpeg";
+    page: number;
+  }): Promise<LlmSuggestion<OcrResult>> {
+    return suggestion<OcrResult>(
+      { text: `[OCR p.${input.page}] texto simulado` },
+      `ocr:p${input.page}`,
     );
   }
 

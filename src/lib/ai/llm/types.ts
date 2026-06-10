@@ -53,6 +53,10 @@ export interface CostEstimate {
   cost: Record<string, number>;
 }
 
+export interface OcrResult {
+  text: string; // texto OCR da página, no idioma original (FR-015)
+}
+
 export interface LLMProvider {
   identity(): ProviderIdentity;
 
@@ -75,6 +79,13 @@ export interface LLMProvider {
     abstract: string | null;
     criteria: string[];
   }): Promise<LlmSuggestion<ScreeningPreclassification>>;
+
+  /** OCR multimodal de uma página rasterizada (R2/FR-007/FR-008). Saída no idioma original. */
+  ocrPage(input: {
+    imageBase64: string;
+    mediaType: "image/png" | "image/jpeg";
+    page: number;
+  }): Promise<LlmSuggestion<OcrResult>>;
 
   /** Estimativa de custo ANTES de lote (FR-033, §VII/P5). */
   estimateCost(input: {
