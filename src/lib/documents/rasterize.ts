@@ -23,7 +23,12 @@ export type RasterizePage = (
 export const rasterizePage: RasterizePage = async (bytes, page) => {
   // Overload sem toDataURL retorna Promise<ArrayBuffer>; cast necessário pois
   // TypeScript infere a união dos overloads quando options é parcialmente omitido.
-  const result = await renderPageAsImage(bytes, page, { scale: 2 });
-  const buf = Buffer.from(result as ArrayBuffer);
+  const result = await renderPageAsImage(bytes, page, { scale: 2 }); // 2× resolução: equilíbrio qualidade de OCR vs. memória; recalibrar em D31
+  if (!(result instanceof ArrayBuffer)) {
+    throw new Error(
+      `rasterizePage: esperado ArrayBuffer de renderPageAsImage, recebido ${typeof result}`,
+    );
+  }
+  const buf = Buffer.from(result);
   return { imageBase64: buf.toString("base64"), mediaType: "image/png" };
 };
