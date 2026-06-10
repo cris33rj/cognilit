@@ -2,7 +2,8 @@
 
 **Branch:** `build/002-marco2-coracao-ai-first/2-pipeline-texto` (tip `11bd58d`)
 **Base:** feature HEAD `758c8e1` (Fatia 1 mergeada + IMPLEMENTATION_PLAN da Fatia 2)
-**Estado:** ✅ Completa, aguardando **merge manual** (CHECKPOINT 3).
+**Estado:** ✅ Completa e **mergeada** na feature `002-marco2-coracao-ai-first`
+(merge commit `3b43594`, 2026-06-10). CHECKPOINT 3 concluído — dev fez o merge manual.
 
 ## O que foi entregue
 
