@@ -53,6 +53,7 @@ export interface ScreeningQueueProps {
   onAttachPdf?: (
     formData: FormData,
   ) => Promise<{ ok: boolean; error?: string }>;
+  onRunPdfPipeline?: () => Promise<{ ok: boolean }>;
 }
 
 export function ScreeningQueue({
@@ -68,6 +69,7 @@ export function ScreeningQueue({
   loadDetail,
   loadDocuments,
   onAttachPdf,
+  onRunPdfPipeline,
 }: ScreeningQueueProps) {
   const qc = useQueryClient();
   const router = useRouter();
@@ -799,6 +801,7 @@ export function ScreeningQueue({
             recordId={focusedRecordId}
             loadDocuments={loadDocuments}
             onAttach={onAttachPdf}
+            onRunPdfPipeline={onRunPdfPipeline}
           />
         )}
       </div>

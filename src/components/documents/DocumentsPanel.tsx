@@ -19,6 +19,7 @@ export interface DocumentsPanelProps {
   recordId: string | null;
   loadDocuments: (reviewId: string, recordId: string) => Promise<DocumentRow[]>;
   onAttach: (formData: FormData) => Promise<{ ok: boolean; error?: string }>;
+  onRunPdfPipeline?: () => Promise<{ ok: boolean }>;
 }
 
 /**
@@ -31,6 +32,7 @@ export function DocumentsPanel({
   recordId,
   loadDocuments,
   onAttach,
+  onRunPdfPipeline,
 }: DocumentsPanelProps) {
   const qc = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -57,10 +59,12 @@ export function DocumentsPanel({
       fd.set("file", file);
       const res = await onAttach(fd);
       if (!res.ok) setError(res.error ?? "Falha ao anexar o PDF.");
-      else
+      else {
         await qc.invalidateQueries({
           queryKey: ["documents", reviewId, recordId],
         });
+        if (onRunPdfPipeline) void onRunPdfPipeline();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Falha ao anexar o PDF.");
     } finally {
