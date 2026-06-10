@@ -394,6 +394,22 @@ describe("ScreeningQueue (US4)", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("Fatia 1 — full_text renderiza o painel de PDFs do estudo (US1)", async () => {
+    renderQueue({
+      stage: "full_text",
+      loadDocuments: vi.fn().mockResolvedValue([]),
+      onAttachPdf: vi.fn().mockResolvedValue({ ok: true }),
+    });
+    expect(await screen.findByText("PDFs do estudo")).toBeInTheDocument();
+    expect(await screen.findByText(/nenhum pdf anexado/i)).toBeInTheDocument();
+  });
+
+  it("Fatia 1 — title_abstract NÃO mostra o painel de PDFs", async () => {
+    renderQueue({ stage: "title_abstract" });
+    await screen.findByText("Estudo Alpha");
+    expect(screen.queryByText("PDFs do estudo")).not.toBeInTheDocument();
+  });
+
   it("T/R: mostra o painel de detalhe do registro focado", async () => {
     renderQueue({ stage: "title_abstract" });
     expect(

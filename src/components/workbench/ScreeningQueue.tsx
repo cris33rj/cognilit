@@ -8,6 +8,8 @@ import { SuggestionChip } from "@/components/ai/SuggestionChip";
 import { ShortcutLegend } from "@/components/workbench/ShortcutLegend";
 import { RecordDetail } from "@/components/workbench/RecordDetail";
 import type { RecordDetailData } from "@/lib/record/queries";
+import { DocumentsPanel } from "@/components/documents/DocumentsPanel";
+import type { DocumentRow } from "@/lib/documents/queries";
 import { DENSITIES, type Density } from "@/lib/screening/config";
 import {
   applyQueueView,
@@ -44,6 +46,13 @@ export interface ScreeningQueueProps {
     reviewId: string,
     recordId: string,
   ) => Promise<RecordDetailData | null>;
+  loadDocuments?: (
+    reviewId: string,
+    recordId: string,
+  ) => Promise<DocumentRow[]>;
+  onAttachPdf?: (
+    formData: FormData,
+  ) => Promise<{ ok: boolean; error?: string }>;
 }
 
 export function ScreeningQueue({
@@ -57,6 +66,8 @@ export function ScreeningQueue({
   onReverse,
   onReasonUsage,
   loadDetail,
+  loadDocuments,
+  onAttachPdf,
 }: ScreeningQueueProps) {
   const qc = useQueryClient();
   const router = useRouter();
@@ -657,7 +668,9 @@ export function ScreeningQueue({
       {/* Grade virtualizada (FR-028, FR-041) + painel de detalhe no T/R (Fatia 15) */}
       <div
         className={
-          stage === "title_abstract" ? "flex items-start gap-4" : undefined
+          stage === "title_abstract" || stage === "full_text"
+            ? "flex items-start gap-4"
+            : undefined
         }
       >
         <div
@@ -666,7 +679,9 @@ export function ScreeningQueue({
           aria-label="Fila de triagem"
           tabIndex={0}
           className={`h-[60vh] overflow-auto rounded border focus:outline focus:outline-2 focus:outline-accent ${
-            stage === "title_abstract" ? "min-w-0 flex-1" : ""
+            stage === "title_abstract" || stage === "full_text"
+              ? "min-w-0 flex-1"
+              : ""
           }`}
         >
           {queue.isLoading ? (
@@ -776,6 +791,14 @@ export function ScreeningQueue({
           <RecordDetail
             detail={detail.data ?? null}
             isLoading={detail.isLoading}
+          />
+        )}
+        {stage === "full_text" && loadDocuments && onAttachPdf && (
+          <DocumentsPanel
+            reviewId={reviewId}
+            recordId={focusedRecordId}
+            loadDocuments={loadDocuments}
+            onAttach={onAttachPdf}
           />
         )}
       </div>
