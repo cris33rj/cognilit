@@ -300,6 +300,64 @@ export type Database = {
           },
         ]
       }
+      document: {
+        Row: {
+          byte_size: number
+          created_at: string
+          filename: string
+          id: string
+          page_count: number | null
+          processing_status: Database["public"]["Enums"]["document_status"]
+          record_id: string
+          review_id: string
+          storage_path: string
+        }
+        Insert: {
+          byte_size: number
+          created_at?: string
+          filename: string
+          id?: string
+          page_count?: number | null
+          processing_status?: Database["public"]["Enums"]["document_status"]
+          record_id: string
+          review_id: string
+          storage_path: string
+        }
+        Update: {
+          byte_size?: number
+          created_at?: string
+          filename?: string
+          id?: string
+          page_count?: number | null
+          processing_status?: Database["public"]["Enums"]["document_status"]
+          record_id?: string
+          review_id?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "record"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "document_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       eligibility_criterion: {
         Row: {
           ai_suggestion_id: string | null
@@ -1104,6 +1162,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_pdf_pipeline_job: {
+        Args: {
+          p_byte_size: number
+          p_document_id: string
+          p_filename: string
+          p_record_id: string
+          p_review_id: string
+          p_storage_path: string
+        }
+        Returns: Json
+      }
       create_review: {
         Args: { p_title: string }
         Returns: {
@@ -1252,6 +1321,16 @@ export type Database = {
         }
       }
       normalize_reason_label: { Args: { "": string }; Returns: string }
+      regenerate_eligibility_criteria: {
+        Args: {
+          p_items: Json
+          p_not_found: boolean
+          p_output: Json
+          p_provenance: Json
+          p_review_id: string
+        }
+        Returns: number
+      }
       reverse_dedup: { Args: { p_decision_id: string }; Returns: undefined }
       reverse_screening: { Args: { p_decision_id: string }; Returns: undefined }
       seed_default_exclusion_reasons: {
@@ -1307,6 +1386,12 @@ export type Database = {
       dedup_actor: "system" | "human"
       dedup_kind: "exact_auto" | "fuzzy_human"
       dedup_outcome: "removed" | "merged" | "kept_distinct"
+      document_status:
+        | "queued"
+        | "processing"
+        | "text_ready"
+        | "partial"
+        | "failed"
       ft_decision_state: "included" | "excluded"
       job_item_status: "pending" | "done" | "failed"
       job_status:
@@ -1315,7 +1400,7 @@ export type Database = {
         | "completed"
         | "completed_with_errors"
         | "failed"
-      job_type: "import_parse" | "ai_screening_batch"
+      job_type: "import_parse" | "ai_screening_batch" | "pdf_text_pipeline"
       llm_provider: "anthropic"
       member_role: "owner" | "reviewer" | "viewer"
       protocol_origin: "ai_draft" | "human"
@@ -1480,6 +1565,13 @@ export const Constants = {
       dedup_actor: ["system", "human"],
       dedup_kind: ["exact_auto", "fuzzy_human"],
       dedup_outcome: ["removed", "merged", "kept_distinct"],
+      document_status: [
+        "queued",
+        "processing",
+        "text_ready",
+        "partial",
+        "failed",
+      ],
       ft_decision_state: ["included", "excluded"],
       job_item_status: ["pending", "done", "failed"],
       job_status: [
@@ -1489,7 +1581,7 @@ export const Constants = {
         "completed_with_errors",
         "failed",
       ],
-      job_type: ["import_parse", "ai_screening_batch"],
+      job_type: ["import_parse", "ai_screening_batch", "pdf_text_pipeline"],
       llm_provider: ["anthropic"],
       member_role: ["owner", "reviewer", "viewer"],
       protocol_origin: ["ai_draft", "human"],

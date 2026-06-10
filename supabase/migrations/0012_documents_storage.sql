@@ -54,3 +54,65 @@ create policy pdfs_delete_member on storage.objects
     bucket_id = 'pdfs'
     and public.is_review_member(((storage.foldername(name))[2])::uuid)
   );
+
+-- ---------- novo type de job (aditivo) ----------
+alter type job_type add value if not exists 'pdf_text_pipeline';
+
+-- ============================================================
+-- RPC: create_pdf_pipeline_job — cria document(queued) + job + job_item + audit
+-- (atômico, §VIII: só enfileira; nunca processa). Valida estudo (passou T/R).
+-- O binário já foi enviado ao Storage pela Action ANTES desta chamada.
+-- ============================================================
+create or replace function public.create_pdf_pipeline_job(
+  p_review_id uuid,
+  p_record_id uuid,
+  p_document_id uuid,
+  p_storage_path text,
+  p_filename text,
+  p_byte_size integer
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_job public.job;
+  v_state corpus_state;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  select corpus_state into v_state
+  from public.record
+  where id = p_record_id and review_id = p_review_id;
+  if v_state is null then
+    raise exception 'record not found in review';
+  end if;
+  if v_state not in ('included_ts', 'included_ft') then
+    raise exception 'record must have passed title/abstract screening';
+  end if;
+
+  insert into public.document (id, review_id, record_id, storage_path, filename, byte_size)
+  values (p_document_id, p_review_id, p_record_id, p_storage_path, p_filename, p_byte_size);
+
+  insert into public.job (review_id, type, status)
+  values (p_review_id, 'pdf_text_pipeline', 'queued')
+  returning * into v_job;
+
+  insert into public.job_item (job_id, review_id, status, payload)
+  values (v_job.id, p_review_id, 'pending', jsonb_build_object('document_id', p_document_id));
+
+  insert into public.audit_entry (
+    review_id, actor_type, actor_id, action, entity, entity_id, before, after
+  ) values (
+    p_review_id, 'human', auth.uid(), 'attach_pdf', 'document', p_document_id,
+    null, jsonb_build_object('job_id', v_job.id, 'filename', p_filename)
+  );
+
+  return jsonb_build_object('document_id', p_document_id, 'job_id', v_job.id);
+end;
+$$;
+
+grant execute on function public.create_pdf_pipeline_job(uuid, uuid, uuid, text, text, integer) to authenticated;
