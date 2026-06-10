@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { serviceClient, signUpUser } from "./helpers/supabase";
+import { serviceClient, signUpUser, anonClient } from "./helpers/supabase";
+import { attachPdfDocument } from "@/lib/documents/attach";
 
 async function newReview(
   client: Awaited<ReturnType<typeof signUpUser>>["client"],
@@ -123,5 +124,100 @@ describe("RPC create_pdf_pipeline_job (Fatia 1, FR-001/005)", () => {
       p_byte_size: 10,
     });
     expect(error).not.toBeNull(); // 'record not found in review'
+  });
+});
+
+describe("attachPdfDocument — validar + upload Storage + RPC (FR-001/002/003)", () => {
+  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let recordFt: string;
+
+  function pdf(): Uint8Array {
+    return new TextEncoder().encode("%PDF-1.4\n1 0 obj<<>>endobj\n%%EOF\n");
+  }
+
+  beforeAll(async () => {
+    const s = Date.now();
+    const u = await signUpUser(`att_${s}@example.com`, "senha-teste-123");
+    owner = u.client;
+    reviewId = await newReview(owner, "Anexo Revisão");
+    recordFt = await seedRecord(reviewId, "included_ft");
+  });
+
+  it("guarda o PDF e enfileira o job (estado queued)", async () => {
+    const res = await attachPdfDocument(
+      { supabase: owner },
+      { reviewId, recordId: recordFt, filename: "estudo.pdf", bytes: pdf() },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const svc = serviceClient();
+    const doc = await svc
+      .from("document")
+      .select("storage_path, processing_status")
+      .eq("id", res.documentId)
+      .single();
+    expect(doc.data!.processing_status).toBe("queued");
+    expect(doc.data!.storage_path).toContain(
+      `review/${reviewId}/record/${recordFt}/`,
+    );
+    const obj = await svc.storage.from("pdfs").download(doc.data!.storage_path);
+    expect(obj.data).not.toBeNull();
+  });
+
+  it("rejeita arquivo não-PDF sem persistir document (FR-003)", async () => {
+    const before =
+      (
+        await serviceClient()
+          .from("document")
+          .select("id")
+          .eq("review_id", reviewId)
+      ).data?.length ?? 0;
+    const res = await attachPdfDocument(
+      { supabase: owner },
+      {
+        reviewId,
+        recordId: recordFt,
+        filename: "x.txt",
+        bytes: new TextEncoder().encode("hello"),
+      },
+    );
+    expect(res.ok).toBe(false);
+    const after =
+      (
+        await serviceClient()
+          .from("document")
+          .select("id")
+          .eq("review_id", reviewId)
+      ).data?.length ?? 0;
+    expect(after).toBe(before);
+  });
+
+  it("não-membro não consegue ler o objeto no Storage (SC-011)", async () => {
+    const res = await attachPdfDocument(
+      { supabase: owner },
+      { reviewId, recordId: recordFt, filename: "estudo2.pdf", bytes: pdf() },
+    );
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    const stranger = anonClient();
+    const { data } = await stranger.storage
+      .from("pdfs")
+      .download(`review/${reviewId}/record/${recordFt}/${res.documentId}.pdf`);
+    expect(data).toBeNull();
+  });
+
+  it("remove o objeto órfão do Storage quando a RPC rejeita (FR-003)", async () => {
+    const recActive = await seedRecord(reviewId, "active");
+    const prefix = `review/${reviewId}/record/${recActive}`;
+    const svc = serviceClient();
+    const before = (await svc.storage.from("pdfs").list(prefix)).data ?? [];
+    const res = await attachPdfDocument(
+      { supabase: owner },
+      { reviewId, recordId: recActive, filename: "orfao.pdf", bytes: pdf() },
+    );
+    expect(res.ok).toBe(false);
+    const after = (await svc.storage.from("pdfs").list(prefix)).data ?? [];
+    expect(after.length).toBe(before.length);
   });
 });
