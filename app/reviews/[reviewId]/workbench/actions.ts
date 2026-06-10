@@ -17,6 +17,7 @@ import {
 } from "@/lib/screening/queries";
 import { enqueueScreeningJob } from "@/lib/screening/enqueue";
 import { runScreeningWorkerWith } from "@/lib/screening/run";
+import { runPdfPipelineWorkerWith } from "@/lib/documents/run";
 import { getLLMProvider } from "@/lib/ai/llm";
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { MissingByokError } from "@/lib/ai/llm/types";
@@ -266,6 +267,22 @@ export async function runScreeningWorker(reviewId: string) {
     .eq("review_id", reviewId);
   const criteria = ((crit ?? []) as Array<{ text: string }>).map((c) => c.text);
   await runScreeningWorkerWith(admin, provider, reviewId, criteria);
+  revalidatePath(`/reviews/${reviewId}/workbench`);
+  return { ok: true as const };
+}
+
+export async function runPdfPipelineWorker(reviewId: string) {
+  await requireMember(reviewId);
+  const admin = createAdminClient();
+  // Provider: BYOK quando há chave; senão Mock determinístico (local/e2e).
+  let provider;
+  try {
+    provider = await getLLMProvider(reviewId);
+  } catch (e) {
+    if (e instanceof MissingByokError) provider = new MockLLMProvider();
+    else throw e;
+  }
+  await runPdfPipelineWorkerWith(admin, provider, reviewId);
   revalidatePath(`/reviews/${reviewId}/workbench`);
   return { ok: true as const };
 }
