@@ -1548,6 +1548,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      reorder_extraction_fields: {
+        Args: { p_field_ids: string[]; p_review_id: string }
+        Returns: undefined
+      }
       reverse_dedup: { Args: { p_decision_id: string }; Returns: undefined }
       reverse_screening: { Args: { p_decision_id: string }; Returns: undefined }
       seed_default_exclusion_reasons: {

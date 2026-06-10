@@ -209,3 +209,56 @@ describe("remove_extraction_field — soft-delete (não apaga linha), audita", (
     expect((audit!.after as { is_active: boolean }).is_active).toBe(false);
   });
 });
+
+describe("reorder_extraction_fields — reescreve sort_order pela ordem do array", () => {
+  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
+  let reviewId: string;
+  let aId: string;
+  let bId: string;
+
+  beforeAll(async () => {
+    const r = await newReview("Form reorder");
+    client = r.client;
+    reviewId = r.reviewId;
+    await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
+    aId = (
+      await client.rpc("add_extraction_field", {
+        p_review_id: reviewId,
+        p_name: "Primeiro",
+        p_type: "text",
+        p_options: null,
+      })
+    ).data.id;
+    bId = (
+      await client.rpc("add_extraction_field", {
+        p_review_id: reviewId,
+        p_name: "Segundo",
+        p_type: "text",
+        p_options: null,
+      })
+    ).data.id;
+  });
+
+  it("inverte a ordem e audita", async () => {
+    const { error } = await client.rpc("reorder_extraction_fields", {
+      p_review_id: reviewId,
+      p_field_ids: [bId, aId],
+    });
+    expect(error).toBeNull();
+
+    const svc = serviceClient();
+    const { data: rows } = await svc
+      .from("extraction_field")
+      .select("id, sort_order")
+      .eq("review_id", reviewId)
+      .order("sort_order", { ascending: true });
+    expect(rows!.map((r) => r.id)).toEqual([bId, aId]);
+
+    const { data: audit } = await svc
+      .from("audit_entry")
+      .select("action")
+      .eq("review_id", reviewId)
+      .eq("action", "reorder_extraction_fields");
+    expect(audit!.length).toBe(1);
+  });
+});

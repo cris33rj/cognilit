@@ -235,3 +235,33 @@ end;
 $$;
 
 grant execute on function public.remove_extraction_field(uuid) to authenticated;
+
+-- ============================================================
+-- RPC: reorder_extraction_fields — sort_order = posição no array; audita uma vez.
+-- ============================================================
+create or replace function public.reorder_extraction_fields(p_review_id uuid, p_field_ids uuid[])
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  update public.extraction_field f
+     set sort_order = ord.pos, updated_at = now()
+    from (
+      select id, pos
+      from unnest(p_field_ids) with ordinality as t(id, pos)
+    ) ord
+   where f.id = ord.id and f.review_id = p_review_id;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (p_review_id, 'human', auth.uid(), 'reorder_extraction_fields', 'extraction_form', null,
+          null, jsonb_build_object('order', to_jsonb(p_field_ids)));
+end;
+$$;
+
+grant execute on function public.reorder_extraction_fields(uuid, uuid[]) to authenticated;
