@@ -75,6 +75,37 @@ export async function listStudies(
   }));
 }
 
+/**
+ * Estudos elegíveis para extração em lote (US4): included_ft COM PDF processado
+ * (text_ready/partial). Mesmo predicado da RPC create_extraction_job — manter em
+ * sincronia. Um estudo com >1 PDF processado aparece uma única vez (dedupe).
+ */
+export async function listExtractionBatchCandidates(
+  deps: { supabase: SupabaseClient },
+  reviewId: string,
+): Promise<StudyRow[]> {
+  const { data, error } = await deps.supabase
+    .from("record")
+    .select("id, metadata, document!inner(processing_status)")
+    .eq("review_id", reviewId)
+    .eq("corpus_state", "included_ft")
+    .in("document.processing_status", ["text_ready", "partial"])
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+
+  const seen = new Set<string>();
+  const out: StudyRow[] = [];
+  for (const r of (data ?? []) as Array<{
+    id: string;
+    metadata: { title?: string } | null;
+  }>) {
+    if (seen.has(r.id)) continue; // dedupe: inner-join repete o estudo por documento
+    seen.add(r.id);
+    out.push({ id: r.id, title: r.metadata?.title ?? "(sem título)" });
+  }
+  return out;
+}
+
 export interface ExtractionValueView {
   id: string;
   field_id: string;
