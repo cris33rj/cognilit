@@ -578,6 +578,88 @@ export type Database = {
           },
         ]
       }
+      extraction_value: {
+        Row: {
+          ai_suggestion_id: string | null
+          created_at: string
+          field_id: string
+          final_value: Json | null
+          id: string
+          record_id: string
+          review_id: string
+          state: Database["public"]["Enums"]["suggestion_state"]
+          superseded_by_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          ai_suggestion_id?: string | null
+          created_at?: string
+          field_id: string
+          final_value?: Json | null
+          id?: string
+          record_id: string
+          review_id: string
+          state?: Database["public"]["Enums"]["suggestion_state"]
+          superseded_by_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ai_suggestion_id?: string | null
+          created_at?: string
+          field_id?: string
+          final_value?: Json | null
+          id?: string
+          record_id?: string
+          review_id?: string
+          state?: Database["public"]["Enums"]["suggestion_state"]
+          superseded_by_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_value_ai_suggestion_id_fkey"
+            columns: ["ai_suggestion_id"]
+            isOneToOne: false
+            referencedRelation: "ai_suggestion"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_value_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_field"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_value_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "record"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_value_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "extraction_value_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_value_superseded_by_id_fkey"
+            columns: ["superseded_by_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_value"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job: {
         Row: {
           actual_cost: Json | null
@@ -1517,6 +1599,31 @@ export type Database = {
         }
       }
       normalize_reason_label: { Args: { "": string }; Returns: string }
+      ratify_extraction_value: {
+        Args: {
+          p_final_value: Json
+          p_state: Database["public"]["Enums"]["suggestion_state"]
+          p_value_id: string
+        }
+        Returns: {
+          ai_suggestion_id: string | null
+          created_at: string
+          field_id: string
+          final_value: Json | null
+          id: string
+          record_id: string
+          review_id: string
+          state: Database["public"]["Enums"]["suggestion_state"]
+          superseded_by_id: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_value"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       regenerate_eligibility_criteria: {
         Args: {
           p_items: Json
@@ -1616,7 +1723,11 @@ export type Database = {
       }
     }
     Enums: {
-      ai_target_kind: "eligibility" | "protocol_draft" | "screening"
+      ai_target_kind:
+        | "eligibility"
+        | "protocol_draft"
+        | "screening"
+        | "extraction"
       audit_actor_type: "human" | "ai" | "system"
       corpus_state:
         | "imported"
@@ -1796,7 +1907,12 @@ export const Constants = {
   },
   public: {
     Enums: {
-      ai_target_kind: ["eligibility", "protocol_draft", "screening"],
+      ai_target_kind: [
+        "eligibility",
+        "protocol_draft",
+        "screening",
+        "extraction",
+      ],
       audit_actor_type: ["human", "ai", "system"],
       corpus_state: [
         "imported",
