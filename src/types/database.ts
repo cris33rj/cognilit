@@ -195,6 +195,7 @@ export type Database = {
           created_at: string
           id: string
           provider: Database["public"]["Enums"]["llm_provider"]
+          purpose: Database["public"]["Enums"]["byok_purpose"]
           review_id: string
           vault_secret_id: string
         }
@@ -202,6 +203,7 @@ export type Database = {
           created_at?: string
           id?: string
           provider?: Database["public"]["Enums"]["llm_provider"]
+          purpose?: Database["public"]["Enums"]["byok_purpose"]
           review_id: string
           vault_secret_id: string
         }
@@ -209,6 +211,7 @@ export type Database = {
           created_at?: string
           id?: string
           provider?: Database["public"]["Enums"]["llm_provider"]
+          purpose?: Database["public"]["Enums"]["byok_purpose"]
           review_id?: string
           vault_secret_id?: string
         }
@@ -216,14 +219,14 @@ export type Database = {
           {
             foreignKeyName: "byok_key_review_id_fkey"
             columns: ["review_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "prisma_counter"
             referencedColumns: ["review_id"]
           },
           {
             foreignKeyName: "byok_key_review_id_fkey"
             columns: ["review_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -416,6 +419,76 @@ export type Database = {
           },
           {
             foreignKeyName: "eligibility_criterion_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      embedding_chunk: {
+        Row: {
+          char_end: number
+          char_start: number
+          content: string
+          created_at: string
+          dim: number
+          document_id: string
+          embedding: string
+          id: string
+          model: string
+          origin: string
+          page: number
+          provider: string
+          review_id: string
+        }
+        Insert: {
+          char_end: number
+          char_start: number
+          content: string
+          created_at?: string
+          dim: number
+          document_id: string
+          embedding: string
+          id?: string
+          model: string
+          origin: string
+          page: number
+          provider: string
+          review_id: string
+        }
+        Update: {
+          char_end?: number
+          char_start?: number
+          content?: string
+          created_at?: string
+          dim?: number
+          document_id?: string
+          embedding?: string
+          id?: string
+          model?: string
+          origin?: string
+          page?: number
+          provider?: string
+          review_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "embedding_chunk_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "document"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "embedding_chunk_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "embedding_chunk_review_id_fkey"
             columns: ["review_id"]
             isOneToOne: false
             referencedRelation: "review"
@@ -1399,6 +1472,27 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_embedding_job: {
+        Args: { p_document_ids?: Json; p_review_id: string }
+        Returns: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_extraction_job: {
         Args: { p_record_ids?: Json; p_review_id: string }
         Returns: {
@@ -1537,7 +1631,10 @@ export type Database = {
         }
       }
       get_byok_secret: {
-        Args: { p_review_id: string }
+        Args: {
+          p_purpose?: Database["public"]["Enums"]["byok_purpose"]
+          p_review_id: string
+        }
         Returns: {
           api_key: string
           provider: Database["public"]["Enums"]["llm_provider"]
@@ -1619,6 +1716,17 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      match_embedding_chunks: {
+        Args: { p_k?: number; p_query: string; p_review_id: string }
+        Returns: {
+          document_id: string
+          origin: string
+          page: number
+          record_id: string
+          similarity: number
+          source_span: string
+        }[]
+      }
       normalize_reason_label: { Args: { "": string }; Returns: string }
       ratify_extraction_value: {
         Args: {
@@ -1690,12 +1798,14 @@ export type Database = {
         Args: {
           p_api_key: string
           p_provider: Database["public"]["Enums"]["llm_provider"]
+          p_purpose?: Database["public"]["Enums"]["byok_purpose"]
           p_review_id: string
         }
         Returns: {
           created_at: string
           id: string
           provider: Database["public"]["Enums"]["llm_provider"]
+          purpose: Database["public"]["Enums"]["byok_purpose"]
           review_id: string
           vault_secret_id: string
         }
@@ -1750,6 +1860,7 @@ export type Database = {
         | "screening"
         | "extraction"
       audit_actor_type: "human" | "ai" | "system"
+      byok_purpose: "llm" | "embedding"
       corpus_state:
         | "imported"
         | "active"
@@ -1785,7 +1896,8 @@ export type Database = {
         | "ai_screening_batch"
         | "pdf_text_pipeline"
         | "ai_extraction_batch"
-      llm_provider: "anthropic"
+        | "embedding_batch"
+      llm_provider: "anthropic" | "voyage"
       member_role: "owner" | "reviewer" | "viewer"
       protocol_origin: "ai_draft" | "human"
       protocol_state: "draft" | "locked"
@@ -1939,6 +2051,7 @@ export const Constants = {
         "extraction",
       ],
       audit_actor_type: ["human", "ai", "system"],
+      byok_purpose: ["llm", "embedding"],
       corpus_state: [
         "imported",
         "active",
@@ -1977,8 +2090,9 @@ export const Constants = {
         "ai_screening_batch",
         "pdf_text_pipeline",
         "ai_extraction_batch",
+        "embedding_batch",
       ],
-      llm_provider: ["anthropic"],
+      llm_provider: ["anthropic", "voyage"],
       member_role: ["owner", "reviewer", "viewer"],
       protocol_origin: ["ai_draft", "human"],
       protocol_state: ["draft", "locked"],
