@@ -130,5 +130,12 @@ describe("runExtractionForRecord (US3)", () => {
       .eq("record_id", recordId)
       .eq("state", "pending");
     expect(pendings!.length).toBeGreaterThan(0); // nova sugestão pending viva
+
+    const { data: active } = await svc
+      .from("extraction_value")
+      .select("id")
+      .eq("record_id", recordId)
+      .in("state", ["pending", "inferred"]);
+    expect(active!.length).toBe(2); // uma pendente viva por campo (2 campos); as antigas foram rejeitadas
   });
 });

@@ -58,6 +58,8 @@ export async function loadRecordText(
     const start = text.length;
     text += l.content + "\n";
     pageIndex.push({ page: l.page, char_start: start, char_end: text.length });
+    // first-wins por página: um estudo com 2 PDFs partilhando a página N guarda só a
+    // camada do 1º documento (limitação aceita nesta fatia; estudo típico tem 1 PDF).
     if (!layerByPage.has(l.page)) {
       layerByPage.set(l.page, { text_layer_id: l.id, origin: l.origin });
     }
@@ -135,6 +137,8 @@ export async function runExtractionForRecord(
     };
     const state = ef.inferred ? "inferred" : "pending";
 
+    // Se o insert de ai_suggestion abaixo falhar, esta linha fica órfã (pending, sem
+    // ai_suggestion_id); a próxima re-extração a aposenta pelo filtro pending/inferred (M1).
     const { data: value, error: vErr } = await supabase
       .from("extraction_value")
       .insert({
@@ -164,10 +168,11 @@ export async function runExtractionForRecord(
       .single();
     if (sErr) throw new Error(sErr.message);
 
-    await supabase
+    const { error: linkErr } = await supabase
       .from("extraction_value")
       .update({ ai_suggestion_id: (suggestion as { id: string }).id })
       .eq("id", valueId);
+    if (linkErr) throw new Error(linkErr.message);
 
     created += 1;
   }
