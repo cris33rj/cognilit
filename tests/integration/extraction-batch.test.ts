@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { enqueueExtractionJob } from "@/lib/extraction/enqueue";
 import { processExtractionJob } from "@/lib/extraction/batch-worker";
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
+import { runExtractionBatchWorkerWith } from "@/lib/extraction/batch-run";
 
 /** Cria Revisão + estudo included_ft com PDF processado + text_layer + form (1 campo). */
 async function seedStudy(
@@ -232,5 +233,26 @@ describe("processExtractionJob (US4/FR-021/FR-023)", () => {
       .select("id", { count: "exact", head: true })
       .eq("review_id", reviewId);
     expect(after2).toBe(after1);
+  });
+});
+
+describe("runExtractionBatchWorkerWith (US4/A1)", () => {
+  it("processa todos os jobs ai_extraction_batch ativos da Revisão", async () => {
+    const { client, reviewId, svc } = await setup();
+    await seedStudy(svc, reviewId, { title: "A" });
+    const enq = await enqueueExtractionJob(
+      { supabase: client },
+      reviewId,
+      null,
+    );
+
+    await runExtractionBatchWorkerWith(svc, new MockLLMProvider(), reviewId);
+
+    const { data: job } = await svc
+      .from("job")
+      .select("status")
+      .eq("id", enq.job_id)
+      .single();
+    expect(job!.status).toBe("completed");
   });
 });
