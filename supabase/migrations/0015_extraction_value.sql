@@ -4,6 +4,8 @@
 -- (worker server-side, bypassa RLS). O humano ratifica via RPC security-definer
 -- auditada (ratify_extraction_value — Task 2). RLS concede só SELECT a membros.
 -- data-model.md §extraction_value + §ai_suggestion(estendida) + máquina de estados.
+-- Múltiplas linhas por (record,field) são intencionais: histórico de re-extração e
+-- coexistência de valor validado + nova sugestão pendente (FR-019a).
 -- ============================================================
 
 -- target_kind ganha 'extraction' (aditivo). Usado em runtime, não nesta transação.
@@ -20,7 +22,7 @@ create table public.extraction_value (
   state suggestion_state not null default 'pending', -- reusa o enum do Marco 1
   superseded_by_id uuid references public.extraction_value (id) on delete set null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),  -- RPCs/worker setam manualmente em cada UPDATE (sem trigger; convenção 0014)
   -- accepted/edited ⇒ final_value obrigatório (data-model §extraction_value)
   constraint extraction_value_final_ck check (
     state not in ('accepted', 'edited') or final_value is not null
@@ -28,6 +30,12 @@ create table public.extraction_value (
 );
 create index extraction_value_record_field_idx on public.extraction_value (record_id, field_id);
 create index extraction_value_review_idx on public.extraction_value (review_id);
+-- Guarda de integridade: no máximo UMA sugestão não-ratificada (pending/inferred) viva
+-- por (record, field). Validados (accepted/edited) coexistem com nova pendente na
+-- re-extração — por isso o índice é escopado só aos estados não-ratificados (FR-019a/Q4).
+create unique index extraction_value_active_uidx
+  on public.extraction_value (record_id, field_id)
+  where state in ('pending', 'inferred');
 
 alter table public.extraction_value enable row level security;
 

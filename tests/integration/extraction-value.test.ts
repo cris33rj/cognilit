@@ -74,6 +74,27 @@ describe("extraction_value — schema + RLS", () => {
     expect(error).not.toBeNull(); // viola o CHECK
   });
 
+  it("CHECK: state edited exige final_value não-nulo", async () => {
+    const svc = serviceClient();
+    const { error } = await svc.from("extraction_value").insert({
+      review_id: ctx.reviewId,
+      record_id: ctx.recordId,
+      field_id: ctx.fieldId,
+      state: "edited",
+    });
+    expect(error).not.toBeNull();
+  });
+
+  it("membro não escreve direto (RLS só concede select)", async () => {
+    const { error } = await ctx.client.from("extraction_value").insert({
+      review_id: ctx.reviewId,
+      record_id: ctx.recordId,
+      field_id: ctx.fieldId,
+      state: "pending",
+    });
+    expect(error).not.toBeNull();
+  });
+
   it("aceita target_kind='extraction' em ai_suggestion", async () => {
     const svc = serviceClient();
     const { error } = await svc.from("ai_suggestion").insert({
