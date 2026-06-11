@@ -35,7 +35,7 @@ begin
 
   -- Um job_item por estudo elegível: incluído no Texto completo (included_ft) E
   -- com PDF processado (text_ready/partial). Mesmo predicado de
-  -- listExtractionBatchCandidates (Task 5) — manter os dois em sincronia.
+  -- listExtractionBatchCandidates (FR-021) — manter os dois em sincronia.
   insert into public.job_item (job_id, review_id, status, payload)
   select v_job.id, p_review_id, 'pending', jsonb_build_object('record_id', r.id)
   from public.record r
