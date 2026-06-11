@@ -3,9 +3,11 @@ import {
   listExtractionFields,
   listStudies,
   listExtractionValues,
+  listExtractionBatchCandidates,
 } from "@/lib/extraction/queries";
 import { ExtractionFormBuilder } from "@/components/extraction/ExtractionFormBuilder";
 import { ExtractionRunner } from "@/components/extraction/ExtractionRunner";
+import { ExtractionBatchRunner } from "@/components/extraction/ExtractionBatchRunner";
 import {
   ensureExtractionForm,
   addExtractionField,
@@ -14,6 +16,8 @@ import {
   reorderExtractionFields,
   runExtraction,
   ratifyExtractionValue,
+  estimateExtractionBatch,
+  runExtractionBatch,
 } from "./actions";
 
 export default async function ExtractionPage({
@@ -27,6 +31,10 @@ export default async function ExtractionPage({
   const supabase = await createClient();
   const fields = await listExtractionFields({ supabase }, reviewId);
   const studies = await listStudies({ supabase }, reviewId);
+  const batchCandidates = await listExtractionBatchCandidates(
+    { supabase },
+    reviewId,
+  );
   const valuesByStudy = await Promise.all(
     studies.map((s) => listExtractionValues({ supabase }, reviewId, s.id)),
   );
@@ -41,6 +49,22 @@ export default async function ExtractionPage({
         onRemove={removeExtractionField}
         onReorder={reorderExtractionFields}
       />
+
+      <section className="space-y-4">
+        <h2 className="text-lg font-semibold">Extração em lote</h2>
+        <p className="text-sm text-ink-soft">
+          Rode a extração por IA sobre vários estudos de uma vez. A estimativa
+          de custo aparece antes da execução.
+        </p>
+        <div className="panel p-4">
+          <ExtractionBatchRunner
+            reviewId={reviewId}
+            candidates={batchCandidates}
+            onEstimate={estimateExtractionBatch}
+            onRun={runExtractionBatch}
+          />
+        </div>
+      </section>
 
       <section className="space-y-6">
         <h2 className="text-lg font-semibold">Estudos para extração</h2>
