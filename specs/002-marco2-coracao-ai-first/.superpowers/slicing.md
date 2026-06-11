@@ -22,7 +22,7 @@
 | **F1** — Ingestão de PDF | `…/1-ingestao-pdf` | ✅ mergeada | `0736b8c` (2026-06-10) |
 | **F2** — Pipeline de texto | `…/2-pipeline-texto` | ✅ mergeada | `3b43594` (2026-06-10) |
 | **F3** — Formulário de extração | `…/3-formulario-extracao` | ✅ mergeada | `1f350a0` (2026-06-10) |
-| **F4** — Extração por IA | `…/4-extracao-ia` | ⬜ pendente | — |
+| **F4** — Extração por IA | `…/4-extracao-ia` | ✅ completa — aguardando merge (CHECKPOINT 3, tip `618be10`) | — |
 | **F5** — Extração em lote | `…/5-extracao-lote` | ⬜ pendente | — |
 | **F6** — Busca semântica/RAG | `…/6-busca-semantica` | ⬜ pendente | — |
 
