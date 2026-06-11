@@ -5,6 +5,12 @@ import type { JobsAndUsage } from "@/lib/shell/usage";
 
 const ACTIVE = ["queued", "running"];
 
+const PHASE_LABELS: Record<string, string> = {
+  screening: "Triagem",
+  extraction: "Extração",
+  embedding: "Embeddings",
+};
+
 export function JobsPanel({
   reviewId,
   data,
@@ -23,6 +29,16 @@ export function JobsPanel({
           Consumo de IA — entrada: <strong>{data.usage.tokensIn}</strong> tokens
           · saída: <strong>{data.usage.tokensOut}</strong> tokens
         </div>
+        {data.usageByPhase.length > 0 && (
+          <ul className="mt-1 flex flex-col gap-0.5 text-xs text-ink-soft">
+            {data.usageByPhase.map((p) => (
+              <li key={p.phase}>
+                {PHASE_LABELS[p.phase] ?? p.phase}: <strong>{p.calls}</strong>{" "}
+                chamada(s) · {p.tokensIn}/{p.tokensOut} tokens
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
       <div className="panel">
         {active.length > 0 ? (
