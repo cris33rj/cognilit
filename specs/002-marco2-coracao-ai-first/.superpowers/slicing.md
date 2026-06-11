@@ -24,7 +24,7 @@
 | **F3** — Formulário de extração | `…/3-formulario-extracao` | ✅ mergeada | `1f350a0` (2026-06-10) |
 | **F4** — Extração por IA | `…/4-extracao-ia` | ✅ mergeada | `925ba7c` (2026-06-11) |
 | **F5** — Extração em lote | `…/5-extracao-lote` | ✅ mergeada | `7d87f88` (2026-06-11) |
-| **F6** — Busca semântica/RAG | `…/6-busca-semantica` | ⬜ pendente | — |
+| **F6** — Busca semântica/RAG | `…/6-busca-semantica` | ✅ mergeada | `0ad546c` (2026-06-11) |
 
 ---
 
