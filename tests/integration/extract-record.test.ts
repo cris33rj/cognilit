@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { signUpUser, serviceClient } from "./helpers/supabase";
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { runExtractionForRecord } from "@/lib/extraction/extract";
+import { listStudies, listExtractionValues } from "@/lib/extraction/queries";
 
 async function setup() {
   const { client } = await signUpUser(
@@ -137,5 +138,30 @@ describe("runExtractionForRecord (US3)", () => {
       .eq("record_id", recordId)
       .in("state", ["pending", "inferred"]);
     expect(active!.length).toBe(2); // uma pendente viva por campo (2 campos); as antigas foram rejeitadas
+  });
+});
+
+describe("queries de extração", () => {
+  it("listStudies retorna estudos included_ft; listExtractionValues traz sugestão+grounding", async () => {
+    const { client, reviewId, recordId, svc } = await setup();
+    await runExtractionForRecord(
+      { supabase: svc, provider: new MockLLMProvider() },
+      reviewId,
+      recordId,
+    );
+
+    const studies = await listStudies({ supabase: client }, reviewId);
+    expect(studies.some((s) => s.id === recordId)).toBe(true);
+
+    const values = await listExtractionValues(
+      { supabase: client },
+      reviewId,
+      recordId,
+    );
+    expect(values.length).toBe(2);
+    const anchored = values.find((v) => v.not_found === false)!;
+    expect(anchored.output).toBeTruthy();
+    expect(anchored.provenance).toHaveProperty("model");
+    expect(anchored.state).toBe("pending");
   });
 });
