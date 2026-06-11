@@ -1399,6 +1399,27 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      create_extraction_job: {
+        Args: { p_record_ids?: Json; p_review_id: string }
+        Returns: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_import_job: {
         Args: {
           p_format: Database["public"]["Enums"]["source_format"]
@@ -1759,7 +1780,11 @@ export type Database = {
         | "completed"
         | "completed_with_errors"
         | "failed"
-      job_type: "import_parse" | "ai_screening_batch" | "pdf_text_pipeline"
+      job_type:
+        | "import_parse"
+        | "ai_screening_batch"
+        | "pdf_text_pipeline"
+        | "ai_extraction_batch"
       llm_provider: "anthropic"
       member_role: "owner" | "reviewer" | "viewer"
       protocol_origin: "ai_draft" | "human"
@@ -1947,7 +1972,12 @@ export const Constants = {
         "completed_with_errors",
         "failed",
       ],
-      job_type: ["import_parse", "ai_screening_batch", "pdf_text_pipeline"],
+      job_type: [
+        "import_parse",
+        "ai_screening_batch",
+        "pdf_text_pipeline",
+        "ai_extraction_batch",
+      ],
       llm_provider: ["anthropic"],
       member_role: ["owner", "reviewer", "viewer"],
       protocol_origin: ["ai_draft", "human"],
