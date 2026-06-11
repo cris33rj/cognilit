@@ -195,6 +195,7 @@ export type Database = {
           created_at: string
           id: string
           provider: Database["public"]["Enums"]["llm_provider"]
+          purpose: Database["public"]["Enums"]["byok_purpose"]
           review_id: string
           vault_secret_id: string
         }
@@ -202,6 +203,7 @@ export type Database = {
           created_at?: string
           id?: string
           provider?: Database["public"]["Enums"]["llm_provider"]
+          purpose?: Database["public"]["Enums"]["byok_purpose"]
           review_id: string
           vault_secret_id: string
         }
@@ -209,6 +211,7 @@ export type Database = {
           created_at?: string
           id?: string
           provider?: Database["public"]["Enums"]["llm_provider"]
+          purpose?: Database["public"]["Enums"]["byok_purpose"]
           review_id?: string
           vault_secret_id?: string
         }
@@ -216,14 +219,14 @@ export type Database = {
           {
             foreignKeyName: "byok_key_review_id_fkey"
             columns: ["review_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "prisma_counter"
             referencedColumns: ["review_id"]
           },
           {
             foreignKeyName: "byok_key_review_id_fkey"
             columns: ["review_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "review"
             referencedColumns: ["id"]
           },
@@ -300,6 +303,64 @@ export type Database = {
           },
         ]
       }
+      document: {
+        Row: {
+          byte_size: number
+          created_at: string
+          filename: string
+          id: string
+          page_count: number | null
+          processing_status: Database["public"]["Enums"]["document_status"]
+          record_id: string
+          review_id: string
+          storage_path: string
+        }
+        Insert: {
+          byte_size: number
+          created_at?: string
+          filename: string
+          id?: string
+          page_count?: number | null
+          processing_status?: Database["public"]["Enums"]["document_status"]
+          record_id: string
+          review_id: string
+          storage_path: string
+        }
+        Update: {
+          byte_size?: number
+          created_at?: string
+          filename?: string
+          id?: string
+          page_count?: number | null
+          processing_status?: Database["public"]["Enums"]["document_status"]
+          record_id?: string
+          review_id?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "document_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "record"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "document_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "document_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       eligibility_criterion: {
         Row: {
           ai_suggestion_id: string | null
@@ -365,6 +426,76 @@ export type Database = {
           },
         ]
       }
+      embedding_chunk: {
+        Row: {
+          char_end: number
+          char_start: number
+          content: string
+          created_at: string
+          dim: number
+          document_id: string
+          embedding: string
+          id: string
+          model: string
+          origin: string
+          page: number
+          provider: string
+          review_id: string
+        }
+        Insert: {
+          char_end: number
+          char_start: number
+          content: string
+          created_at?: string
+          dim: number
+          document_id: string
+          embedding: string
+          id?: string
+          model: string
+          origin: string
+          page: number
+          provider: string
+          review_id: string
+        }
+        Update: {
+          char_end?: number
+          char_start?: number
+          content?: string
+          created_at?: string
+          dim?: number
+          document_id?: string
+          embedding?: string
+          id?: string
+          model?: string
+          origin?: string
+          page?: number
+          provider?: string
+          review_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "embedding_chunk_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "document"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "embedding_chunk_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "embedding_chunk_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       exclusion_reason: {
         Row: {
           created_at: string
@@ -419,6 +550,185 @@ export type Database = {
             columns: ["source_criterion_id"]
             isOneToOne: false
             referencedRelation: "eligibility_criterion"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      extraction_field: {
+        Row: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          form_id: string
+          id?: string
+          is_active?: boolean
+          name: string
+          options?: Json | null
+          review_id: string
+          sort_order?: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          form_id?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          options?: Json | null
+          review_id?: string
+          sort_order?: number
+          type?: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_field_form_id_fkey"
+            columns: ["form_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_form"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_field_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "extraction_field_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      extraction_form: {
+        Row: {
+          created_at: string
+          id: string
+          review_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          review_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          review_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_form_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "extraction_form_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      extraction_value: {
+        Row: {
+          ai_suggestion_id: string | null
+          created_at: string
+          field_id: string
+          final_value: Json | null
+          id: string
+          record_id: string
+          review_id: string
+          state: Database["public"]["Enums"]["suggestion_state"]
+          superseded_by_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          ai_suggestion_id?: string | null
+          created_at?: string
+          field_id: string
+          final_value?: Json | null
+          id?: string
+          record_id: string
+          review_id: string
+          state?: Database["public"]["Enums"]["suggestion_state"]
+          superseded_by_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ai_suggestion_id?: string | null
+          created_at?: string
+          field_id?: string
+          final_value?: Json | null
+          id?: string
+          record_id?: string
+          review_id?: string
+          state?: Database["public"]["Enums"]["suggestion_state"]
+          superseded_by_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extraction_value_ai_suggestion_id_fkey"
+            columns: ["ai_suggestion_id"]
+            isOneToOne: false
+            referencedRelation: "ai_suggestion"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_value_field_id_fkey"
+            columns: ["field_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_field"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_value_record_id_fkey"
+            columns: ["record_id"]
+            isOneToOne: false
+            referencedRelation: "record"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_value_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "extraction_value_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "extraction_value_superseded_by_id_fkey"
+            columns: ["superseded_by_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_value"
             referencedColumns: ["id"]
           },
         ]
@@ -1013,6 +1323,64 @@ export type Database = {
           },
         ]
       }
+      text_layer: {
+        Row: {
+          char_end: number
+          char_start: number
+          content: string
+          created_at: string
+          document_id: string
+          id: string
+          origin: Database["public"]["Enums"]["text_origin"]
+          page: number
+          review_id: string
+        }
+        Insert: {
+          char_end: number
+          char_start: number
+          content: string
+          created_at?: string
+          document_id: string
+          id?: string
+          origin: Database["public"]["Enums"]["text_origin"]
+          page: number
+          review_id: string
+        }
+        Update: {
+          char_end?: number
+          char_start?: number
+          content?: string
+          created_at?: string
+          document_id?: string
+          id?: string
+          origin?: Database["public"]["Enums"]["text_origin"]
+          page?: number
+          review_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "text_layer_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "document"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "text_layer_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "text_layer_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       prisma_counter: {
@@ -1060,6 +1428,32 @@ export type Database = {
         Args: { p_label: string; p_review_id: string }
         Returns: string
       }
+      add_extraction_field: {
+        Args: {
+          p_name: string
+          p_options: Json
+          p_review_id: string
+          p_type: Database["public"]["Enums"]["extraction_field_type"]
+        }
+        Returns: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_field"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       add_protocol_amendment: {
         Args: { p_change: Json; p_review_id: string }
         Returns: {
@@ -1074,6 +1468,48 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "protocol_amendment"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_embedding_job: {
+        Args: { p_document_ids?: Json; p_review_id: string }
+        Returns: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_extraction_job: {
+        Args: { p_record_ids?: Json; p_review_id: string }
+        Returns: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -1103,6 +1539,17 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      create_pdf_pipeline_job: {
+        Args: {
+          p_byte_size: number
+          p_document_id: string
+          p_filename: string
+          p_record_id: string
+          p_review_id: string
+          p_storage_path: string
+        }
+        Returns: Json
       }
       create_review: {
         Args: { p_title: string }
@@ -1168,8 +1615,26 @@ export type Database = {
         Args: { p_review_id: string }
         Returns: undefined
       }
-      get_byok_secret: {
+      ensure_extraction_form: {
         Args: { p_review_id: string }
+        Returns: {
+          created_at: string
+          id: string
+          review_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_form"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      get_byok_secret: {
+        Args: {
+          p_purpose?: Database["public"]["Enums"]["byok_purpose"]
+          p_review_id: string
+        }
         Returns: {
           api_key: string
           provider: Database["public"]["Enums"]["llm_provider"]
@@ -1251,7 +1716,78 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      match_embedding_chunks: {
+        Args: { p_k?: number; p_query: string; p_review_id: string }
+        Returns: {
+          document_id: string
+          origin: string
+          page: number
+          record_id: string
+          similarity: number
+          source_span: string
+        }[]
+      }
       normalize_reason_label: { Args: { "": string }; Returns: string }
+      ratify_extraction_value: {
+        Args: {
+          p_final_value: Json
+          p_state: Database["public"]["Enums"]["suggestion_state"]
+          p_value_id: string
+        }
+        Returns: {
+          ai_suggestion_id: string | null
+          created_at: string
+          field_id: string
+          final_value: Json | null
+          id: string
+          record_id: string
+          review_id: string
+          state: Database["public"]["Enums"]["suggestion_state"]
+          superseded_by_id: string | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_value"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      regenerate_eligibility_criteria: {
+        Args: {
+          p_items: Json
+          p_not_found: boolean
+          p_output: Json
+          p_provenance: Json
+          p_review_id: string
+        }
+        Returns: number
+      }
+      remove_extraction_field: {
+        Args: { p_field_id: string }
+        Returns: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_field"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      reorder_extraction_fields: {
+        Args: { p_field_ids: string[]; p_review_id: string }
+        Returns: undefined
+      }
       reverse_dedup: { Args: { p_decision_id: string }; Returns: undefined }
       reverse_screening: { Args: { p_decision_id: string }; Returns: undefined }
       seed_default_exclusion_reasons: {
@@ -1262,12 +1798,14 @@ export type Database = {
         Args: {
           p_api_key: string
           p_provider: Database["public"]["Enums"]["llm_provider"]
+          p_purpose?: Database["public"]["Enums"]["byok_purpose"]
           p_review_id: string
         }
         Returns: {
           created_at: string
           id: string
           provider: Database["public"]["Enums"]["llm_provider"]
+          purpose: Database["public"]["Enums"]["byok_purpose"]
           review_id: string
           vault_secret_id: string
         }
@@ -1288,10 +1826,41 @@ export type Database = {
         Args: { p_review_id: string }
         Returns: undefined
       }
+      update_extraction_field: {
+        Args: {
+          p_field_id: string
+          p_name: string
+          p_options: Json
+          p_type: Database["public"]["Enums"]["extraction_field_type"]
+        }
+        Returns: {
+          created_at: string
+          form_id: string
+          id: string
+          is_active: boolean
+          name: string
+          options: Json | null
+          review_id: string
+          sort_order: number
+          type: Database["public"]["Enums"]["extraction_field_type"]
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "extraction_field"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
     }
     Enums: {
-      ai_target_kind: "eligibility" | "protocol_draft" | "screening"
+      ai_target_kind:
+        | "eligibility"
+        | "protocol_draft"
+        | "screening"
+        | "extraction"
       audit_actor_type: "human" | "ai" | "system"
+      byok_purpose: "llm" | "embedding"
       corpus_state:
         | "imported"
         | "active"
@@ -1307,6 +1876,13 @@ export type Database = {
       dedup_actor: "system" | "human"
       dedup_kind: "exact_auto" | "fuzzy_human"
       dedup_outcome: "removed" | "merged" | "kept_distinct"
+      document_status:
+        | "queued"
+        | "processing"
+        | "text_ready"
+        | "partial"
+        | "failed"
+      extraction_field_type: "text" | "number" | "date" | "boolean" | "select"
       ft_decision_state: "included" | "excluded"
       job_item_status: "pending" | "done" | "failed"
       job_status:
@@ -1315,8 +1891,13 @@ export type Database = {
         | "completed"
         | "completed_with_errors"
         | "failed"
-      job_type: "import_parse" | "ai_screening_batch"
-      llm_provider: "anthropic"
+      job_type:
+        | "import_parse"
+        | "ai_screening_batch"
+        | "pdf_text_pipeline"
+        | "ai_extraction_batch"
+        | "embedding_batch"
+      llm_provider: "anthropic" | "voyage"
       member_role: "owner" | "reviewer" | "viewer"
       protocol_origin: "ai_draft" | "human"
       protocol_state: "draft" | "locked"
@@ -1331,6 +1912,7 @@ export type Database = {
         | "edited"
         | "rejected"
         | "inferred"
+      text_origin: "nativo" | "ocr_ia"
       ts_decision_state: "included" | "excluded" | "maybe"
     }
     CompositeTypes: {
@@ -1462,8 +2044,14 @@ export const Constants = {
   },
   public: {
     Enums: {
-      ai_target_kind: ["eligibility", "protocol_draft", "screening"],
+      ai_target_kind: [
+        "eligibility",
+        "protocol_draft",
+        "screening",
+        "extraction",
+      ],
       audit_actor_type: ["human", "ai", "system"],
+      byok_purpose: ["llm", "embedding"],
       corpus_state: [
         "imported",
         "active",
@@ -1480,6 +2068,14 @@ export const Constants = {
       dedup_actor: ["system", "human"],
       dedup_kind: ["exact_auto", "fuzzy_human"],
       dedup_outcome: ["removed", "merged", "kept_distinct"],
+      document_status: [
+        "queued",
+        "processing",
+        "text_ready",
+        "partial",
+        "failed",
+      ],
+      extraction_field_type: ["text", "number", "date", "boolean", "select"],
       ft_decision_state: ["included", "excluded"],
       job_item_status: ["pending", "done", "failed"],
       job_status: [
@@ -1489,8 +2085,14 @@ export const Constants = {
         "completed_with_errors",
         "failed",
       ],
-      job_type: ["import_parse", "ai_screening_batch"],
-      llm_provider: ["anthropic"],
+      job_type: [
+        "import_parse",
+        "ai_screening_batch",
+        "pdf_text_pipeline",
+        "ai_extraction_batch",
+        "embedding_batch",
+      ],
+      llm_provider: ["anthropic", "voyage"],
       member_role: ["owner", "reviewer", "viewer"],
       protocol_origin: ["ai_draft", "human"],
       protocol_state: ["draft", "locked"],
@@ -1506,6 +2108,7 @@ export const Constants = {
         "rejected",
         "inferred",
       ],
+      text_origin: ["nativo", "ocr_ia"],
       ts_decision_state: ["included", "excluded", "maybe"],
     },
   },

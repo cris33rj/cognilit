@@ -53,6 +53,10 @@ export interface CostEstimate {
   cost: Record<string, number>;
 }
 
+export interface OcrResult {
+  text: string; // texto OCR da página, no idioma original (FR-015)
+}
+
 export interface LLMProvider {
   identity(): ProviderIdentity;
 
@@ -76,11 +80,58 @@ export interface LLMProvider {
     criteria: string[];
   }): Promise<LlmSuggestion<ScreeningPreclassification>>;
 
-  /** Estimativa de custo ANTES de lote (FR-033, §VII/P5). */
-  estimateCost(input: {
-    itemCount: number;
-    kind: "ai_screening_batch";
-  }): Promise<CostEstimate>;
+  /** OCR multimodal de uma página rasterizada (R2/FR-007/FR-008). Saída no idioma original. */
+  ocrPage(input: {
+    imageBase64: string;
+    mediaType: "image/png" | "image/jpeg";
+    page: number;
+  }): Promise<LlmSuggestion<OcrResult>>;
+
+  /** Preenche os campos do formulário a partir do TEXTO do documento (FR-012). pt-BR.
+   *  documentText vem concatenada (chunking interno R6); NÃO usa RAG (Q1/§US3⟂US5). */
+  extractFields(input: {
+    fields: ExtractionFieldDef[];
+    documentText: string;
+    pageIndex?: { page: number; char_start: number; char_end: number }[];
+  }): Promise<ExtractionResult>;
+
+  /** Estimativa de custo ANTES de lote (FR-022, §VII/P5). */
+  estimateCost(
+    input:
+      | { itemCount: number; kind: "ai_screening_batch" }
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+  ): Promise<CostEstimate>;
+}
+
+export type ExtractionFieldType =
+  | "text"
+  | "number"
+  | "date"
+  | "boolean"
+  | "select";
+
+export interface ExtractionFieldDef {
+  id: string;
+  name: string; // rótulo pt-BR
+  type: ExtractionFieldType;
+  options?: string[]; // quando type === 'select'
+}
+
+export interface ExtractedField {
+  field_id: string;
+  value: FactualValue<unknown>; // {value, source_span, page} | {value:null, reason:'not_found'}
+  inferred: boolean; // true ⇒ state nasce 'inferred' (FR-014)
+  grounding: {
+    text_layer_id: string | null; // resolvido no lib (provider devolve null)
+    page: number | null;
+    source_span: string | null; // citado no idioma original (FR-015)
+    origin: "nativo" | "ocr_ia" | null;
+  };
+}
+
+export interface ExtractionResult {
+  fields: ExtractedField[];
+  provenance: Provenance; // OBRIGATÓRIO (FR-016/§II)
 }
 
 export class MissingByokError extends Error {

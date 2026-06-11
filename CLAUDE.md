@@ -251,10 +251,10 @@ cifrada. Não confundir os dois eixos.
 - CI (GitHub Actions): lint, type-check e testes obrigatórios antes do deploy
 
 <!-- SPECKIT START -->
-Feature ativa: `001-marco1-nucleo-fluxo`.
+Feature ativa: `002-marco2-coracao-ai-first`.
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan at
-`specs/001-marco1-nucleo-fluxo/plan.md` (and its Phase 1 artifacts:
+`specs/002-marco2-coracao-ai-first/plan.md` (and its Phase 1 artifacts:
 `research.md`, `data-model.md`, `contracts/`, `quickstart.md`).
 <!-- SPECKIT END -->

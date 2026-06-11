@@ -1,0 +1,267 @@
+-- ============================================================
+-- Marco 2 / Fatia 3 — Formulário de extração configurável (US2 / D9).
+-- extraction_form é 1:1 com review (Q2). extraction_field é tipado e usa
+-- soft-delete (is_active) para nunca apagar silenciosamente valores futuros
+-- (extraction_value chega na Fatia 4). Escrita real via RPC auditada (abaixo);
+-- RLS concede só SELECT a membros. data-model.md §extraction_form/§extraction_field.
+-- ============================================================
+
+-- tipo do campo (enum no banco — CLAUDE.md). FR-009.
+create type extraction_field_type as enum ('text', 'number', 'date', 'boolean', 'select');
+
+-- ---------- extraction_form (1:1 com review — Q2/FR-011) ----------
+create table public.extraction_form (
+  id uuid primary key default gen_random_uuid(),
+  review_id uuid not null unique references public.review (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- ---------- extraction_field (campo tipado — FR-009/010) ----------
+create table public.extraction_field (
+  id uuid primary key default gen_random_uuid(),
+  review_id uuid not null references public.review (id) on delete cascade,
+  form_id uuid not null references public.extraction_form (id) on delete cascade,
+  name text not null check (length(btrim(name)) > 0),     -- não-vazio
+  type extraction_field_type not null,
+  options jsonb,                                            -- valores p/ type=select
+  sort_order integer not null default 0,                   -- ordenação (FR-009)
+  is_active boolean not null default true,                 -- soft-delete (decisão 2)
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  -- select ⇒ options é array não-vazio; não-select ⇒ options nulo (decisão 4)
+  constraint extraction_field_options_ck check (
+    case
+      when type = 'select'
+        then options is not null and jsonb_typeof(options) = 'array' and jsonb_array_length(options) > 0
+      else options is null
+    end
+  )
+);
+create index extraction_field_form_idx on public.extraction_field (form_id, sort_order);
+create index extraction_field_review_idx on public.extraction_field (review_id);
+
+alter table public.extraction_form  enable row level security;
+alter table public.extraction_field enable row level security;
+
+-- Leitura por membros; escrita só pelas RPCs security-definer (Task 2-6).
+create policy extraction_form_select on public.extraction_form
+  for select using (public.is_review_member(review_id));
+create policy extraction_field_select on public.extraction_field
+  for select using (public.is_review_member(review_id));
+
+-- ============================================================
+-- RPC: ensure_extraction_form — cria (idempotente) o form 1:1 da Revisão; audita só na criação.
+-- ============================================================
+create or replace function public.ensure_extraction_form(p_review_id uuid)
+returns public.extraction_form
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_form public.extraction_form;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  select * into v_form from public.extraction_form where review_id = p_review_id;
+  if found then
+    return v_form;
+  end if;
+
+  insert into public.extraction_form (review_id) values (p_review_id)
+  returning * into v_form;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (p_review_id, 'human', auth.uid(), 'ensure_extraction_form', 'extraction_form', v_form.id,
+          null, to_jsonb(v_form));
+
+  return v_form;
+end;
+$$;
+
+grant execute on function public.ensure_extraction_form(uuid) to authenticated;
+
+-- ============================================================
+-- RPC: add_extraction_field — valida (name + select⇒options), anexa ao fim, audita.
+-- ============================================================
+create or replace function public.add_extraction_field(
+  p_review_id uuid,
+  p_name text,
+  p_type extraction_field_type,
+  p_options jsonb
+)
+returns public.extraction_field
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_form public.extraction_form;
+  v_field public.extraction_field;
+  v_options jsonb;
+  v_next int;
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+  if coalesce(btrim(p_name), '') = '' then
+    raise exception 'name required';
+  end if;
+
+  if p_type = 'select' then
+    if p_options is null or jsonb_typeof(p_options) <> 'array' or jsonb_array_length(p_options) = 0 then
+      raise exception 'select requires non-empty options';
+    end if;
+    v_options := p_options;
+  else
+    v_options := null;  -- não-select nunca guarda options (decisão 4)
+  end if;
+
+  select * into v_form from public.extraction_form where review_id = p_review_id;
+  if not found then
+    raise exception 'extraction form not found';
+  end if;
+
+  select coalesce(max(sort_order), 0) + 1 into v_next
+    from public.extraction_field where form_id = v_form.id and is_active;
+
+  insert into public.extraction_field (review_id, form_id, name, type, options, sort_order)
+  values (p_review_id, v_form.id, btrim(p_name), p_type, v_options, v_next)
+  returning * into v_field;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (p_review_id, 'human', auth.uid(), 'add_extraction_field', 'extraction_field', v_field.id,
+          null, to_jsonb(v_field));
+
+  return v_field;
+end;
+$$;
+
+grant execute on function public.add_extraction_field(uuid, text, extraction_field_type, jsonb) to authenticated;
+
+-- ============================================================
+-- RPC: update_extraction_field — valida, atualiza, audita before/after.
+-- ============================================================
+create or replace function public.update_extraction_field(
+  p_field_id uuid,
+  p_name text,
+  p_type extraction_field_type,
+  p_options jsonb
+)
+returns public.extraction_field
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_before public.extraction_field;
+  v_after public.extraction_field;
+  v_options jsonb;
+begin
+  select * into v_before from public.extraction_field where id = p_field_id;
+  if not found then
+    raise exception 'field not found';
+  end if;
+  if not public.is_review_member(v_before.review_id) then
+    raise exception 'not a member';
+  end if;
+  if coalesce(btrim(p_name), '') = '' then
+    raise exception 'name required';
+  end if;
+
+  if p_type = 'select' then
+    if p_options is null or jsonb_typeof(p_options) <> 'array' or jsonb_array_length(p_options) = 0 then
+      raise exception 'select requires non-empty options';
+    end if;
+    v_options := p_options;
+  else
+    v_options := null;
+  end if;
+
+  update public.extraction_field
+     set name = btrim(p_name), type = p_type, options = v_options, updated_at = now()
+   where id = p_field_id
+   returning * into v_after;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (v_before.review_id, 'human', auth.uid(), 'update_extraction_field', 'extraction_field',
+          p_field_id, to_jsonb(v_before), to_jsonb(v_after));
+
+  return v_after;
+end;
+$$;
+
+grant execute on function public.update_extraction_field(uuid, text, extraction_field_type, jsonb) to authenticated;
+
+-- ============================================================
+-- RPC: remove_extraction_field — soft-delete (is_active=false), audita. NUNCA DELETE
+-- (forward-safe: extraction_value chega na Fatia 4; nada é apagado silenciosamente).
+-- ============================================================
+create or replace function public.remove_extraction_field(p_field_id uuid)
+returns public.extraction_field
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_before public.extraction_field;
+  v_after public.extraction_field;
+begin
+  select * into v_before from public.extraction_field where id = p_field_id;
+  if not found then
+    raise exception 'field not found';
+  end if;
+  if not public.is_review_member(v_before.review_id) then
+    raise exception 'not a member';
+  end if;
+  if not v_before.is_active then
+    return v_before;  -- idempotente
+  end if;
+
+  update public.extraction_field
+     set is_active = false, updated_at = now()
+   where id = p_field_id
+   returning * into v_after;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (v_before.review_id, 'human', auth.uid(), 'remove_extraction_field', 'extraction_field',
+          p_field_id, to_jsonb(v_before), to_jsonb(v_after));
+
+  return v_after;
+end;
+$$;
+
+grant execute on function public.remove_extraction_field(uuid) to authenticated;
+
+-- ============================================================
+-- RPC: reorder_extraction_fields — sort_order = posição no array; audita uma vez.
+-- ============================================================
+create or replace function public.reorder_extraction_fields(p_review_id uuid, p_field_ids uuid[])
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.is_review_member(p_review_id) then
+    raise exception 'not a member';
+  end if;
+
+  update public.extraction_field f
+     set sort_order = ord.pos, updated_at = now()
+    from (
+      select id, pos
+      from unnest(p_field_ids) with ordinality as t(id, pos)
+    ) ord
+   where f.id = ord.id and f.review_id = p_review_id;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (p_review_id, 'human', auth.uid(), 'reorder_extraction_fields', 'extraction_form', null,
+          null, jsonb_build_object('order', to_jsonb(p_field_ids)));
+end;
+$$;
+
+grant execute on function public.reorder_extraction_fields(uuid, uuid[]) to authenticated;

@@ -7,6 +7,9 @@ const nextConfig = {
     staleTimes: {
       dynamic: 0,
     },
+    serverActions: {
+      bodySizeLimit: "51mb", // aceita upload de PDF ≤ 50 MiB (A4)
+    },
   },
 };
 
