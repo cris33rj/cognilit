@@ -34,9 +34,9 @@ describe("MockEmbeddingProvider", () => {
       ],
     });
     expect(out).toHaveLength(2);
-    expect(out[0].embedding).toHaveLength(1024);
-    expect(out[1].embedding).toHaveLength(1024);
-    expect(out[0].content).toBe("alpha");
+    expect(out[0]!.embedding).toHaveLength(1024);
+    expect(out[1]!.embedding).toHaveLength(1024);
+    expect(out[0]!.content).toBe("alpha");
   });
 
   it("é determinístico: o mesmo texto gera o mesmo vetor", async () => {

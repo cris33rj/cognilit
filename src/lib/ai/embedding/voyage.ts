@@ -54,11 +54,12 @@ export class VoyageProvider implements EmbeddingProvider {
       input.chunks.map((c) => c.content),
       "document",
     );
-    return input.chunks.map((c, i) => ({ ...c, embedding: vectors[i] }));
+    return input.chunks.map((c, i) => ({ ...c, embedding: vectors[i]! }));
   }
 
   async embedQuery(input: { query: string }): Promise<number[]> {
     const [v] = await this.call([input.query], "query");
+    if (!v) throw new Error("Voyage não retornou embedding para a query");
     return v;
   }
 

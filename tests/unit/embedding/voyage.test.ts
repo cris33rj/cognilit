@@ -49,9 +49,9 @@ describe("VoyageProvider", () => {
         },
       ],
     });
-    expect(out[0].embedding).toHaveLength(1024);
-    expect(out[1].embedding[0]).toBeCloseTo(0.2);
-    const [url, init] = spy.mock.calls[0];
+    expect(out[0]!.embedding).toHaveLength(1024);
+    expect(out[1]!.embedding[0]).toBeCloseTo(0.2);
+    const [url, init] = spy.mock.calls[0]!;
     expect(url).toBe("https://api.voyageai.com/v1/embeddings");
     const sent = JSON.parse((init as RequestInit).body as string);
     expect(sent.model).toBe("voyage-3");

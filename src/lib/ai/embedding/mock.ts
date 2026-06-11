@@ -14,7 +14,8 @@ function deterministicVector(text: string): number[] {
   const v = new Array<number>(DIM).fill(0);
   for (let i = 0; i < text.length; i++) {
     const code = text.charCodeAt(i);
-    v[(code + i) % DIM] += ((code % 17) + 1) / 17;
+    const idx = (code + i) % DIM;
+    v[idx] = (v[idx] ?? 0) + ((code % 17) + 1) / 17;
   }
   const norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0)) || 1;
   return v.map((x) => x / norm);
