@@ -120,3 +120,79 @@ describe("extraction_value — schema + RLS", () => {
     expect(error).toBeNull();
   });
 });
+
+describe("ratify_extraction_value — humano-no-laço, auditado", () => {
+  let ctx: Awaited<ReturnType<typeof newReviewWithStudy>>;
+  let valueId: string;
+  beforeAll(async () => {
+    ctx = await newReviewWithStudy("Ratificação");
+    const svc = serviceClient();
+    const { data } = await svc
+      .from("extraction_value")
+      .insert({
+        review_id: ctx.reviewId,
+        record_id: ctx.recordId,
+        field_id: ctx.fieldId,
+        state: "pending",
+      })
+      .select("id")
+      .single();
+    valueId = data!.id as string;
+  });
+
+  it("aceitar grava final_value, state=accepted e audit_entry", async () => {
+    const { error } = await ctx.client.rpc("ratify_extraction_value", {
+      p_value_id: valueId,
+      p_state: "accepted",
+      p_final_value: { value: 42 },
+    });
+    expect(error).toBeNull();
+    const svc = serviceClient();
+    const { data: row } = await svc
+      .from("extraction_value")
+      .select("state, final_value")
+      .eq("id", valueId)
+      .single();
+    expect(row!.state).toBe("accepted");
+    expect(row!.final_value).toEqual({ value: 42 });
+    const { data: audit } = await svc
+      .from("audit_entry")
+      .select("action")
+      .eq("entity_id", valueId)
+      .eq("action", "ratify_extraction_value");
+    expect(audit!.length).toBeGreaterThan(0);
+  });
+
+  it("rejeitar não exige final_value", async () => {
+    const svc = serviceClient();
+    const { data } = await svc
+      .from("extraction_value")
+      .insert({
+        review_id: ctx.reviewId,
+        record_id: ctx.recordId,
+        field_id: ctx.fieldId,
+        state: "pending",
+      })
+      .select("id")
+      .single();
+    const { error } = await ctx.client.rpc("ratify_extraction_value", {
+      p_value_id: data!.id,
+      p_state: "rejected",
+      p_final_value: null,
+    });
+    expect(error).toBeNull();
+  });
+
+  it("não-membro não ratifica", async () => {
+    const { client: other } = await signUpUser(
+      `other_${Date.now()}@example.com`,
+      "senha-teste-123",
+    );
+    const { error } = await other.rpc("ratify_extraction_value", {
+      p_value_id: valueId,
+      p_state: "accepted",
+      p_final_value: { value: 1 },
+    });
+    expect(error).not.toBeNull();
+  });
+});

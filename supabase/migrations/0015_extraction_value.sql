@@ -42,3 +42,53 @@ alter table public.extraction_value enable row level security;
 -- Leitura por membros; escrita real é do worker service-role (IA) ou da RPC abaixo (humano).
 create policy extraction_value_select_member on public.extraction_value
   for select using (public.is_review_member(review_id));
+
+-- ============================================================
+-- RPC: ratify_extraction_value — única via ao valor final (FR-019/§I).
+-- p_state ∈ {accepted, edited, rejected}; accepted/edited exige final_value.
+-- A IA nunca chama isto (ator 'human', auth.uid()). Audita before/after.
+-- ============================================================
+create or replace function public.ratify_extraction_value(
+  p_value_id uuid,
+  p_state suggestion_state,
+  p_final_value jsonb
+)
+returns public.extraction_value
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_before public.extraction_value;
+  v_after public.extraction_value;
+begin
+  select * into v_before from public.extraction_value where id = p_value_id;
+  if not found then
+    raise exception 'extraction value not found';
+  end if;
+  if not public.is_review_member(v_before.review_id) then
+    raise exception 'not a member';
+  end if;
+  if p_state not in ('accepted', 'edited', 'rejected') then
+    raise exception 'invalid ratification state';
+  end if;
+  if p_state in ('accepted', 'edited') and p_final_value is null then
+    raise exception 'final_value required for %', p_state;
+  end if;
+
+  update public.extraction_value
+     set state = p_state,
+         final_value = case when p_state = 'rejected' then null else p_final_value end,
+         updated_at = now()
+   where id = p_value_id
+   returning * into v_after;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (v_before.review_id, 'human', auth.uid(), 'ratify_extraction_value', 'extraction_value',
+          p_value_id, to_jsonb(v_before), to_jsonb(v_after));
+
+  return v_after;
+end;
+$$;
+
+grant execute on function public.ratify_extraction_value(uuid, suggestion_state, jsonb) to authenticated;
