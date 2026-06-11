@@ -163,7 +163,7 @@ describe("ratify_extraction_value — humano-no-laço, auditado", () => {
     expect(audit!.length).toBeGreaterThan(0);
   });
 
-  it("rejeitar não exige final_value", async () => {
+  it("rejeitar não exige final_value e zera o valor", async () => {
     const svc = serviceClient();
     const { data } = await svc
       .from("extraction_value")
@@ -181,18 +181,43 @@ describe("ratify_extraction_value — humano-no-laço, auditado", () => {
       p_final_value: null,
     });
     expect(error).toBeNull();
+    const { data: row } = await svc
+      .from("extraction_value")
+      .select("state, final_value")
+      .eq("id", data!.id)
+      .single();
+    expect(row!.state).toBe("rejected");
+    expect(row!.final_value).toBeNull();
   });
 
   it("não-membro não ratifica", async () => {
+    const svc = serviceClient();
+    const { data: fresh } = await svc
+      .from("extraction_value")
+      .insert({
+        review_id: ctx.reviewId,
+        record_id: ctx.recordId,
+        field_id: ctx.fieldId,
+        state: "pending",
+      })
+      .select("id")
+      .single();
     const { client: other } = await signUpUser(
       `other_${Date.now()}@example.com`,
       "senha-teste-123",
     );
     const { error } = await other.rpc("ratify_extraction_value", {
-      p_value_id: valueId,
+      p_value_id: fresh!.id,
       p_state: "accepted",
       p_final_value: { value: 1 },
     });
     expect(error).not.toBeNull();
+    // a linha continua pending (não ratificada por não-membro)
+    const { data: row } = await svc
+      .from("extraction_value")
+      .select("state")
+      .eq("id", fresh!.id)
+      .single();
+    expect(row!.state).toBe("pending");
   });
 });
