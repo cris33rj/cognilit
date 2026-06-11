@@ -15,6 +15,7 @@ export type PhaseKey =
   | "duplicates"
   | "screening_ts"
   | "screening_ft"
+  | "extraction"
   | "risk_of_bias"
   | "certainty";
 
@@ -36,6 +37,8 @@ export interface PhaseInput {
   passedTs: number;
   includedFt: number;
   excludedFt: number;
+  /** Há ao menos um extraction_value ratificado (accepted/edited) na Revisão. */
+  extractionRatified: boolean;
 }
 
 interface PhaseDef {
@@ -88,6 +91,13 @@ const PIPELINE: PhaseDef[] = [
     // todos avançam, então a fase nunca fecharia.
     completed: (i) =>
       i.passedTs > 0 && i.includedFt + i.excludedFt >= i.passedTs,
+  },
+  {
+    key: "extraction",
+    label: "Extração",
+    href: (r) => `/reviews/${r}/extraction`,
+    // Fase pós-triagem (D19). Concluída quando há ≥1 valor ratificado pelo humano.
+    completed: (i) => i.extractionRatified,
   },
 ];
 
@@ -148,6 +158,12 @@ export async function loadPhaseStates(reviewId: string): Promise<Phase[]> {
   const protocolStatus =
     protocol?.state === "locked" ? "locked" : protocol ? "draft" : "none";
 
+  const { count: ratifiedCount } = await supabase
+    .from("extraction_value")
+    .select("id", { count: "exact", head: true })
+    .eq("review_id", reviewId)
+    .in("state", ["accepted", "edited"]);
+
   return computePhaseStates(reviewId, {
     hasQuestion: (questionCount ?? 0) > 0,
     protocolStatus,
@@ -158,5 +174,6 @@ export async function loadPhaseStates(reviewId: string): Promise<Phase[]> {
     passedTs: counters.passedTs,
     includedFt: counters.includedFt,
     excludedFt: counters.excludedFt,
+    extractionRatified: (ratifiedCount ?? 0) > 0,
   });
 }

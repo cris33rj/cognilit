@@ -2,6 +2,9 @@ import Anthropic from "@anthropic-ai/sdk";
 import type {
   CostEstimate,
   EligibilityDerivation,
+  ExtractedField,
+  ExtractionFieldDef,
+  ExtractionResult,
   LLMProvider,
   LlmSuggestion,
   OcrResult,
@@ -9,7 +12,7 @@ import type {
   ProviderIdentity,
   ScreeningPreclassification,
 } from "./types";
-import { estimateScreeningCost } from "./cost";
+import { estimateScreeningCost, estimateExtractionCost } from "./cost";
 
 const MODEL = "claude-opus-4-8"; // default D14
 const PT_BR = "Responda SEMPRE em português brasileiro (pt-BR).";
@@ -177,11 +180,94 @@ export class AnthropicProvider implements LLMProvider {
     };
   }
 
-  async estimateCost(input: {
-    itemCount: number;
-    kind: "ai_screening_batch";
-  }): Promise<CostEstimate> {
+  async estimateCost(
+    input:
+      | { itemCount: number; kind: "ai_screening_batch" }
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+  ): Promise<CostEstimate> {
+    if (input.kind === "ai_extraction_batch") {
+      return estimateExtractionCost(input.itemCount, input.fieldCount);
+    }
     return estimateScreeningCost(input.itemCount);
+  }
+
+  async extractFields(input: {
+    fields: ExtractionFieldDef[];
+    documentText: string;
+    pageIndex?: { page: number; char_start: number; char_end: number }[];
+  }): Promise<ExtractionResult> {
+    const fieldSpec = input.fields
+      .map(
+        (f) =>
+          `- ${f.name} (id=${f.id}, tipo=${f.type}${f.options ? `, opções=${f.options.join("|")}` : ""})`,
+      )
+      .join("\n");
+    const prompt =
+      `Extraia os campos abaixo SOMENTE a partir do texto do documento.\n` +
+      `Para cada campo retorne um objeto: {"field_id","value","source_span","page","inferred"}.\n` +
+      `Se o valor NÃO constar no texto, use value=null e source_span=null (não invente).\n` +
+      `Marque inferred=true quando o valor for deduzido sem trecho literal.\n` +
+      `O source_span deve ser citado no IDIOMA ORIGINAL do documento.\n\n` +
+      `Campos:\n${fieldSpec}\n\nTexto:\n${input.documentText}\n\n` +
+      `Retorne JSON {"fields":[...]}.`;
+    const msg = await this.client.messages.create({
+      model: MODEL,
+      max_tokens: Math.min(8000, 1024 + input.fields.length * 256),
+      system: `${PT_BR}\nVocê extrai dados de estudos para revisões sistemáticas; nunca inventa valores.`,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const raw = textOf(msg);
+    const parsed = safeParse<{ fields: Array<Record<string, unknown>> }>(raw, {
+      fields: [],
+    });
+    const byId = new Map(parsed.fields.map((r) => [String(r.field_id), r]));
+    const fields: ExtractedField[] = input.fields.map((f) => {
+      const r = byId.get(f.id);
+      const value =
+        r && r.value !== null && r.value !== undefined ? r.value : null;
+      const page = r && typeof r.page === "number" ? r.page : null;
+      const span =
+        r && typeof r.source_span === "string" ? r.source_span : null;
+      const inferred = !!(r && r.inferred === true);
+      if (value === null) {
+        return {
+          field_id: f.id,
+          value: {
+            value: null,
+            source_span: null,
+            page: null,
+            reason: "not_found",
+          },
+          inferred,
+          grounding: {
+            text_layer_id: null,
+            page: null,
+            source_span: null,
+            origin: null,
+          },
+        };
+      }
+      return {
+        field_id: f.id,
+        value: { value, source_span: span, page },
+        inferred,
+        grounding: {
+          text_layer_id: null,
+          page,
+          source_span: span,
+          origin: null,
+        },
+      };
+    });
+    return {
+      fields,
+      provenance: {
+        model: MODEL,
+        version: MODEL,
+        prompt_or_span: prompt,
+        timestamp: nowIso(),
+      },
+    };
   }
 }
 

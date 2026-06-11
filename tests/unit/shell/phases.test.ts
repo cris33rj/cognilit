@@ -11,6 +11,7 @@ const base: PhaseInput = {
   passedTs: 0,
   includedFt: 0,
   excludedFt: 0,
+  extractionRatified: false,
 };
 const by = (phases: ReturnType<typeof computePhaseStates>) =>
   Object.fromEntries(phases.map((p) => [p.key, p.status]));

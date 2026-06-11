@@ -1,12 +1,19 @@
 import { createClient } from "@/lib/supabase/server";
-import { listExtractionFields } from "@/lib/extraction/queries";
+import {
+  listExtractionFields,
+  listStudies,
+  listExtractionValues,
+} from "@/lib/extraction/queries";
 import { ExtractionFormBuilder } from "@/components/extraction/ExtractionFormBuilder";
+import { ExtractionRunner } from "@/components/extraction/ExtractionRunner";
 import {
   ensureExtractionForm,
   addExtractionField,
   updateExtractionField,
   removeExtractionField,
   reorderExtractionFields,
+  runExtraction,
+  ratifyExtractionValue,
 } from "./actions";
 
 export default async function ExtractionPage({
@@ -19,9 +26,13 @@ export default async function ExtractionPage({
   await ensureExtractionForm(reviewId);
   const supabase = await createClient();
   const fields = await listExtractionFields({ supabase }, reviewId);
+  const studies = await listStudies({ supabase }, reviewId);
+  const valuesByStudy = await Promise.all(
+    studies.map((s) => listExtractionValues({ supabase }, reviewId, s.id)),
+  );
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <div className="mx-auto max-w-3xl space-y-10 px-4 py-8">
       <ExtractionFormBuilder
         reviewId={reviewId}
         fields={fields}
@@ -30,6 +41,28 @@ export default async function ExtractionPage({
         onRemove={removeExtractionField}
         onReorder={reorderExtractionFields}
       />
+
+      <section className="space-y-6">
+        <h2 className="text-lg font-semibold">Estudos para extração</h2>
+        {studies.length === 0 && (
+          <p className="text-sm text-ink-faint">
+            Nenhum estudo incluído no Texto completo ainda.
+          </p>
+        )}
+        {studies.map((s, i) => (
+          <div key={s.id} className="panel space-y-3 p-4">
+            <h3 className="text-sm font-semibold">{s.title}</h3>
+            <ExtractionRunner
+              reviewId={reviewId}
+              recordId={s.id}
+              fields={fields}
+              values={valuesByStudy[i]!}
+              onRun={runExtraction}
+              onRatify={ratifyExtractionValue}
+            />
+          </div>
+        ))}
+      </section>
     </div>
   );
 }
