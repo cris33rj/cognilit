@@ -2,7 +2,7 @@
 
 **Branch:** `build/002-marco2-coracao-ai-first/4-extracao-ia` (tip `618be10`)
 **Base:** feature HEAD `bc2e0ca` (F2 + F3 mergeadas + IMPLEMENTATION_PLAN da Fatia 4)
-**Estado:** ✅ Completa, aguardando **merge manual** (CHECKPOINT 3).
+**Estado:** ✅ Mergeada na feature branch — merge `925ba7c` (2026-06-11).
 
 ## O que foi entregue
 
