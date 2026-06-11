@@ -109,7 +109,7 @@ export async function listExtractionValues(
   if (error) throw new Error(error.message);
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => {
     const raw = r.ai_suggestion;
-    const sugg = (Array.isArray(raw) ? raw[0] : raw) as null | {
+    const sugg = (Array.isArray(raw) ? (raw[0] ?? null) : raw) as null | {
       output: unknown;
       provenance: Provenance;
       not_found: boolean;

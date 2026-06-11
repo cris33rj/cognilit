@@ -152,6 +152,7 @@ describe("queries de extração", () => {
 
     const studies = await listStudies({ supabase: client }, reviewId);
     expect(studies.some((s) => s.id === recordId)).toBe(true);
+    expect(studies.find((s) => s.id === recordId)?.title).toBe("Estudo");
 
     const values = await listExtractionValues(
       { supabase: client },
@@ -163,5 +164,8 @@ describe("queries de extração", () => {
     expect(anchored.output).toBeTruthy();
     expect(anchored.provenance).toHaveProperty("model");
     expect(anchored.state).toBe("pending");
+
+    const missing = values.find((v) => v.not_found === true)!;
+    expect((missing.output as { value: unknown }).value).toBeNull();
   });
 });
