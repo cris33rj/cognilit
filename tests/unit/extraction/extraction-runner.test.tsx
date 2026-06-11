@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { ExtractionRunner } from "@/components/extraction/ExtractionRunner";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 const fields = [
   {
@@ -104,5 +106,61 @@ describe("ExtractionRunner", () => {
       />,
     );
     expect(screen.getByText(/não encontrado/i)).toBeInTheDocument();
+  });
+
+  it("clicar 'Aceitar' chama onRatify com state accepted", () => {
+    const onRatify = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <ExtractionRunner
+        reviewId="r1"
+        recordId="rec1"
+        fields={[fields[0]!]}
+        values={[values[0]!]}
+        onRun={vi.fn()}
+        onRatify={onRatify}
+      />,
+    );
+    fireEvent.click(screen.getByText("Aceitar"));
+    expect(onRatify).toHaveBeenCalledWith("r1", "v1", "accepted", {
+      value: "42",
+    });
+  });
+
+  it("valor já validado (accepted) não mostra ações de sugestão", () => {
+    const accepted = [
+      {
+        ...values[0]!,
+        state: "accepted" as const,
+        final_value: { value: "42" },
+      },
+    ];
+    render(
+      <ExtractionRunner
+        reviewId="r1"
+        recordId="rec1"
+        fields={[fields[0]!]}
+        values={accepted}
+        onRun={vi.fn()}
+        onRatify={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("Aceitar")).not.toBeInTheDocument();
+    expect(screen.queryByText("Rejeitar")).not.toBeInTheDocument();
+  });
+
+  it("clicar 'Extrair por IA' chama onRun", () => {
+    const onRun = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <ExtractionRunner
+        reviewId="r1"
+        recordId="rec1"
+        fields={fields}
+        values={values}
+        onRun={onRun}
+        onRatify={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText("Extrair por IA"));
+    expect(onRun).toHaveBeenCalledWith("r1", "rec1");
   });
 });

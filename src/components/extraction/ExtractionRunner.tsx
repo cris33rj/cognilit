@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { SuggestionState } from "@/lib/ai/llm/types";
 import type {
   ExtractionFieldRow,
@@ -34,6 +35,7 @@ export function ExtractionRunner({
     finalValue: unknown,
   ) => Promise<{ ok: boolean; error?: string }>;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const byField = new Map(values.map((v) => [v.field_id, v]));
@@ -43,18 +45,22 @@ export function ExtractionRunner({
     startTransition(async () => {
       const r = await onRun(reviewId, recordId);
       if (!r.ok) setError(r.error ?? "Falha ao extrair.");
+      else router.refresh();
     });
   }
 
   function ratify(valueId: string, state: SuggestionState, current: unknown) {
     setError(null);
+    let finalValue: unknown = { value: current };
+    if (state === "edited") {
+      const input = window.prompt("Novo valor:", String(current ?? ""));
+      if (input === null) return; // cancelou — no-op
+      finalValue = { value: input };
+    }
     startTransition(async () => {
-      const finalValue =
-        state === "edited"
-          ? { value: window.prompt("Novo valor:", String(current ?? "")) ?? "" }
-          : { value: current };
       const r = await onRatify(reviewId, valueId, state, finalValue);
       if (!r.ok) setError(r.error ?? "Falha ao ratificar.");
+      else router.refresh();
     });
   }
 
@@ -71,7 +77,11 @@ export function ExtractionRunner({
           {pending ? "Extraindo…" : "Extrair por IA"}
         </button>
       </div>
-      {error && <p className="text-xs text-warn">{error}</p>}
+      {error && (
+        <p role="alert" className="text-xs text-warn">
+          {error}
+        </p>
+      )}
       <ul className="divide-y divide-line">
         {fields.map((f) => {
           const v = byField.get(f.id);
