@@ -210,10 +210,13 @@ export class AnthropicProvider implements LLMProvider {
       `O source_span deve ser citado no IDIOMA ORIGINAL do documento.\n\n` +
       `Campos:\n${fieldSpec}\n\nTexto:\n${input.documentText}\n\n` +
       `Retorne JSON {"fields":[...]}.`;
-    const raw = await this.ask(
-      "Você extrai dados de estudos para revisões sistemáticas; nunca inventa valores.",
-      prompt,
-    );
+    const msg = await this.client.messages.create({
+      model: MODEL,
+      max_tokens: Math.min(8000, 1024 + input.fields.length * 256),
+      system: `${PT_BR}\nVocê extrai dados de estudos para revisões sistemáticas; nunca inventa valores.`,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const raw = textOf(msg);
     const parsed = safeParse<{ fields: Array<Record<string, unknown>> }>(raw, {
       fields: [],
     });

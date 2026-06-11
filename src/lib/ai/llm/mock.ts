@@ -106,9 +106,10 @@ export class MockLLMProvider implements LLMProvider {
       | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
   ): Promise<CostEstimate> {
     if (input.kind === "ai_extraction_batch") {
+      const tokensEstimated = input.itemCount * input.fieldCount * 250;
       return {
-        tokensEstimated: input.itemCount * input.fieldCount * 250,
-        cost: { usd: input.itemCount * input.fieldCount * 0.0006 },
+        tokensEstimated,
+        cost: { usd: (tokensEstimated / 1000) * 0.0025 },
       };
     }
     return {
@@ -154,7 +155,7 @@ export class MockLLMProvider implements LLMProvider {
           text_layer_id: null,
           page: 1,
           source_span: span,
-          origin: "nativo",
+          origin: null,
         },
       };
     });
