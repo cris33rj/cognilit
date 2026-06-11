@@ -2,7 +2,7 @@
 
 **Branch:** `build/002-marco2-coracao-ai-first/3-formulario-extracao` (tip `a076414`)
 **Base:** feature HEAD `45a3881` (Fatia 2 mergeada + IMPLEMENTATION_PLAN da Fatia 3)
-**Estado:** ✅ Completa, aguardando **merge manual** (CHECKPOINT 3).
+**Estado:** ✅ Mergeada na feature branch — merge `1f350a0` (2026-06-10).
 
 ## O que foi entregue
 

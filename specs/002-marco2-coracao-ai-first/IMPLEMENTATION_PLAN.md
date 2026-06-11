@@ -1,116 +1,1167 @@
-# Fatia 3 — Formulário de extração configurável (US2) — Implementation Plan
+# Fatia 4 — Extração por IA: grounding + proveniência + validação humana (US3) — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Permitir que um membro da Revisão monte **um único** formulário de extração com campos tipados (texto/número/data/booleano/escolha), editáveis, removíveis e reordenáveis — toda mudança auditada — como instrumento configurável reaproveitável, **sem IA**.
+**Goal:** Sobre um estudo (`record` com `corpus_state='included_ft'`) que tem PDF processado (`text_layer`), o pesquisador aciona a **extração por IA**: o `LLMProvider` preenche os campos do formulário (Fatia 3) como **sugestões** com trecho-fonte+página, "não encontrado" 1ª classe e campos inferidos marcados; o humano **aceita/edita/rejeita**; a IA nunca finaliza; re-extração encosta sem sobrescrever o validado.
 
-**Architecture:** Schema-first (Princípio IV). Migração `0014` cria `extraction_form` (1:1 com `review`) + `extraction_field` (campos tipados, soft-delete via `is_active`), com RLS de leitura por membro. Toda mutação passa por **RPC `security definer`** que valida pertencimento, valida o campo e grava `audit_entry` atômico (espelha `lock_protocol`/`ensure_exclusion_reasons` do Marco 1). A camada TS (`queries`/`schema`/Server Actions) é fina sobre as RPCs; a UI é um builder client-side que chama as actions. **Nenhuma escrita direta** de campo contorna a RPC auditada.
+**Architecture:** Espelha o caminho de IA do Marco 1 (screening) — **server-side Node**, provider injetado (A1). A escrita das sugestões de IA usa o **client service-role** (admin) que bypassa RLS (como `screening/worker.ts` e `text_layer`); a **ratificação humana** passa por **RPC `security definer` auditada** com `auth.uid()` (como as RPCs da Fatia 3). Sem job/lote nesta fatia (isso é a Fatia 5): a extração é **por estudo (single)**, disparada por Server Action. Reusa `src/components/ai/*` (FR-020). A fase "Extração" entra no trilho (`phases.ts`) como fase pós-triagem.
 
-**Tech Stack:** Next.js 14 (App Router, Server Actions), Supabase (PostgreSQL, RLS, RPC plpgsql), TypeScript strict, React Hook Form + Zod, Tailwind, Vitest (unit + integration), Testing Library.
+**Tech Stack:** Next.js 14 App Router (Server Components + Server Actions), Supabase (Postgres+RLS, RPC security-definer), `@anthropic-ai/sdk` via abstração `LLMProvider`, Vitest (unit + integration que batem direto no DB), Testing Library.
 
 ---
 
-## Decisões de design (registradas para CHECKPOINT 2)
+## Decisões de design (locked — não reabrir durante execução)
 
-1. **`sort_order int` (não `order`)** — `order` é palavra reservada do SQL; a convenção do repo já usa `sort_order` (`exclusion_reason`). A `data-model.md` nomeia `order` conceitualmente; `sort_order` é a materialização.
-2. **Soft-delete via `is_active boolean`** — remover um campo faz `is_active=false` (espelha `exclusion_reason.is_active`), nunca `DELETE`. Honra o edge case "remover/editar **não apaga silenciosamente** `extraction_value` validado": `extraction_value` só nasce na Fatia 4, então o soft-delete é o **seam forward-safe** (a FK da F4 nunca aponta para linha removida). A F4 acrescenta a regra "não desativar campo com valor validado".
-3. **Mutações só por RPC auditada** — `add/update/remove/reorder_extraction_field` e `ensure_extraction_form` são `security definer`, checam `is_review_member`, validam e gravam `audit_entry` (ator `human`). RLS concede **apenas `select`** a `authenticated`; escrita real é das RPCs. Satisfaz FR-010 ("mudança registrada") e FR-029 ("configurar formulário" na trilha).
-4. **Validação em três camadas** — CHECK no schema (backstop), `raise exception` nas RPCs (mensagem limpa), Zod nas Server Actions (UX). `type='select' ⇒ options` array não-vazio; `name` não-vazio.
-5. **Sem fiação do trilho de fases** — a slicing atribui o `PhaseKey` "Extração" à **Fatia 4**. A F3 entrega a página `app/reviews/[reviewId]/extraction/page.tsx` alcançável por URL; a F4 a insere no `PhaseRail`. F3 **não** toca `phases.ts`.
-6. **Sem IA, sem embeddings, sem job** — F3 é configuração pura. Nenhum import de `LLMProvider`/`EmbeddingProvider`/`job`.
+1. **AI escreve via service-role; humano via RPC auditada.** `runExtractionForRecord(admin, provider, …)` insere `ai_suggestion` + `extraction_value(state=pending|inferred)` com o client admin (bypassa RLS, espelha `screening/worker.ts`). A ratificação (`ratify_extraction_value`) é RPC `security definer` com `auth.uid()` + `audit_entry` (espelha `update_extraction_field`). RLS de `extraction_value` concede **só `select`** a membros.
+2. **`extraction_value` é o âncora por sugestão.** Cada `ExtractedField` gera **um** `extraction_value` (estado nasce `pending`/`inferred`) ligado a **uma** `ai_suggestion` (`target_kind='extraction'`, `target_id = extraction_value.id`). `state` reusa o enum `suggestion_state` (não criar enum novo).
+3. **Re-extração (FR-019a/Q4):** uma nova execução cria novas linhas `pending`/`inferred`. Linhas anteriores **ainda não ratificadas** (`pending`/`inferred`) são aposentadas (saem da UI). Linhas **validadas** (`accepted`/`edited`/`rejected`) **nunca** são tocadas — `final_value` permanece intacto. "Valor atual validado" de `(record,field)` = linha mais recente em `accepted`/`edited`.
+4. **Sem `ai_usage` nesta fatia.** Contabilidade de consumo (FR-023) e o `job_type='ai_extraction_batch'` são da **Fatia 5**. F4 não enfileira job nem grava `ai_usage`.
+5. **`extractFields` não consome embeddings (US3⟂US5/Q1).** Lê `text_layer` direto, concatenada e com `pageIndex` para ancorar span→página. Nenhum import de `embedding_chunk`/Voyage.
+6. **Grounding resolvido no lib.** O provider devolve `grounding.page` + `source_span`; `runExtractionForRecord` mapeia `page → {text_layer_id, origin}` a partir das camadas carregadas (o provider não conhece IDs do banco).
 
 ---
 
 ## File Structure
 
-| Arquivo | Responsabilidade |
-|---|---|
-| `supabase/migrations/0014_extraction_form.sql` | **Criar:** enum `extraction_field_type`; tabelas `extraction_form` (1:1 review) + `extraction_field` (tipado, `is_active`, `sort_order`, CHECKs); RLS `select` por membro; RPCs `ensure_extraction_form`, `add/update/remove/reorder_extraction_field` (auditadas); grants. |
-| `src/types/database.ts` | **Modificar (regen):** tipos de `extraction_form`/`extraction_field` + enum. |
-| `src/lib/extraction/queries.ts` | **Criar:** `getExtractionForm` (form 1:1) + `listExtractionFields` (ativos, ordenados) — deps-injected (`{ supabase }`), espelha `documents/queries.ts`. |
-| `src/lib/extraction/schema.ts` | **Criar:** Zod `extractionFieldInputSchema` + tipos derivados; `FIELD_TYPES` (`as const`). |
-| `app/reviews/[reviewId]/extraction/actions.ts` | **Criar:** Server Actions `ensureExtractionForm`/`addExtractionField`/`updateExtractionField`/`removeExtractionField`/`reorderExtractionFields` (thin sobre RPC, `requireMember`, `revalidatePath`). |
-| `app/reviews/[reviewId]/extraction/page.tsx` | **Criar:** Server Component — busca form+fields e renderiza `<ExtractionFormBuilder>`. |
-| `src/components/extraction/ExtractionFormBuilder.tsx` | **Criar:** client builder — adicionar/editar/remover/reordenar campos via actions; pt-BR; Tailwind. |
-| `tests/integration/extraction-form.test.ts` | **Criar:** RPCs (ensure 1:1, add+validação, update audit, remove soft-delete, reorder). |
-| `tests/integration/rls.extraction.test.ts` | **Criar:** isolamento — não-membro não lê form/fields; RPC de não-membro levanta `not a member`. |
-| `tests/unit/extraction/schema.test.ts` | **Criar:** Zod — `select` exige `options`; `name` não-vazio; tipos inválidos rejeitados. |
-| `tests/unit/extraction/form-builder.test.tsx` | **Criar:** render do builder (campos listados, ordem, ação remover chama action). |
+**Criar:**
+- `supabase/migrations/0015_extraction_value.sql` — `ALTER TYPE ai_target_kind ADD VALUE 'extraction'`; tabela `extraction_value` + RLS; RPC `ratify_extraction_value`.
+- `src/lib/extraction/extract.ts` — `loadRecordText` + `runExtractionForRecord` (lib pura, deps-injetadas).
+- `src/lib/extraction/run.ts` — `runExtractionForRecordWith(admin, provider, reviewId, recordId)` (wrapper, espelha `screening/run.ts`).
+- `src/components/extraction/ExtractionRunner.tsx` — client: dispara extração + renderiza sugestões (reusa `components/ai/*`).
+- `tests/unit/ai/extract-fields.test.ts` — `MockLLMProvider.extractFields` (provenance/not_found/inferred/sem-embeddings).
+- `tests/unit/extraction/extraction-cost.test.ts` — `estimateExtractionCost`.
+- `tests/unit/shell/phases-extraction.test.ts` — fase Extração no trilho.
+- `tests/unit/extraction/extraction-runner.test.tsx` — componente.
+- `tests/integration/extraction-value.test.ts` — migração + ratificação.
+- `tests/integration/extract-record.test.ts` — `runExtractionForRecord` ponta-a-ponta (sugestão+valor+grounding) + queries.
+- `tests/integration/rls.extraction-value.test.ts` — isolamento cross-review (SC-011).
+
+**Modificar:**
+- `src/lib/ai/llm/types.ts` — tipos de extração + `estimateCost` union.
+- `src/lib/ai/llm/cost.ts` — `estimateExtractionCost`.
+- `src/lib/ai/llm/mock.ts` — `extractFields` + `estimateCost` atualizado.
+- `src/lib/ai/llm/anthropic.ts` — `extractFields` + `estimateCost` atualizado.
+- `src/lib/extraction/queries.ts` — `listStudies` + `listExtractionValues`.
+- `app/reviews/[reviewId]/extraction/actions.ts` — `runExtraction` + `ratifyExtractionValue`.
+- `app/reviews/[reviewId]/extraction/page.tsx` — lista de estudos + `ExtractionRunner`.
+- `src/lib/shell/phases.ts` — `PhaseKey` `extraction` + `loadPhaseStates`.
 
 ---
 
-## Task 1: Migração 0014 — `extraction_form` + `extraction_field` + RLS (schema only)
+## Task 1: Migração 0015 — `extraction_value` + RLS + ALTER `ai_target_kind`
 
 **Files:**
-- Create: `supabase/migrations/0014_extraction_form.sql`
-- Modify: `src/types/database.ts` (via `npm run gen:types`)
+- Create: `supabase/migrations/0015_extraction_value.sql`
+- Test: `tests/integration/extraction-value.test.ts`
 
-- [ ] **Step 1: Escrever a migration (schema + RLS, sem RPCs ainda)**
+- [ ] **Step 1: Escrever o teste de migração (falha)**
 
-Create `supabase/migrations/0014_extraction_form.sql`:
+```ts
+// tests/integration/extraction-value.test.ts
+import { describe, it, expect, beforeAll } from "vitest";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+
+async function newReviewWithStudy(title: string) {
+  const { client } = await signUpUser(
+    `xv_${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`,
+    "senha-teste-123",
+  );
+  const { data: review, error } = await client.rpc("create_review", { p_title: title });
+  if (error) throw new Error(error.message);
+  const reviewId = review.id as string;
+  const svc = serviceClient();
+  const { data: rec, error: rErr } = await svc
+    .from("record")
+    .insert({ review_id: reviewId, corpus_state: "included_ft", metadata: { title: "Estudo X" } })
+    .select("id")
+    .single();
+  if (rErr) throw new Error(rErr.message);
+  await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
+  const { data: field } = await client.rpc("add_extraction_field", {
+    p_review_id: reviewId, p_name: "Amostra", p_type: "number", p_options: null,
+  });
+  return { client, reviewId, recordId: rec!.id as string, fieldId: field!.id as string };
+}
+
+describe("extraction_value — schema + RLS", () => {
+  let ctx: Awaited<ReturnType<typeof newReviewWithStudy>>;
+  beforeAll(async () => { ctx = await newReviewWithStudy("Valor de extração"); });
+
+  it("membro lê extraction_value escrito por service-role", async () => {
+    const svc = serviceClient();
+    const { error: insErr } = await svc.from("extraction_value").insert({
+      review_id: ctx.reviewId, record_id: ctx.recordId, field_id: ctx.fieldId, state: "pending",
+    });
+    expect(insErr).toBeNull();
+    const { data, error } = await ctx.client
+      .from("extraction_value").select("id, state").eq("review_id", ctx.reviewId);
+    expect(error).toBeNull();
+    expect(data!.length).toBe(1);
+    expect(data![0]!.state).toBe("pending");
+  });
+
+  it("CHECK: state accepted exige final_value não-nulo", async () => {
+    const svc = serviceClient();
+    const { error } = await svc.from("extraction_value").insert({
+      review_id: ctx.reviewId, record_id: ctx.recordId, field_id: ctx.fieldId, state: "accepted",
+    });
+    expect(error).not.toBeNull(); // viola o CHECK
+  });
+
+  it("aceita target_kind='extraction' em ai_suggestion", async () => {
+    const svc = serviceClient();
+    const { error } = await svc.from("ai_suggestion").insert({
+      review_id: ctx.reviewId, target_kind: "extraction", target_id: ctx.recordId,
+      output: { value: 42, source_span: "n=42", page: 3 },
+      provenance: { model: "m", version: "v", prompt_or_span: "p", timestamp: new Date().toISOString() },
+      state: "pending", grounding: { text_layer_id: null, page: 3, source_span: "n=42", origin: "nativo" },
+      not_found: false,
+    });
+    expect(error).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `npx vitest run tests/integration/extraction-value.test.ts`
+Expected: FAIL — relação `extraction_value` não existe / enum sem `extraction`.
+
+- [ ] **Step 3: Escrever a migração**
 
 ```sql
+-- supabase/migrations/0015_extraction_value.sql
 -- ============================================================
--- Marco 2 / Fatia 3 — Formulário de extração configurável (US2 / D9).
--- extraction_form é 1:1 com review (Q2). extraction_field é tipado e usa
--- soft-delete (is_active) para nunca apagar silenciosamente valores futuros
--- (extraction_value chega na Fatia 4). Escrita real via RPC auditada (abaixo);
--- RLS concede só SELECT a membros. data-model.md §extraction_form/§extraction_field.
+-- Marco 2 / Fatia 4 — Extração por IA: valor extraído por estudo×campo.
+-- A IA escreve ai_suggestion + extraction_value(pending/inferred) via service-role
+-- (worker server-side, bypassa RLS). O humano ratifica via RPC security-definer
+-- auditada (ratify_extraction_value). RLS concede só SELECT a membros.
+-- data-model.md §extraction_value + §ai_suggestion(estendida) + máquina de estados.
 -- ============================================================
 
--- tipo do campo (enum no banco — CLAUDE.md). FR-009.
-create type extraction_field_type as enum ('text', 'number', 'date', 'boolean', 'select');
+-- target_kind ganha 'extraction' (aditivo). Usado em runtime, não nesta transação.
+alter type ai_target_kind add value if not exists 'extraction';
 
--- ---------- extraction_form (1:1 com review — Q2/FR-011) ----------
-create table public.extraction_form (
-  id uuid primary key default gen_random_uuid(),
-  review_id uuid not null unique references public.review (id) on delete cascade,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
--- ---------- extraction_field (campo tipado — FR-009/010) ----------
-create table public.extraction_field (
+-- ---------- extraction_value (record × field → valor humano + sugestão) ----------
+create table public.extraction_value (
   id uuid primary key default gen_random_uuid(),
   review_id uuid not null references public.review (id) on delete cascade,
-  form_id uuid not null references public.extraction_form (id) on delete cascade,
-  name text not null check (length(btrim(name)) > 0),     -- não-vazio
-  type extraction_field_type not null,
-  options jsonb,                                            -- valores p/ type=select
-  sort_order integer not null default 0,                   -- ordenação (FR-009)
-  is_active boolean not null default true,                 -- soft-delete (decisão 2)
+  record_id uuid not null references public.record (id) on delete cascade,
+  field_id uuid not null references public.extraction_field (id) on delete cascade,
+  ai_suggestion_id uuid references public.ai_suggestion (id) on delete set null,
+  final_value jsonb,                                 -- valor humano após ratificação (FR-018)
+  state suggestion_state not null default 'pending', -- reusa o enum do Marco 1
+  superseded_by_id uuid references public.extraction_value (id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
-  -- select ⇒ options é array não-vazio; não-select ⇒ options nulo (decisão 4)
-  constraint extraction_field_options_ck check (
-    case
-      when type = 'select'
-        then options is not null and jsonb_typeof(options) = 'array' and jsonb_array_length(options) > 0
-      else options is null
-    end
+  -- accepted/edited ⇒ final_value obrigatório (data-model §extraction_value)
+  constraint extraction_value_final_ck check (
+    state not in ('accepted', 'edited') or final_value is not null
   )
 );
-create index extraction_field_form_idx on public.extraction_field (form_id, sort_order);
-create index extraction_field_review_idx on public.extraction_field (review_id);
+create index extraction_value_record_field_idx on public.extraction_value (record_id, field_id);
+create index extraction_value_review_idx on public.extraction_value (review_id);
 
-alter table public.extraction_form  enable row level security;
-alter table public.extraction_field enable row level security;
+alter table public.extraction_value enable row level security;
 
--- Leitura por membros; escrita só pelas RPCs security-definer (Task 2-6).
-create policy extraction_form_select on public.extraction_form
-  for select using (public.is_review_member(review_id));
-create policy extraction_field_select on public.extraction_field
+-- Leitura por membros; escrita real é do worker service-role (IA) ou da RPC abaixo (humano).
+create policy extraction_value_select_member on public.extraction_value
   for select using (public.is_review_member(review_id));
 ```
 
-- [ ] **Step 2: Aplicar e regenerar tipos**
+- [ ] **Step 4: Aplicar e ver passar**
 
-Run:
+Run: `npx supabase db reset` (aplica 0001–0015) e depois `npx vitest run tests/integration/extraction-value.test.ts`
+Expected: os 3 testes passam. (Se `db reset` não estiver disponível no worktree, ver as notas de baseline no `COMPLETION-fatia-3.md`.)
+
+- [ ] **Step 5: Commit**
+
 ```bash
-supabase db reset
-npm run gen:types
+git add supabase/migrations/0015_extraction_value.sql tests/integration/extraction-value.test.ts
+git commit -m "feat(002-f4): migration 0015 extraction_value + RLS + ai_target_kind=extraction (US3)"
 ```
-Expected: reset sem erro; `src/types/database.ts` passa a conter `extraction_form`, `extraction_field` e o enum `extraction_field_type`.
+
+---
+
+## Task 2: RPC `ratify_extraction_value` (aceitar/editar/rejeitar, auditada)
+
+**Files:**
+- Modify: `supabase/migrations/0015_extraction_value.sql` (append)
+- Test: `tests/integration/extraction-value.test.ts` (append)
+
+- [ ] **Step 1: Escrever o teste (falha)**
+
+```ts
+// append em tests/integration/extraction-value.test.ts
+describe("ratify_extraction_value — humano-no-laço, auditado", () => {
+  let ctx: Awaited<ReturnType<typeof newReviewWithStudy>>;
+  let valueId: string;
+  beforeAll(async () => {
+    ctx = await newReviewWithStudy("Ratificação");
+    const svc = serviceClient();
+    const { data } = await svc.from("extraction_value").insert({
+      review_id: ctx.reviewId, record_id: ctx.recordId, field_id: ctx.fieldId, state: "pending",
+    }).select("id").single();
+    valueId = data!.id as string;
+  });
+
+  it("aceitar grava final_value, state=accepted e audit_entry", async () => {
+    const { error } = await ctx.client.rpc("ratify_extraction_value", {
+      p_value_id: valueId, p_state: "accepted", p_final_value: { value: 42 },
+    });
+    expect(error).toBeNull();
+    const svc = serviceClient();
+    const { data: row } = await svc.from("extraction_value").select("state, final_value").eq("id", valueId).single();
+    expect(row!.state).toBe("accepted");
+    expect(row!.final_value).toEqual({ value: 42 });
+    const { data: audit } = await svc.from("audit_entry").select("action")
+      .eq("entity_id", valueId).eq("action", "ratify_extraction_value");
+    expect(audit!.length).toBeGreaterThan(0);
+  });
+
+  it("rejeitar não exige final_value", async () => {
+    const svc = serviceClient();
+    const { data } = await svc.from("extraction_value").insert({
+      review_id: ctx.reviewId, record_id: ctx.recordId, field_id: ctx.fieldId, state: "pending",
+    }).select("id").single();
+    const { error } = await ctx.client.rpc("ratify_extraction_value", {
+      p_value_id: data!.id, p_state: "rejected", p_final_value: null,
+    });
+    expect(error).toBeNull();
+  });
+
+  it("não-membro não ratifica", async () => {
+    const { client: other } = await signUpUser(
+      `other_${Date.now()}@example.com`, "senha-teste-123");
+    const { error } = await other.rpc("ratify_extraction_value", {
+      p_value_id: valueId, p_state: "accepted", p_final_value: { value: 1 },
+    });
+    expect(error).not.toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `npx vitest run tests/integration/extraction-value.test.ts -t ratify`
+Expected: FAIL — função `ratify_extraction_value` não existe.
+
+- [ ] **Step 3: Adicionar a RPC à migração**
+
+```sql
+-- append em supabase/migrations/0015_extraction_value.sql
+-- ============================================================
+-- RPC: ratify_extraction_value — única via ao valor final (FR-019/§I).
+-- p_state ∈ {accepted, edited, rejected}; accepted/edited exige final_value.
+-- A IA nunca chama isto (ator 'human', auth.uid()). Audita before/after.
+-- ============================================================
+create or replace function public.ratify_extraction_value(
+  p_value_id uuid,
+  p_state suggestion_state,
+  p_final_value jsonb
+)
+returns public.extraction_value
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_before public.extraction_value;
+  v_after public.extraction_value;
+begin
+  select * into v_before from public.extraction_value where id = p_value_id;
+  if not found then
+    raise exception 'extraction value not found';
+  end if;
+  if not public.is_review_member(v_before.review_id) then
+    raise exception 'not a member';
+  end if;
+  if p_state not in ('accepted', 'edited', 'rejected') then
+    raise exception 'invalid ratification state';
+  end if;
+  if p_state in ('accepted', 'edited') and p_final_value is null then
+    raise exception 'final_value required for %', p_state;
+  end if;
+
+  update public.extraction_value
+     set state = p_state,
+         final_value = case when p_state = 'rejected' then null else p_final_value end,
+         updated_at = now()
+   where id = p_value_id
+   returning * into v_after;
+
+  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
+  values (v_before.review_id, 'human', auth.uid(), 'ratify_extraction_value', 'extraction_value',
+          p_value_id, to_jsonb(v_before), to_jsonb(v_after));
+
+  return v_after;
+end;
+$$;
+
+grant execute on function public.ratify_extraction_value(uuid, suggestion_state, jsonb) to authenticated;
+```
+
+- [ ] **Step 4: Aplicar e ver passar**
+
+Run: `npx supabase db reset && npx vitest run tests/integration/extraction-value.test.ts`
+Expected: PASS (todos).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add supabase/migrations/0015_extraction_value.sql tests/integration/extraction-value.test.ts
+git commit -m "feat(002-f4): ratify_extraction_value RPC (human-in-loop, audited) (US3/FR-018/019)"
+```
+
+---
+
+## Task 3: Regenerar tipos do banco
+
+**Files:**
+- Modify: `src/types/database.ts` (gerado)
+
+- [ ] **Step 1: Regenerar**
+
+Run: `npm run gen:types`
+Expected: `src/types/database.ts` passa a conter `extraction_value` e `ratify_extraction_value`.
+
+- [ ] **Step 2: Type-check**
+
+Run: `npx tsc --noEmit`
+Expected: 0 erros.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/types/database.ts
+git commit -m "chore(002-f4): regenerate database types (extraction_value)"
+```
+
+---
+
+## Task 4: Tipos de extração no `LLMProvider` + `estimateCost` union
+
+**Files:**
+- Modify: `src/lib/ai/llm/types.ts`
+
+- [ ] **Step 1: Adicionar os tipos e estender a interface**
+
+```ts
+// append/editar em src/lib/ai/llm/types.ts
+
+export type ExtractionFieldType = "text" | "number" | "date" | "boolean" | "select";
+
+export interface ExtractionFieldDef {
+  id: string;
+  name: string; // rótulo pt-BR
+  type: ExtractionFieldType;
+  options?: string[]; // quando type === 'select'
+}
+
+export interface ExtractedField {
+  field_id: string;
+  value: FactualValue<unknown>; // {value, source_span, page} | {value:null, reason:'not_found'}
+  inferred: boolean; // true ⇒ state nasce 'inferred' (FR-014)
+  grounding: {
+    text_layer_id: string | null; // resolvido no lib (provider devolve null)
+    page: number | null;
+    source_span: string | null; // citado no idioma original (FR-015)
+    origin: "nativo" | "ocr_ia" | null;
+  };
+}
+
+export interface ExtractionResult {
+  fields: ExtractedField[];
+  provenance: Provenance; // OBRIGATÓRIO (FR-016/§II)
+}
+```
+
+E estender a interface `LLMProvider` (dentro do `interface LLMProvider { … }`), logo após `ocrPage`:
+
+```ts
+  /** Preenche os campos do formulário a partir do TEXTO do documento (FR-012). pt-BR.
+   *  documentText vem concatenada (chunking interno R6); NÃO usa RAG (Q1/§US3⟂US5). */
+  extractFields(input: {
+    fields: ExtractionFieldDef[];
+    documentText: string;
+    pageIndex?: { page: number; char_start: number; char_end: number }[];
+  }): Promise<ExtractionResult>;
+```
+
+E trocar a assinatura de `estimateCost` para a união (FR-022, contrato `extraction.md`):
+
+```ts
+  /** Estimativa de custo ANTES de lote (FR-022, §VII/P5). */
+  estimateCost(
+    input:
+      | { itemCount: number; kind: "ai_screening_batch" }
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+  ): Promise<CostEstimate>;
+```
+
+- [ ] **Step 2: Type-check (vai falhar nos implementadores — esperado)**
+
+Run: `npx tsc --noEmit`
+Expected: erros em `mock.ts` e `anthropic.ts` (não implementam `extractFields` / assinatura de `estimateCost`). Resolvidos nas Tasks 5–7.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add src/lib/ai/llm/types.ts
+git commit -m "feat(002-f4): LLMProvider extraction types + estimateCost union (US3/contract)"
+```
+
+---
+
+## Task 5: `estimateExtractionCost` + `estimateCost` do mock/anthropic
+
+**Files:**
+- Modify: `src/lib/ai/llm/cost.ts`
+- Modify: `src/lib/ai/llm/mock.ts`
+- Modify: `src/lib/ai/llm/anthropic.ts`
+- Test: `tests/unit/extraction/extraction-cost.test.ts`
+
+- [ ] **Step 1: Escrever o teste (falha)**
+
+```ts
+// tests/unit/extraction/extraction-cost.test.ts
+import { describe, it, expect } from "vitest";
+import { estimateExtractionCost } from "@/lib/ai/llm/cost";
+
+describe("estimateExtractionCost", () => {
+  it("escala com itens e campos", () => {
+    const a = estimateExtractionCost(2, 3);
+    expect(a.tokensEstimated).toBeGreaterThan(0);
+    expect(a.cost.usd).toBeGreaterThan(0);
+    const b = estimateExtractionCost(4, 3);
+    expect(b.tokensEstimated).toBe(a.tokensEstimated * 2);
+  });
+  it("zero itens ⇒ zero", () => {
+    expect(estimateExtractionCost(0, 5).tokensEstimated).toBe(0);
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `npx vitest run tests/unit/extraction/extraction-cost.test.ts`
+Expected: FAIL — `estimateExtractionCost` não existe.
+
+- [ ] **Step 3: Implementar em cost.ts**
+
+No topo de `cost.ts`, tornar a constante exportável (trocar `const USD_PER_1K_TOKENS` por `export const USD_PER_1K_TOKENS`). Depois adicionar ao fim:
+
+```ts
+// append em src/lib/ai/llm/cost.ts
+const TOKENS_PER_FIELD = 250; // heurística (refinar na Fatia 5 com métricas reais)
+
+/** Estimativa de custo de extração: itens (estudos) × campos. */
+export function estimateExtractionCost(
+  itemCount: number,
+  fieldCount: number,
+): CostEstimate {
+  const items = Math.max(0, Math.trunc(itemCount));
+  const fields = Math.max(0, Math.trunc(fieldCount));
+  const tokensEstimated = items * fields * TOKENS_PER_FIELD;
+  return {
+    tokensEstimated,
+    cost: { usd: (tokensEstimated / 1000) * USD_PER_1K_TOKENS },
+  };
+}
+```
+
+- [ ] **Step 4: Atualizar `estimateCost` do mock**
+
+Em `src/lib/ai/llm/mock.ts`, trocar o método `estimateCost`:
+
+```ts
+  async estimateCost(
+    input:
+      | { itemCount: number; kind: "ai_screening_batch" }
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+  ): Promise<CostEstimate> {
+    if (input.kind === "ai_extraction_batch") {
+      return {
+        tokensEstimated: input.itemCount * input.fieldCount * 250,
+        cost: { usd: input.itemCount * input.fieldCount * 0.0006 },
+      };
+    }
+    return {
+      tokensEstimated: input.itemCount * 800,
+      cost: { usd: input.itemCount * 0.002 },
+    };
+  }
+```
+
+- [ ] **Step 5: Atualizar `estimateCost` do anthropic**
+
+Em `src/lib/ai/llm/anthropic.ts`, importar `estimateExtractionCost` e trocar o método:
+
+```ts
+import { estimateScreeningCost, estimateExtractionCost } from "./cost";
+```
+
+```ts
+  async estimateCost(
+    input:
+      | { itemCount: number; kind: "ai_screening_batch" }
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+  ): Promise<CostEstimate> {
+    if (input.kind === "ai_extraction_batch") {
+      return estimateExtractionCost(input.itemCount, input.fieldCount);
+    }
+    return estimateScreeningCost(input.itemCount);
+  }
+```
+
+- [ ] **Step 6: Rodar o teste**
+
+Run: `npx vitest run tests/unit/extraction/extraction-cost.test.ts`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/lib/ai/llm/cost.ts src/lib/ai/llm/mock.ts src/lib/ai/llm/anthropic.ts tests/unit/extraction/extraction-cost.test.ts
+git commit -m "feat(002-f4): estimateExtractionCost + estimateCost ai_extraction_batch kind (US4 contract/FR-022)"
+```
+
+---
+
+## Task 6: `MockLLMProvider.extractFields`
+
+**Files:**
+- Modify: `src/lib/ai/llm/mock.ts`
+- Test: `tests/unit/ai/extract-fields.test.ts`
+
+- [ ] **Step 1: Escrever os testes (falha)**
+
+```ts
+// tests/unit/ai/extract-fields.test.ts
+import { describe, it, expect } from "vitest";
+import { MockLLMProvider } from "@/lib/ai/llm/mock";
+import type { ExtractionFieldDef } from "@/lib/ai/llm/types";
+
+const fields: ExtractionFieldDef[] = [
+  { id: "f-amostra", name: "Amostra", type: "number" },
+  { id: "f-ausente", name: "Campo Ausente", type: "text" },
+  { id: "f-desenho", name: "Desenho do estudo", type: "select", options: ["RCT", "Coorte"] },
+];
+
+describe("MockLLMProvider.extractFields (FR-012..016)", () => {
+  it("proveniência presente em 100% das saídas", async () => {
+    const r = await new MockLLMProvider().extractFields({
+      fields, documentText: "Amostra de 42 participantes. RCT duplo-cego.",
+    });
+    expect(r.provenance).toHaveProperty("model");
+    expect(r.provenance).toHaveProperty("timestamp");
+    expect(r.fields).toHaveLength(3);
+  });
+
+  it("campo ausente ⇒ value null + reason not_found (FR-013)", async () => {
+    const r = await new MockLLMProvider().extractFields({ fields, documentText: "x" });
+    const ausente = r.fields.find((f) => f.field_id === "f-ausente")!;
+    expect(ausente.value.value).toBeNull();
+    expect(ausente.value.reason).toBe("not_found");
+  });
+
+  it("campo inferido ⇒ inferred=true (FR-014)", async () => {
+    const r = await new MockLLMProvider().extractFields({ fields, documentText: "x" });
+    const desenho = r.fields.find((f) => f.field_id === "f-desenho")!;
+    expect(desenho.inferred).toBe(true);
+  });
+
+  it("campo ancorado expõe source_span + page (FR-012)", async () => {
+    const r = await new MockLLMProvider().extractFields({ fields, documentText: "x" });
+    const amostra = r.fields.find((f) => f.field_id === "f-amostra")!;
+    expect(amostra.value.value).not.toBeNull();
+    expect(amostra.grounding.page).not.toBeNull();
+    expect(amostra.grounding.source_span).toBeTypeOf("string");
+  });
+
+  it("determinístico e sem rede (espelha mock.ts)", async () => {
+    const a = await new MockLLMProvider().extractFields({ fields, documentText: "x" });
+    const b = await new MockLLMProvider().extractFields({ fields, documentText: "x" });
+    expect(a.fields.map((f) => f.value.value)).toEqual(b.fields.map((f) => f.value.value));
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `npx vitest run tests/unit/ai/extract-fields.test.ts`
+Expected: FAIL — `extractFields` não existe no mock.
+
+- [ ] **Step 3: Implementar no mock**
+
+Adicionar os novos tipos ao import existente no topo de `mock.ts` (`ExtractedField`, `ExtractionFieldDef`, `ExtractionResult`). E o método (dentro da classe):
+
+```ts
+  async extractFields(input: {
+    fields: ExtractionFieldDef[];
+    documentText: string;
+    pageIndex?: { page: number; char_start: number; char_end: number }[];
+  }): Promise<ExtractionResult> {
+    // Determinístico: 'select' ⇒ inferido; nome contendo "ausente" ⇒ not_found;
+    // demais ⇒ ancorado em página 1 com span simulado. Sem rede, pt-BR.
+    const fields: ExtractedField[] = input.fields.map((f) => {
+      const isAusente = /ausente/i.test(f.name);
+      const isInferred = f.type === "select";
+      if (isAusente) {
+        return {
+          field_id: f.id,
+          value: { value: null, source_span: null, page: null, reason: "not_found" },
+          inferred: false,
+          grounding: { text_layer_id: null, page: null, source_span: null, origin: null },
+        };
+      }
+      const span = `[trecho simulado p/ ${f.name}]`;
+      return {
+        field_id: f.id,
+        value: { value: `valor de ${f.name}`, source_span: span, page: 1 },
+        inferred: isInferred,
+        grounding: { text_layer_id: null, page: 1, source_span: span, origin: "nativo" },
+      };
+    });
+    return { fields, provenance: provenance("extract") };
+  }
+```
+
+- [ ] **Step 4: Rodar e ver passar**
+
+Run: `npx vitest run tests/unit/ai/extract-fields.test.ts`
+Expected: PASS (5 testes).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/ai/llm/mock.ts tests/unit/ai/extract-fields.test.ts
+git commit -m "feat(002-f4): MockLLMProvider.extractFields (not_found/inferred/grounding) (US3/FR-012..016)"
+```
+
+---
+
+## Task 7: `AnthropicProvider.extractFields`
+
+**Files:**
+- Modify: `src/lib/ai/llm/anthropic.ts`
+
+> Sem teste de rede (espelha `ocrPage`, que também não tem unit do provider real — o contrato é coberto pelo mock). Implementação fiel ao contrato e ao `safeParse` existente.
+
+- [ ] **Step 1: Adicionar os novos tipos ao import existente no topo de anthropic.ts**
+
+Incluir `ExtractedField`, `ExtractionFieldDef`, `ExtractionResult` no bloco `import type { … } from "./types";` já existente.
+
+- [ ] **Step 2: Implementar o método (dentro da classe `AnthropicProvider`)**
+
+```ts
+  async extractFields(input: {
+    fields: ExtractionFieldDef[];
+    documentText: string;
+    pageIndex?: { page: number; char_start: number; char_end: number }[];
+  }): Promise<ExtractionResult> {
+    const fieldSpec = input.fields
+      .map((f) => `- ${f.name} (id=${f.id}, tipo=${f.type}${f.options ? `, opções=${f.options.join("|")}` : ""})`)
+      .join("\n");
+    const prompt =
+      `Extraia os campos abaixo SOMENTE a partir do texto do documento.\n` +
+      `Para cada campo retorne um objeto: {"field_id","value","source_span","page","inferred"}.\n` +
+      `Se o valor NÃO constar no texto, use value=null e source_span=null (não invente).\n` +
+      `Marque inferred=true quando o valor for deduzido sem trecho literal.\n` +
+      `O source_span deve ser citado no IDIOMA ORIGINAL do documento.\n\n` +
+      `Campos:\n${fieldSpec}\n\nTexto:\n${input.documentText}\n\n` +
+      `Retorne JSON {"fields":[...]}.`;
+    const raw = await this.ask(
+      "Você extrai dados de estudos para revisões sistemáticas; nunca inventa valores.",
+      prompt,
+    );
+    const parsed = safeParse<{ fields: Array<Record<string, unknown>> }>(raw, { fields: [] });
+    const byId = new Map(parsed.fields.map((r) => [String(r.field_id), r]));
+    const fields: ExtractedField[] = input.fields.map((f) => {
+      const r = byId.get(f.id);
+      const value = r && r.value !== null && r.value !== undefined ? r.value : null;
+      const page = r && typeof r.page === "number" ? r.page : null;
+      const span = r && typeof r.source_span === "string" ? r.source_span : null;
+      const inferred = !!(r && r.inferred === true);
+      if (value === null) {
+        return {
+          field_id: f.id,
+          value: { value: null, source_span: null, page: null, reason: "not_found" },
+          inferred,
+          grounding: { text_layer_id: null, page: null, source_span: null, origin: null },
+        };
+      }
+      return {
+        field_id: f.id,
+        value: { value, source_span: span, page },
+        inferred,
+        grounding: { text_layer_id: null, page, source_span: span, origin: null },
+      };
+    });
+    return {
+      fields,
+      provenance: { model: MODEL, version: MODEL, prompt_or_span: prompt, timestamp: nowIso() },
+    };
+  }
+```
+
+- [ ] **Step 3: Type-check (deve fechar 0 erros agora)**
+
+Run: `npx tsc --noEmit`
+Expected: 0 erros (Tasks 4–7 completam a interface).
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add src/lib/ai/llm/anthropic.ts
+git commit -m "feat(002-f4): AnthropicProvider.extractFields (grounding/not_found via safeParse) (US3/FR-012)"
+```
+
+---
+
+## Task 8: Lib de extração — `loadRecordText` + `runExtractionForRecord`
+
+**Files:**
+- Create: `src/lib/extraction/extract.ts`
+- Create: `src/lib/extraction/run.ts`
+- Test: `tests/integration/extract-record.test.ts`
+
+- [ ] **Step 1: Escrever o teste de integração (falha)**
+
+```ts
+// tests/integration/extract-record.test.ts
+import { describe, it, expect } from "vitest";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+import { MockLLMProvider } from "@/lib/ai/llm/mock";
+import { runExtractionForRecord } from "@/lib/extraction/extract";
+
+async function setup() {
+  const { client } = await signUpUser(
+    `er_${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`, "senha-teste-123");
+  const { data: review } = await client.rpc("create_review", { p_title: "Extração record" });
+  const reviewId = review!.id as string;
+  const svc = serviceClient();
+  const { data: rec } = await svc.from("record")
+    .insert({ review_id: reviewId, corpus_state: "included_ft", metadata: { title: "Estudo" } })
+    .select("id").single();
+  const recordId = rec!.id as string;
+  const { data: doc } = await svc.from("document").insert({
+    review_id: reviewId, record_id: recordId, storage_path: `review/${reviewId}/record/${recordId}/d.pdf`,
+    filename: "d.pdf", byte_size: 10, processing_status: "text_ready",
+  }).select("id").single();
+  await svc.from("text_layer").insert({
+    review_id: reviewId, document_id: doc!.id, page: 1, char_start: 0, char_end: 30,
+    content: "Amostra de 42 participantes.", origin: "nativo",
+  });
+  await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
+  await client.rpc("add_extraction_field", { p_review_id: reviewId, p_name: "Amostra", p_type: "number", p_options: null });
+  await client.rpc("add_extraction_field", { p_review_id: reviewId, p_name: "Campo Ausente", p_type: "text", p_options: null });
+  return { client, reviewId, recordId, svc };
+}
+
+describe("runExtractionForRecord (US3)", () => {
+  it("cria ai_suggestion + extraction_value por campo, com grounding resolvido", async () => {
+    const { reviewId, recordId, svc } = await setup();
+    const res = await runExtractionForRecord({ supabase: svc, provider: new MockLLMProvider() }, reviewId, recordId);
+    expect(res.created).toBe(2);
+
+    const { data: vals } = await svc.from("extraction_value")
+      .select("id, state, ai_suggestion_id, field_id").eq("record_id", recordId);
+    expect(vals!.length).toBe(2);
+    expect(vals!.every((v) => v.ai_suggestion_id !== null)).toBe(true);
+
+    const { data: sugg } = await svc.from("ai_suggestion")
+      .select("grounding, not_found, target_kind").eq("review_id", reviewId).eq("target_kind", "extraction");
+    expect(sugg!.length).toBe(2);
+    const anchored = sugg!.find((s) => s.not_found === false)!;
+    expect((anchored.grounding as { origin: string }).origin).toBe("nativo");
+    expect((anchored.grounding as { text_layer_id: string | null }).text_layer_id).not.toBeNull();
+  });
+
+  it("re-extração: nova sugestão pending, final_value validado intacto (FR-019a)", async () => {
+    const { client, reviewId, recordId, svc } = await setup();
+    await runExtractionForRecord({ supabase: svc, provider: new MockLLMProvider() }, reviewId, recordId);
+    const { data: first } = await svc.from("extraction_value")
+      .select("id").eq("record_id", recordId).limit(1).single();
+    await client.rpc("ratify_extraction_value", { p_value_id: first!.id, p_state: "accepted", p_final_value: { value: 42 } });
+
+    await runExtractionForRecord({ supabase: svc, provider: new MockLLMProvider() }, reviewId, recordId);
+
+    const { data: validated } = await svc.from("extraction_value")
+      .select("final_value, state").eq("id", first!.id).single();
+    expect(validated!.state).toBe("accepted");
+    expect(validated!.final_value).toEqual({ value: 42 }); // intacto
+    const { data: pendings } = await svc.from("extraction_value")
+      .select("id").eq("record_id", recordId).eq("state", "pending");
+    expect(pendings!.length).toBeGreaterThan(0); // nova sugestão pending viva
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `npx vitest run tests/integration/extract-record.test.ts`
+Expected: FAIL — módulo `@/lib/extraction/extract` não existe.
+
+- [ ] **Step 3: Implementar `extract.ts`**
+
+```ts
+// src/lib/extraction/extract.ts
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { ExtractionFieldDef, LLMProvider } from "@/lib/ai/llm/types";
+
+export interface ExtractionDeps {
+  supabase: SupabaseClient; // service-role (bypassa RLS — escrita da IA)
+  provider: LLMProvider;
+}
+
+interface LayerRow {
+  id: string;
+  page: number;
+  char_start: number;
+  char_end: number;
+  content: string;
+  origin: "nativo" | "ocr_ia";
+}
+
+/** Concatena as text_layer dos PDFs processados do estudo e indexa por página. */
+export async function loadRecordText(
+  supabase: SupabaseClient,
+  reviewId: string,
+  recordId: string,
+): Promise<{
+  documentText: string;
+  pageIndex: { page: number; char_start: number; char_end: number }[];
+  layerByPage: Map<number, { text_layer_id: string; origin: "nativo" | "ocr_ia" }>;
+}> {
+  const { data: docs, error: dErr } = await supabase
+    .from("document")
+    .select("id")
+    .eq("review_id", reviewId)
+    .eq("record_id", recordId)
+    .in("processing_status", ["text_ready", "partial"]);
+  if (dErr) throw new Error(dErr.message);
+  const docIds = (docs ?? []).map((d) => (d as { id: string }).id);
+  if (docIds.length === 0) {
+    return { documentText: "", pageIndex: [], layerByPage: new Map() };
+  }
+
+  const { data: layers, error: lErr } = await supabase
+    .from("text_layer")
+    .select("id, page, char_start, char_end, content, origin")
+    .in("document_id", docIds)
+    .order("page", { ascending: true });
+  if (lErr) throw new Error(lErr.message);
+
+  let text = "";
+  const pageIndex: { page: number; char_start: number; char_end: number }[] = [];
+  const layerByPage = new Map<number, { text_layer_id: string; origin: "nativo" | "ocr_ia" }>();
+  for (const l of (layers ?? []) as LayerRow[]) {
+    const start = text.length;
+    text += l.content + "\n";
+    pageIndex.push({ page: l.page, char_start: start, char_end: text.length });
+    if (!layerByPage.has(l.page)) {
+      layerByPage.set(l.page, { text_layer_id: l.id, origin: l.origin });
+    }
+  }
+  return { documentText: text, pageIndex, layerByPage };
+}
+
+/**
+ * Extração por IA de um estudo (single, server-side — A1). Cria ai_suggestion
+ * (target_kind='extraction') + extraction_value(pending/inferred) por campo.
+ * Re-extração: aposenta pendentes anteriores (não ratificados); NUNCA toca o
+ * validado (FR-019/019a). A IA não finaliza valor — só a RPC ratify_extraction_value.
+ */
+export async function runExtractionForRecord(
+  deps: ExtractionDeps,
+  reviewId: string,
+  recordId: string,
+): Promise<{ created: number }> {
+  const { supabase, provider } = deps;
+
+  const { data: fieldRows, error: fErr } = await supabase
+    .from("extraction_field")
+    .select("id, name, type, options, sort_order")
+    .eq("review_id", reviewId)
+    .eq("is_active", true)
+    .order("sort_order", { ascending: true });
+  if (fErr) throw new Error(fErr.message);
+  const fields: ExtractionFieldDef[] = (fieldRows ?? []).map((f) => {
+    const r = f as { id: string; name: string; type: ExtractionFieldDef["type"]; options: string[] | null };
+    return { id: r.id, name: r.name, type: r.type, options: r.options ?? undefined };
+  });
+  if (fields.length === 0) return { created: 0 };
+
+  const { documentText, pageIndex, layerByPage } = await loadRecordText(supabase, reviewId, recordId);
+
+  const result = await provider.extractFields({ fields, documentText, pageIndex });
+
+  let created = 0;
+  for (const ef of result.fields) {
+    // Re-extração: pendentes anteriores (não ratificados) do mesmo (record,field) saem de cena.
+    await supabase
+      .from("extraction_value")
+      .update({ state: "rejected", updated_at: new Date().toISOString() })
+      .eq("record_id", recordId)
+      .eq("field_id", ef.field_id)
+      .in("state", ["pending", "inferred"]);
+
+    const layer = ef.grounding.page != null ? layerByPage.get(ef.grounding.page) : undefined;
+    const grounding = {
+      text_layer_id: layer?.text_layer_id ?? null,
+      page: ef.grounding.page,
+      source_span: ef.grounding.source_span,
+      origin: layer?.origin ?? ef.grounding.origin ?? null,
+    };
+    const state = ef.inferred ? "inferred" : "pending";
+
+    const { data: value, error: vErr } = await supabase
+      .from("extraction_value")
+      .insert({ review_id: reviewId, record_id: recordId, field_id: ef.field_id, state })
+      .select("id")
+      .single();
+    if (vErr) throw new Error(vErr.message);
+    const valueId = (value as { id: string }).id;
+
+    const { data: suggestion, error: sErr } = await supabase
+      .from("ai_suggestion")
+      .insert({
+        review_id: reviewId,
+        target_kind: "extraction",
+        target_id: valueId,
+        output: ef.value,
+        provenance: result.provenance,
+        state,
+        grounding,
+        not_found: ef.value.value === null,
+      })
+      .select("id")
+      .single();
+    if (sErr) throw new Error(sErr.message);
+
+    await supabase
+      .from("extraction_value")
+      .update({ ai_suggestion_id: (suggestion as { id: string }).id })
+      .eq("id", valueId);
+
+    created += 1;
+  }
+  return { created };
+}
+```
+
+> **Nota de re-extração:** o `update … set state='rejected'` aposenta sugestões pendentes velhas. Isso satisfaz "nova pendente ao lado do validado" porque linhas `accepted/edited` são excluídas pelo filtro `.in("state", ["pending","inferred"])`. O `final_value` validado nunca é tocado (FR-019a).
+
+- [ ] **Step 4: Implementar `run.ts` (wrapper, espelha screening/run.ts)**
+
+```ts
+// src/lib/extraction/run.ts
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { LLMProvider } from "@/lib/ai/llm/types";
+import { runExtractionForRecord } from "./extract";
+
+/** Wrapper desacoplado da resolução de BYOK (admin + provider já resolvidos). */
+export async function runExtractionForRecordWith(
+  supabase: SupabaseClient,
+  provider: LLMProvider,
+  reviewId: string,
+  recordId: string,
+): Promise<{ created: number }> {
+  return runExtractionForRecord({ supabase, provider }, reviewId, recordId);
+}
+```
+
+- [ ] **Step 5: Rodar e ver passar**
+
+Run: `npx vitest run tests/integration/extract-record.test.ts`
+Expected: PASS (2 testes).
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/lib/extraction/extract.ts src/lib/extraction/run.ts tests/integration/extract-record.test.ts
+git commit -m "feat(002-f4): runExtractionForRecord (ai_suggestion+extraction_value, grounding, re-extract) (US3/FR-012..019a)"
+```
+
+---
+
+## Task 9: Queries de leitura — `listStudies` + `listExtractionValues`
+
+**Files:**
+- Modify: `src/lib/extraction/queries.ts`
+- Test: `tests/integration/extract-record.test.ts` (append)
+
+- [ ] **Step 1: Escrever o teste (falha)**
+
+```ts
+// append em tests/integration/extract-record.test.ts
+import { listStudies, listExtractionValues } from "@/lib/extraction/queries";
+
+describe("queries de extração", () => {
+  it("listStudies retorna estudos included_ft; listExtractionValues traz sugestão+grounding", async () => {
+    const { client, reviewId, recordId, svc } = await setup();
+    await runExtractionForRecord({ supabase: svc, provider: new MockLLMProvider() }, reviewId, recordId);
+
+    const studies = await listStudies({ supabase: client }, reviewId);
+    expect(studies.some((s) => s.id === recordId)).toBe(true);
+
+    const values = await listExtractionValues({ supabase: client }, reviewId, recordId);
+    expect(values.length).toBe(2);
+    const anchored = values.find((v) => v.not_found === false)!;
+    expect(anchored.output).toBeTruthy();
+    expect(anchored.provenance).toHaveProperty("model");
+    expect(anchored.state).toBe("pending");
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `npx vitest run tests/integration/extract-record.test.ts -t queries`
+Expected: FAIL — `listStudies`/`listExtractionValues` não existem.
+
+- [ ] **Step 3: Implementar em queries.ts**
+
+```ts
+// append em src/lib/extraction/queries.ts
+import type { Provenance, SuggestionState } from "@/lib/ai/llm/types";
+
+export interface StudyRow {
+  id: string;
+  title: string;
+}
+
+/** Estudos da Revisão (record incluído após o Texto completo — alvo da extração). */
+export async function listStudies(
+  deps: { supabase: SupabaseClient },
+  reviewId: string,
+): Promise<StudyRow[]> {
+  const { data, error } = await deps.supabase
+    .from("record")
+    .select("id, metadata")
+    .eq("review_id", reviewId)
+    .eq("corpus_state", "included_ft")
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Array<{ id: string; metadata: { title?: string } | null }>).map((r) => ({
+    id: r.id,
+    title: r.metadata?.title ?? "(sem título)",
+  }));
+}
+
+export interface ExtractionValueView {
+  id: string;
+  field_id: string;
+  state: SuggestionState;
+  final_value: unknown;
+  not_found: boolean;
+  output: unknown; // FactualValue da sugestão
+  provenance: Provenance | null;
+  grounding: { text_layer_id: string | null; page: number | null; source_span: string | null; origin: string | null } | null;
+}
+
+/** Valores vivos (não rejeitados) de um estudo, com a sugestão de IA embutida. */
+export async function listExtractionValues(
+  deps: { supabase: SupabaseClient },
+  reviewId: string,
+  recordId: string,
+): Promise<ExtractionValueView[]> {
+  const { data, error } = await deps.supabase
+    .from("extraction_value")
+    .select(
+      "id, field_id, state, final_value, ai_suggestion:ai_suggestion_id (output, provenance, grounding, not_found)",
+    )
+    .eq("review_id", reviewId)
+    .eq("record_id", recordId)
+    .neq("state", "rejected")
+    .order("created_at", { ascending: true });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => {
+    const sugg = (r.ai_suggestion ?? null) as null | {
+      output: unknown; provenance: Provenance; not_found: boolean;
+      grounding: ExtractionValueView["grounding"];
+    };
+    return {
+      id: r.id as string,
+      field_id: r.field_id as string,
+      state: r.state as SuggestionState,
+      final_value: r.final_value ?? null,
+      not_found: sugg?.not_found ?? false,
+      output: sugg?.output ?? null,
+      provenance: sugg?.provenance ?? null,
+      grounding: sugg?.grounding ?? null,
+    };
+  });
+}
+```
+
+- [ ] **Step 4: Rodar e ver passar**
+
+Run: `npx vitest run tests/integration/extract-record.test.ts`
+Expected: PASS (todos).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/lib/extraction/queries.ts tests/integration/extract-record.test.ts
+git commit -m "feat(002-f4): listStudies + listExtractionValues (US3 read layer)"
+```
+
+---
+
+## Task 10: Server Actions — `runExtraction` + `ratifyExtractionValue`
+
+**Files:**
+- Modify: `app/reviews/[reviewId]/extraction/actions.ts`
+
+- [ ] **Step 1: Adicionar os imports server-side no topo**
+
+```ts
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getLLMProvider, MissingByokError } from "@/lib/ai/llm";
+import { MockLLMProvider } from "@/lib/ai/llm/mock";
+import { runExtractionForRecordWith } from "@/lib/extraction/run";
+import type { SuggestionState } from "@/lib/ai/llm/types";
+```
+
+- [ ] **Step 2: Adicionar as actions (ao fim do arquivo)**
+
+```ts
+// ---- Extração por IA (Fatia 4 / US3): single por estudo, server-side (A1) ----
+export async function runExtraction(reviewId: string, recordId: string) {
+  await requireMember(reviewId);
+  const admin = createAdminClient();
+  // Provider: BYOK quando há chave; senão Mock determinístico (local/e2e).
+  let provider;
+  try {
+    provider = await getLLMProvider(reviewId);
+  } catch (e) {
+    if (e instanceof MissingByokError) provider = new MockLLMProvider();
+    else throw e;
+  }
+  const res = await runExtractionForRecordWith(admin, provider, reviewId, recordId);
+  revalidate(reviewId);
+  return { ok: true as const, created: res.created };
+}
+
+export async function ratifyExtractionValue(
+  reviewId: string,
+  valueId: string,
+  state: SuggestionState,
+  finalValue: unknown,
+) {
+  const { supabase } = await requireMember(reviewId);
+  const { error } = await supabase.rpc("ratify_extraction_value", {
+    p_value_id: valueId,
+    p_state: state,
+    p_final_value: state === "rejected" ? null : finalValue,
+  });
+  if (error) return { ok: false as const, error: error.message };
+  revalidate(reviewId);
+  return { ok: true as const };
+}
+```
 
 - [ ] **Step 3: Type-check**
 
@@ -120,1249 +1171,183 @@ Expected: 0 erros.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add supabase/migrations/0014_extraction_form.sql src/types/database.ts
-git commit -m "feat(002-f3): migration 0014 extraction_form + extraction_field + RLS (US2)"
+git add app/reviews/[reviewId]/extraction/actions.ts
+git commit -m "feat(002-f4): runExtraction + ratifyExtractionValue server actions (US3)"
 ```
 
 ---
 
-## Task 2: RPC `ensure_extraction_form` (1:1 lazy create, auditada)
+## Task 11: Componente `ExtractionRunner` (reusa `components/ai/*`)
 
 **Files:**
-- Modify: `supabase/migrations/0014_extraction_form.sql`
-- Test: `tests/integration/extraction-form.test.ts`
+- Create: `src/components/extraction/ExtractionRunner.tsx`
+- Test: `tests/unit/extraction/extraction-runner.test.tsx`
 
-- [ ] **Step 1: Escrever o teste que falha**
-
-Create `tests/integration/extraction-form.test.ts`:
-
-```ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { signUpUser, serviceClient } from "./helpers/supabase";
-
-async function newReview(title: string) {
-  const { client } = await signUpUser(
-    `xf_${Date.now()}_${Math.random().toString(36).slice(2)}@example.com`,
-    "senha-teste-123",
-  );
-  const { data: review, error } = await client.rpc("create_review", { p_title: title });
-  if (error) throw new Error(error.message);
-  return { client, reviewId: review.id as string };
-}
-
-describe("ensure_extraction_form — 1:1 com review, idempotente", () => {
-  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-
-  beforeAll(async () => {
-    const r = await newReview("Form de extração");
-    client = r.client;
-    reviewId = r.reviewId;
-  });
-
-  it("cria o formulário na 1ª chamada e devolve o mesmo na 2ª (sem duplicar)", async () => {
-    const a = await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
-    expect(a.error).toBeNull();
-    const b = await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
-    expect(b.error).toBeNull();
-    expect(b.data.id).toBe(a.data.id);
-
-    const svc = serviceClient();
-    const { data: forms } = await svc
-      .from("extraction_form")
-      .select("id")
-      .eq("review_id", reviewId);
-    expect(forms!.length).toBe(1);
-  });
-});
-```
-
-- [ ] **Step 2: Rodar e ver falhar**
-
-Run: `npx vitest run tests/integration/extraction-form.test.ts`
-Expected: FAIL — `function public.ensure_extraction_form(uuid) does not exist`.
-
-- [ ] **Step 3: Adicionar a RPC à migration**
-
-Append em `supabase/migrations/0014_extraction_form.sql`:
-
-```sql
--- ============================================================
--- RPC: ensure_extraction_form — cria (idempotente) o form 1:1 da Revisão; audita só na criação.
--- ============================================================
-create or replace function public.ensure_extraction_form(p_review_id uuid)
-returns public.extraction_form
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_form public.extraction_form;
-begin
-  if not public.is_review_member(p_review_id) then
-    raise exception 'not a member';
-  end if;
-
-  select * into v_form from public.extraction_form where review_id = p_review_id;
-  if found then
-    return v_form;
-  end if;
-
-  insert into public.extraction_form (review_id) values (p_review_id)
-  returning * into v_form;
-
-  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
-  values (p_review_id, 'human', auth.uid(), 'ensure_extraction_form', 'extraction_form', v_form.id,
-          null, to_jsonb(v_form));
-
-  return v_form;
-end;
-$$;
-
-grant execute on function public.ensure_extraction_form(uuid) to authenticated;
-```
-
-- [ ] **Step 4: Aplicar, regenerar tipos e ver passar**
-
-Run:
-```bash
-supabase db reset
-npm run gen:types
-npx vitest run tests/integration/extraction-form.test.ts
-```
-Expected: reset sem erro; teste PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add supabase/migrations/0014_extraction_form.sql src/types/database.ts tests/integration/extraction-form.test.ts
-git commit -m "feat(002-f3): ensure_extraction_form RPC (1:1, audited) (US2/FR-011)"
-```
-
----
-
-## Task 3: RPC `add_extraction_field` + validação + audit
-
-**Files:**
-- Modify: `supabase/migrations/0014_extraction_form.sql`
-- Test: `tests/integration/extraction-form.test.ts`
-
-- [ ] **Step 1: Escrever os testes que falham**
-
-Append em `tests/integration/extraction-form.test.ts`:
-
-```ts
-describe("add_extraction_field — cria campo tipado, valida, audita", () => {
-  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-
-  beforeAll(async () => {
-    const r = await newReview("Form add campo");
-    client = r.client;
-    reviewId = r.reviewId;
-    await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
-  });
-
-  it("cria um campo number e grava audit_entry", async () => {
-    const { data, error } = await client.rpc("add_extraction_field", {
-      p_review_id: reviewId,
-      p_name: "Tamanho da amostra",
-      p_type: "number",
-      p_options: null,
-    });
-    expect(error).toBeNull();
-    expect(data.name).toBe("Tamanho da amostra");
-    expect(data.type).toBe("number");
-    expect(data.is_active).toBe(true);
-
-    const svc = serviceClient();
-    const { data: audit } = await svc
-      .from("audit_entry")
-      .select("action, entity, entity_id")
-      .eq("review_id", reviewId)
-      .eq("action", "add_extraction_field");
-    expect(audit!.length).toBe(1);
-    expect(audit![0].entity_id).toBe(data.id);
-  });
-
-  it("rejeita select sem options", async () => {
-    const { error } = await client.rpc("add_extraction_field", {
-      p_review_id: reviewId,
-      p_name: "Desenho",
-      p_type: "select",
-      p_options: null,
-    });
-    expect(error).not.toBeNull();
-    expect(error!.message).toMatch(/options/i);
-  });
-
-  it("rejeita name vazio", async () => {
-    const { error } = await client.rpc("add_extraction_field", {
-      p_review_id: reviewId,
-      p_name: "   ",
-      p_type: "text",
-      p_options: null,
-    });
-    expect(error).not.toBeNull();
-    expect(error!.message).toMatch(/name/i);
-  });
-
-  it("aceita select com options e anexa ao fim (sort_order crescente)", async () => {
-    const first = await client.rpc("add_extraction_field", {
-      p_review_id: reviewId,
-      p_name: "Desenho do estudo",
-      p_type: "select",
-      p_options: ["RCT", "Coorte", "Caso-controle"],
-    });
-    expect(first.error).toBeNull();
-    expect(first.data.sort_order).toBeGreaterThan(0);
-    expect(first.data.options).toEqual(["RCT", "Coorte", "Caso-controle"]);
-  });
-});
-```
-
-- [ ] **Step 2: Rodar e ver falhar**
-
-Run: `npx vitest run tests/integration/extraction-form.test.ts`
-Expected: FAIL — `function public.add_extraction_field(...) does not exist`.
-
-- [ ] **Step 3: Adicionar a RPC à migration**
-
-Append em `supabase/migrations/0014_extraction_form.sql`:
-
-```sql
--- ============================================================
--- RPC: add_extraction_field — valida (name + select⇒options), anexa ao fim, audita.
--- ============================================================
-create or replace function public.add_extraction_field(
-  p_review_id uuid,
-  p_name text,
-  p_type extraction_field_type,
-  p_options jsonb
-)
-returns public.extraction_field
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_form public.extraction_form;
-  v_field public.extraction_field;
-  v_options jsonb;
-  v_next int;
-begin
-  if not public.is_review_member(p_review_id) then
-    raise exception 'not a member';
-  end if;
-  if coalesce(btrim(p_name), '') = '' then
-    raise exception 'name required';
-  end if;
-
-  if p_type = 'select' then
-    if p_options is null or jsonb_typeof(p_options) <> 'array' or jsonb_array_length(p_options) = 0 then
-      raise exception 'select requires non-empty options';
-    end if;
-    v_options := p_options;
-  else
-    v_options := null;  -- não-select nunca guarda options (decisão 4)
-  end if;
-
-  select * into v_form from public.extraction_form where review_id = p_review_id;
-  if not found then
-    raise exception 'extraction form not found';
-  end if;
-
-  select coalesce(max(sort_order), 0) + 1 into v_next
-    from public.extraction_field where form_id = v_form.id and is_active;
-
-  insert into public.extraction_field (review_id, form_id, name, type, options, sort_order)
-  values (p_review_id, v_form.id, btrim(p_name), p_type, v_options, v_next)
-  returning * into v_field;
-
-  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
-  values (p_review_id, 'human', auth.uid(), 'add_extraction_field', 'extraction_field', v_field.id,
-          null, to_jsonb(v_field));
-
-  return v_field;
-end;
-$$;
-
-grant execute on function public.add_extraction_field(uuid, text, extraction_field_type, jsonb) to authenticated;
-```
-
-- [ ] **Step 4: Aplicar e ver passar**
-
-Run:
-```bash
-supabase db reset
-npm run gen:types
-npx vitest run tests/integration/extraction-form.test.ts
-```
-Expected: todos PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add supabase/migrations/0014_extraction_form.sql src/types/database.ts tests/integration/extraction-form.test.ts
-git commit -m "feat(002-f3): add_extraction_field RPC + validation + audit (US2/FR-009)"
-```
-
----
-
-## Task 4: RPC `update_extraction_field` + audit before/after
-
-**Files:**
-- Modify: `supabase/migrations/0014_extraction_form.sql`
-- Test: `tests/integration/extraction-form.test.ts`
-
-- [ ] **Step 1: Escrever o teste que falha**
-
-Append em `tests/integration/extraction-form.test.ts`:
-
-```ts
-describe("update_extraction_field — edita campo, audita antes/depois", () => {
-  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-  let fieldId: string;
-
-  beforeAll(async () => {
-    const r = await newReview("Form edit campo");
-    client = r.client;
-    reviewId = r.reviewId;
-    await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
-    const { data } = await client.rpc("add_extraction_field", {
-      p_review_id: reviewId,
-      p_name: "Ano",
-      p_type: "text",
-      p_options: null,
-    });
-    fieldId = data.id;
-  });
-
-  it("atualiza nome/tipo e grava before/after", async () => {
-    const { data, error } = await client.rpc("update_extraction_field", {
-      p_field_id: fieldId,
-      p_name: "Ano de publicação",
-      p_type: "number",
-      p_options: null,
-    });
-    expect(error).toBeNull();
-    expect(data.name).toBe("Ano de publicação");
-    expect(data.type).toBe("number");
-
-    const svc = serviceClient();
-    const { data: audit } = await svc
-      .from("audit_entry")
-      .select("before, after")
-      .eq("review_id", reviewId)
-      .eq("action", "update_extraction_field")
-      .single();
-    expect((audit!.before as { name: string }).name).toBe("Ano");
-    expect((audit!.after as { name: string }).name).toBe("Ano de publicação");
-  });
-
-  it("rejeita virar select sem options", async () => {
-    const { error } = await client.rpc("update_extraction_field", {
-      p_field_id: fieldId,
-      p_name: "Ano de publicação",
-      p_type: "select",
-      p_options: null,
-    });
-    expect(error).not.toBeNull();
-    expect(error!.message).toMatch(/options/i);
-  });
-});
-```
-
-- [ ] **Step 2: Rodar e ver falhar**
-
-Run: `npx vitest run tests/integration/extraction-form.test.ts`
-Expected: FAIL — `function public.update_extraction_field(...) does not exist`.
-
-- [ ] **Step 3: Adicionar a RPC à migration**
-
-Append em `supabase/migrations/0014_extraction_form.sql`:
-
-```sql
--- ============================================================
--- RPC: update_extraction_field — valida, atualiza, audita before/after.
--- ============================================================
-create or replace function public.update_extraction_field(
-  p_field_id uuid,
-  p_name text,
-  p_type extraction_field_type,
-  p_options jsonb
-)
-returns public.extraction_field
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_before public.extraction_field;
-  v_after public.extraction_field;
-  v_options jsonb;
-begin
-  select * into v_before from public.extraction_field where id = p_field_id;
-  if not found then
-    raise exception 'field not found';
-  end if;
-  if not public.is_review_member(v_before.review_id) then
-    raise exception 'not a member';
-  end if;
-  if coalesce(btrim(p_name), '') = '' then
-    raise exception 'name required';
-  end if;
-
-  if p_type = 'select' then
-    if p_options is null or jsonb_typeof(p_options) <> 'array' or jsonb_array_length(p_options) = 0 then
-      raise exception 'select requires non-empty options';
-    end if;
-    v_options := p_options;
-  else
-    v_options := null;
-  end if;
-
-  update public.extraction_field
-     set name = btrim(p_name), type = p_type, options = v_options, updated_at = now()
-   where id = p_field_id
-   returning * into v_after;
-
-  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
-  values (v_before.review_id, 'human', auth.uid(), 'update_extraction_field', 'extraction_field',
-          p_field_id, to_jsonb(v_before), to_jsonb(v_after));
-
-  return v_after;
-end;
-$$;
-
-grant execute on function public.update_extraction_field(uuid, text, extraction_field_type, jsonb) to authenticated;
-```
-
-- [ ] **Step 4: Aplicar e ver passar**
-
-Run:
-```bash
-supabase db reset
-npm run gen:types
-npx vitest run tests/integration/extraction-form.test.ts
-```
-Expected: todos PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add supabase/migrations/0014_extraction_form.sql src/types/database.ts tests/integration/extraction-form.test.ts
-git commit -m "feat(002-f3): update_extraction_field RPC + audit before/after (US2/FR-010)"
-```
-
----
-
-## Task 5: RPC `remove_extraction_field` — soft-delete + audit
-
-**Files:**
-- Modify: `supabase/migrations/0014_extraction_form.sql`
-- Test: `tests/integration/extraction-form.test.ts`
-
-- [ ] **Step 1: Escrever o teste que falha**
-
-Append em `tests/integration/extraction-form.test.ts`:
-
-```ts
-describe("remove_extraction_field — soft-delete (não apaga linha), audita", () => {
-  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-  let fieldId: string;
-
-  beforeAll(async () => {
-    const r = await newReview("Form remove campo");
-    client = r.client;
-    reviewId = r.reviewId;
-    await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
-    const { data } = await client.rpc("add_extraction_field", {
-      p_review_id: reviewId,
-      p_name: "Campo temporário",
-      p_type: "text",
-      p_options: null,
-    });
-    fieldId = data.id;
-  });
-
-  it("marca is_active=false mantendo a linha (não apaga silenciosamente) e audita", async () => {
-    const { data, error } = await client.rpc("remove_extraction_field", { p_field_id: fieldId });
-    expect(error).toBeNull();
-    expect(data.is_active).toBe(false);
-
-    const svc = serviceClient();
-    const { data: row } = await svc
-      .from("extraction_field")
-      .select("id, is_active")
-      .eq("id", fieldId)
-      .single();
-    expect(row).not.toBeNull();          // linha preservada
-    expect(row!.is_active).toBe(false);
-
-    const { data: audit } = await svc
-      .from("audit_entry")
-      .select("before, after")
-      .eq("review_id", reviewId)
-      .eq("action", "remove_extraction_field")
-      .single();
-    expect((audit!.before as { is_active: boolean }).is_active).toBe(true);
-    expect((audit!.after as { is_active: boolean }).is_active).toBe(false);
-  });
-});
-```
-
-- [ ] **Step 2: Rodar e ver falhar**
-
-Run: `npx vitest run tests/integration/extraction-form.test.ts`
-Expected: FAIL — `function public.remove_extraction_field(uuid) does not exist`.
-
-- [ ] **Step 3: Adicionar a RPC à migration**
-
-Append em `supabase/migrations/0014_extraction_form.sql`:
-
-```sql
--- ============================================================
--- RPC: remove_extraction_field — soft-delete (is_active=false), audita. NUNCA DELETE
--- (forward-safe: extraction_value chega na Fatia 4; nada é apagado silenciosamente).
--- ============================================================
-create or replace function public.remove_extraction_field(p_field_id uuid)
-returns public.extraction_field
-language plpgsql
-security definer
-set search_path = public
-as $$
-declare
-  v_before public.extraction_field;
-  v_after public.extraction_field;
-begin
-  select * into v_before from public.extraction_field where id = p_field_id;
-  if not found then
-    raise exception 'field not found';
-  end if;
-  if not public.is_review_member(v_before.review_id) then
-    raise exception 'not a member';
-  end if;
-  if not v_before.is_active then
-    return v_before;  -- idempotente
-  end if;
-
-  update public.extraction_field
-     set is_active = false, updated_at = now()
-   where id = p_field_id
-   returning * into v_after;
-
-  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
-  values (v_before.review_id, 'human', auth.uid(), 'remove_extraction_field', 'extraction_field',
-          p_field_id, to_jsonb(v_before), to_jsonb(v_after));
-
-  return v_after;
-end;
-$$;
-
-grant execute on function public.remove_extraction_field(uuid) to authenticated;
-```
-
-- [ ] **Step 4: Aplicar e ver passar**
-
-Run:
-```bash
-supabase db reset
-npm run gen:types
-npx vitest run tests/integration/extraction-form.test.ts
-```
-Expected: todos PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add supabase/migrations/0014_extraction_form.sql src/types/database.ts tests/integration/extraction-form.test.ts
-git commit -m "feat(002-f3): remove_extraction_field RPC soft-delete + audit (US2/FR-010)"
-```
-
----
-
-## Task 6: RPC `reorder_extraction_fields` — reescreve `sort_order`, audita
-
-**Files:**
-- Modify: `supabase/migrations/0014_extraction_form.sql`
-- Test: `tests/integration/extraction-form.test.ts`
-
-- [ ] **Step 1: Escrever o teste que falha**
-
-Append em `tests/integration/extraction-form.test.ts`:
-
-```ts
-describe("reorder_extraction_fields — reescreve sort_order pela ordem do array", () => {
-  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-  let aId: string;
-  let bId: string;
-
-  beforeAll(async () => {
-    const r = await newReview("Form reorder");
-    client = r.client;
-    reviewId = r.reviewId;
-    await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
-    aId = (await client.rpc("add_extraction_field", {
-      p_review_id: reviewId, p_name: "Primeiro", p_type: "text", p_options: null,
-    })).data.id;
-    bId = (await client.rpc("add_extraction_field", {
-      p_review_id: reviewId, p_name: "Segundo", p_type: "text", p_options: null,
-    })).data.id;
-  });
-
-  it("inverte a ordem e audita", async () => {
-    const { error } = await client.rpc("reorder_extraction_fields", {
-      p_review_id: reviewId,
-      p_field_ids: [bId, aId],
-    });
-    expect(error).toBeNull();
-
-    const svc = serviceClient();
-    const { data: rows } = await svc
-      .from("extraction_field")
-      .select("id, sort_order")
-      .eq("review_id", reviewId)
-      .order("sort_order", { ascending: true });
-    expect(rows!.map((r) => r.id)).toEqual([bId, aId]);
-
-    const { data: audit } = await svc
-      .from("audit_entry")
-      .select("action")
-      .eq("review_id", reviewId)
-      .eq("action", "reorder_extraction_fields");
-    expect(audit!.length).toBe(1);
-  });
-});
-```
-
-- [ ] **Step 2: Rodar e ver falhar**
-
-Run: `npx vitest run tests/integration/extraction-form.test.ts`
-Expected: FAIL — `function public.reorder_extraction_fields(uuid, uuid[]) does not exist`.
-
-- [ ] **Step 3: Adicionar a RPC à migration**
-
-Append em `supabase/migrations/0014_extraction_form.sql`:
-
-```sql
--- ============================================================
--- RPC: reorder_extraction_fields — sort_order = posição no array; audita uma vez.
--- ============================================================
-create or replace function public.reorder_extraction_fields(p_review_id uuid, p_field_ids uuid[])
-returns void
-language plpgsql
-security definer
-set search_path = public
-as $$
-begin
-  if not public.is_review_member(p_review_id) then
-    raise exception 'not a member';
-  end if;
-
-  update public.extraction_field f
-     set sort_order = ord.pos, updated_at = now()
-    from (
-      select id, pos
-      from unnest(p_field_ids) with ordinality as t(id, pos)
-    ) ord
-   where f.id = ord.id and f.review_id = p_review_id;
-
-  insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, before, after)
-  values (p_review_id, 'human', auth.uid(), 'reorder_extraction_fields', 'extraction_form', null,
-          null, jsonb_build_object('order', to_jsonb(p_field_ids)));
-end;
-$$;
-
-grant execute on function public.reorder_extraction_fields(uuid, uuid[]) to authenticated;
-```
-
-- [ ] **Step 4: Aplicar e ver passar**
-
-Run:
-```bash
-supabase db reset
-npm run gen:types
-npx vitest run tests/integration/extraction-form.test.ts
-```
-Expected: todos PASS.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add supabase/migrations/0014_extraction_form.sql src/types/database.ts tests/integration/extraction-form.test.ts
-git commit -m "feat(002-f3): reorder_extraction_fields RPC + audit (US2/FR-009)"
-```
-
----
-
-## Task 7: Camada de leitura — `src/lib/extraction/queries.ts`
-
-**Files:**
-- Create: `src/lib/extraction/queries.ts`
-- Test: `tests/integration/extraction-form.test.ts`
-
-- [ ] **Step 1: Escrever o teste que falha**
-
-Append em `tests/integration/extraction-form.test.ts` (o import vai no topo do arquivo, junto aos demais):
-
-```ts
-import { getExtractionForm, listExtractionFields } from "@/lib/extraction/queries";
-
-describe("queries — getExtractionForm + listExtractionFields (só ativos, ordenados)", () => {
-  let client: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
-  let keepId: string;
-  let dropId: string;
-
-  beforeAll(async () => {
-    const r = await newReview("Form queries");
-    client = r.client;
-    reviewId = r.reviewId;
-    await client.rpc("ensure_extraction_form", { p_review_id: reviewId });
-    keepId = (await client.rpc("add_extraction_field", {
-      p_review_id: reviewId, p_name: "Mantido", p_type: "text", p_options: null,
-    })).data.id;
-    dropId = (await client.rpc("add_extraction_field", {
-      p_review_id: reviewId, p_name: "Removido", p_type: "text", p_options: null,
-    })).data.id;
-    await client.rpc("remove_extraction_field", { p_field_id: dropId });
-  });
-
-  it("retorna o form 1:1 e só os campos ativos, em ordem", async () => {
-    const svc = serviceClient();
-    const form = await getExtractionForm({ supabase: svc }, reviewId);
-    expect(form).not.toBeNull();
-
-    const fields = await listExtractionFields({ supabase: svc }, reviewId);
-    expect(fields.map((f) => f.id)).toEqual([keepId]);
-    expect(fields[0].name).toBe("Mantido");
-  });
-});
-```
-
-- [ ] **Step 2: Rodar e ver falhar**
-
-Run: `npx vitest run tests/integration/extraction-form.test.ts`
-Expected: FAIL — não há módulo `@/lib/extraction/queries`.
-
-- [ ] **Step 3: Implementar as queries**
-
-Create `src/lib/extraction/queries.ts` (espelha `src/lib/documents/queries.ts` — deps-injected, testável):
-
-```ts
-import type { SupabaseClient } from "@supabase/supabase-js";
-
-export interface ExtractionFormRow {
-  id: string;
-  review_id: string;
-}
-
-export type ExtractionFieldType = "text" | "number" | "date" | "boolean" | "select";
-
-export interface ExtractionFieldRow {
-  id: string;
-  name: string;
-  type: ExtractionFieldType;
-  options: string[] | null;
-  sort_order: number;
-}
-
-/** Formulário 1:1 da Revisão (null se ainda não criado). RLS escopa por membro. */
-export async function getExtractionForm(
-  deps: { supabase: SupabaseClient },
-  reviewId: string,
-): Promise<ExtractionFormRow | null> {
-  const { data, error } = await deps.supabase
-    .from("extraction_form")
-    .select("id, review_id")
-    .eq("review_id", reviewId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  return (data as ExtractionFormRow | null) ?? null;
-}
-
-/** Campos ativos do formulário, na ordem de exibição (FR-009). */
-export async function listExtractionFields(
-  deps: { supabase: SupabaseClient },
-  reviewId: string,
-): Promise<ExtractionFieldRow[]> {
-  const { data, error } = await deps.supabase
-    .from("extraction_field")
-    .select("id, name, type, options, sort_order")
-    .eq("review_id", reviewId)
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true });
-  if (error) throw new Error(error.message);
-  return (data ?? []) as ExtractionFieldRow[];
-}
-```
-
-- [ ] **Step 4: Rodar e ver passar + type-check**
-
-Run:
-```bash
-npx vitest run tests/integration/extraction-form.test.ts
-npx tsc --noEmit
-```
-Expected: PASS; 0 erros de tipo.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add src/lib/extraction/queries.ts tests/integration/extraction-form.test.ts
-git commit -m "feat(002-f3): extraction queries getExtractionForm + listExtractionFields (US2)"
-```
-
----
-
-## Task 8: Validação Zod + Server Actions
-
-**Files:**
-- Create: `src/lib/extraction/schema.ts`
-- Create: `app/reviews/[reviewId]/extraction/actions.ts`
-- Test: `tests/unit/extraction/schema.test.ts`
-
-- [ ] **Step 1: Escrever o teste do schema que falha**
-
-Create `tests/unit/extraction/schema.test.ts`:
-
-```ts
-import { describe, it, expect } from "vitest";
-import { extractionFieldInputSchema } from "@/lib/extraction/schema";
-
-describe("extractionFieldInputSchema", () => {
-  it("aceita um campo text válido", () => {
-    const r = extractionFieldInputSchema.safeParse({ name: "Ano", type: "text" });
-    expect(r.success).toBe(true);
-  });
-
-  it("rejeita name vazio", () => {
-    const r = extractionFieldInputSchema.safeParse({ name: "  ", type: "text" });
-    expect(r.success).toBe(false);
-  });
-
-  it("rejeita select sem options", () => {
-    const r = extractionFieldInputSchema.safeParse({ name: "Desenho", type: "select" });
-    expect(r.success).toBe(false);
-  });
-
-  it("rejeita select com options vazio", () => {
-    const r = extractionFieldInputSchema.safeParse({ name: "Desenho", type: "select", options: [] });
-    expect(r.success).toBe(false);
-  });
-
-  it("aceita select com options", () => {
-    const r = extractionFieldInputSchema.safeParse({
-      name: "Desenho", type: "select", options: ["RCT", "Coorte"],
-    });
-    expect(r.success).toBe(true);
-  });
-
-  it("rejeita tipo desconhecido", () => {
-    const r = extractionFieldInputSchema.safeParse({ name: "X", type: "currency" });
-    expect(r.success).toBe(false);
-  });
-});
-```
-
-- [ ] **Step 2: Rodar e ver falhar**
-
-Run: `npx vitest run tests/unit/extraction/schema.test.ts`
-Expected: FAIL — não há módulo `@/lib/extraction/schema`.
-
-- [ ] **Step 3: Implementar o schema**
-
-Create `src/lib/extraction/schema.ts`:
-
-```ts
-import { z } from "zod";
-
-export const FIELD_TYPES = ["text", "number", "date", "boolean", "select"] as const;
-export type ExtractionFieldType = (typeof FIELD_TYPES)[number];
-
-export const FIELD_TYPE_LABELS: Record<ExtractionFieldType, string> = {
-  text: "Texto",
-  number: "Número",
-  date: "Data",
-  boolean: "Booleano",
-  select: "Escolha de lista",
-};
-
-/** Entrada de um campo no builder. select ⇒ options não-vazio (FR-009). */
-export const extractionFieldInputSchema = z
-  .object({
-    name: z.string().trim().min(1, "Informe um nome para o campo."),
-    type: z.enum(FIELD_TYPES),
-    options: z.array(z.string().trim().min(1)).optional(),
-  })
-  .refine((v) => v.type !== "select" || (v.options !== undefined && v.options.length > 0), {
-    message: "Campos de escolha exigem ao menos uma opção.",
-    path: ["options"],
-  });
-
-export type ExtractionFieldInput = z.infer<typeof extractionFieldInputSchema>;
-```
-
-- [ ] **Step 4: Rodar e ver passar**
-
-Run: `npx vitest run tests/unit/extraction/schema.test.ts`
-Expected: todos PASS.
-
-- [ ] **Step 5: Implementar as Server Actions**
-
-Create `app/reviews/[reviewId]/extraction/actions.ts`:
-
-```ts
-"use server";
-
-import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
-import { extractionFieldInputSchema } from "@/lib/extraction/schema";
-import type { ExtractionFieldType } from "@/lib/extraction/schema";
-
-async function requireMember(reviewId: string) {
-  const supabase = await createClient();
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) throw new Error("not authenticated");
-  const { data, error } = await supabase.rpc("is_review_member", { p_review_id: reviewId });
-  if (error || !data) throw new Error("not a member");
-  return { supabase };
-}
-
-function revalidate(reviewId: string) {
-  revalidatePath(`/reviews/${reviewId}/extraction`);
-}
-
-export async function ensureExtractionForm(reviewId: string) {
-  const { supabase } = await requireMember(reviewId);
-  const { data, error } = await supabase.rpc("ensure_extraction_form", { p_review_id: reviewId });
-  if (error) return { ok: false as const, error: error.message };
-  revalidate(reviewId);
-  return { ok: true as const, formId: data.id as string };
-}
-
-export async function addExtractionField(
-  reviewId: string,
-  input: { name: string; type: ExtractionFieldType; options?: string[] },
-) {
-  const parsed = extractionFieldInputSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Campo inválido." };
-  }
-  const { supabase } = await requireMember(reviewId);
-  const { error } = await supabase.rpc("add_extraction_field", {
-    p_review_id: reviewId,
-    p_name: parsed.data.name,
-    p_type: parsed.data.type,
-    p_options: parsed.data.type === "select" ? parsed.data.options! : null,
-  });
-  if (error) return { ok: false as const, error: error.message };
-  revalidate(reviewId);
-  return { ok: true as const };
-}
-
-export async function updateExtractionField(
-  reviewId: string,
-  fieldId: string,
-  input: { name: string; type: ExtractionFieldType; options?: string[] },
-) {
-  const parsed = extractionFieldInputSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Campo inválido." };
-  }
-  const { supabase } = await requireMember(reviewId);
-  const { error } = await supabase.rpc("update_extraction_field", {
-    p_field_id: fieldId,
-    p_name: parsed.data.name,
-    p_type: parsed.data.type,
-    p_options: parsed.data.type === "select" ? parsed.data.options! : null,
-  });
-  if (error) return { ok: false as const, error: error.message };
-  revalidate(reviewId);
-  return { ok: true as const };
-}
-
-export async function removeExtractionField(reviewId: string, fieldId: string) {
-  const { supabase } = await requireMember(reviewId);
-  const { error } = await supabase.rpc("remove_extraction_field", { p_field_id: fieldId });
-  if (error) return { ok: false as const, error: error.message };
-  revalidate(reviewId);
-  return { ok: true as const };
-}
-
-export async function reorderExtractionFields(reviewId: string, fieldIds: string[]) {
-  const { supabase } = await requireMember(reviewId);
-  const { error } = await supabase.rpc("reorder_extraction_fields", {
-    p_review_id: reviewId,
-    p_field_ids: fieldIds,
-  });
-  if (error) return { ok: false as const, error: error.message };
-  revalidate(reviewId);
-  return { ok: true as const };
-}
-```
-
-- [ ] **Step 6: Type-check + commit**
-
-Run: `npx tsc --noEmit`
-Expected: 0 erros.
-
-```bash
-git add src/lib/extraction/schema.ts "app/reviews/[reviewId]/extraction/actions.ts" tests/unit/extraction/schema.test.ts
-git commit -m "feat(002-f3): extraction Zod schema + Server Actions (US2/FR-009/010)"
-```
-
----
-
-## Task 9: UI — `ExtractionFormBuilder` + página da Extração
-
-**Files:**
-- Create: `src/components/extraction/ExtractionFormBuilder.tsx`
-- Create: `app/reviews/[reviewId]/extraction/page.tsx`
-- Test: `tests/unit/extraction/form-builder.test.tsx`
-
-- [ ] **Step 1: Escrever o teste do componente que falha**
-
-Create `tests/unit/extraction/form-builder.test.tsx`:
+- [ ] **Step 1: Escrever o teste de componente (falha)**
 
 ```tsx
+// tests/unit/extraction/extraction-runner.test.tsx
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
-import { ExtractionFormBuilder } from "@/components/extraction/ExtractionFormBuilder";
-import type { ExtractionFieldRow } from "@/lib/extraction/queries";
+import { render, screen } from "@testing-library/react";
+import { ExtractionRunner } from "@/components/extraction/ExtractionRunner";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
-
-const fields: ExtractionFieldRow[] = [
-  { id: "f1", name: "Ano de publicação", type: "number", options: null, sort_order: 1 },
-  { id: "f2", name: "Desenho do estudo", type: "select", options: ["RCT", "Coorte"], sort_order: 2 },
+const fields = [
+  { id: "f1", name: "Amostra", type: "number" as const, options: null, sort_order: 1 },
+  { id: "f2", name: "Desenho", type: "select" as const, options: ["RCT"], sort_order: 2 },
 ];
 
-const noop = vi.fn().mockResolvedValue({ ok: true });
+const values = [
+  { id: "v1", field_id: "f1", state: "pending" as const, final_value: null, not_found: false,
+    output: { value: "42", source_span: "n=42", page: 3 },
+    provenance: { model: "mock-llm", version: "0.0.0", prompt_or_span: "extract", timestamp: new Date().toISOString() },
+    grounding: { text_layer_id: "t1", page: 3, source_span: "n=42", origin: "nativo" } },
+  { id: "v2", field_id: "f2", state: "inferred" as const, final_value: null, not_found: false,
+    output: { value: "RCT", source_span: null, page: null },
+    provenance: { model: "mock-llm", version: "0.0.0", prompt_or_span: "extract", timestamp: new Date().toISOString() },
+    grounding: { text_layer_id: null, page: null, source_span: null, origin: null } },
+];
 
-describe("ExtractionFormBuilder", () => {
-  it("lista os campos em ordem com o rótulo do tipo em pt-BR", () => {
+describe("ExtractionRunner", () => {
+  it("renderiza campos com chip de estado e ações da sugestão", () => {
     render(
-      <ExtractionFormBuilder
-        reviewId="r1"
-        fields={fields}
-        onAdd={noop}
-        onUpdate={noop}
-        onRemove={noop}
-        onReorder={noop}
+      <ExtractionRunner
+        reviewId="r1" recordId="rec1" fields={fields} values={values}
+        onRun={vi.fn()} onRatify={vi.fn()}
       />,
     );
-    expect(screen.getByText("Ano de publicação")).toBeInTheDocument();
-    expect(screen.getByText("Desenho do estudo")).toBeInTheDocument();
-    expect(screen.getByText(/Número/)).toBeInTheDocument();
-    expect(screen.getByText(/Escolha de lista/)).toBeInTheDocument();
+    expect(screen.getByText("Amostra")).toBeInTheDocument();
+    expect(screen.getByText(/pendente/i)).toBeInTheDocument();
+    expect(screen.getByText("Inferida")).toBeInTheDocument();
+    expect(screen.getAllByText("Aceitar").length).toBeGreaterThan(0);
   });
 
-  it("chama onRemove com o id ao remover um campo", () => {
-    const onRemove = vi.fn().mockResolvedValue({ ok: true });
+  it("campo not_found renderiza 'não encontrado'", () => {
+    const nf = [{ ...values[0], not_found: true, output: { value: null, page: null, source_span: null, reason: "not_found" } }];
     render(
-      <ExtractionFormBuilder
-        reviewId="r1"
-        fields={fields}
-        onAdd={noop}
-        onUpdate={noop}
-        onRemove={onRemove}
-        onReorder={noop}
-      />,
+      <ExtractionRunner reviewId="r1" recordId="rec1" fields={[fields[0]!]} values={nf as never}
+        onRun={vi.fn()} onRatify={vi.fn()} />,
     );
-    fireEvent.click(screen.getAllByRole("button", { name: /remover/i })[0]);
-    expect(onRemove).toHaveBeenCalledWith("r1", "f1");
+    expect(screen.getByText(/não encontrado/i)).toBeInTheDocument();
   });
 });
 ```
 
 - [ ] **Step 2: Rodar e ver falhar**
 
-Run: `npx vitest run tests/unit/extraction/form-builder.test.tsx`
-Expected: FAIL — não há módulo `@/components/extraction/ExtractionFormBuilder`.
+Run: `npx vitest run tests/unit/extraction/extraction-runner.test.tsx`
+Expected: FAIL — componente não existe.
 
 - [ ] **Step 3: Implementar o componente**
 
-Create `src/components/extraction/ExtractionFormBuilder.tsx`:
-
 ```tsx
+// src/components/extraction/ExtractionRunner.tsx
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import {
-  FIELD_TYPES,
-  FIELD_TYPE_LABELS,
-  type ExtractionFieldType,
-} from "@/lib/extraction/schema";
-import type { ExtractionFieldRow } from "@/lib/extraction/queries";
+import type { SuggestionState } from "@/lib/ai/llm/types";
+import type { ExtractionFieldRow, ExtractionValueView } from "@/lib/extraction/queries";
+import { SuggestionChip } from "@/components/ai/SuggestionChip";
+import { SuggestionActions } from "@/components/ai/SuggestionActions";
+import { ProvenancePopover } from "@/components/ai/ProvenancePopover";
+import { NotFound } from "@/components/ai/NotFound";
 
-type ActionResult = { ok: true } | { ok: false; error: string };
-
-interface Props {
+export function ExtractionRunner({
+  reviewId,
+  recordId,
+  fields,
+  values,
+  onRun,
+  onRatify,
+}: {
   reviewId: string;
+  recordId: string;
   fields: ExtractionFieldRow[];
-  onAdd: (reviewId: string, input: { name: string; type: ExtractionFieldType; options?: string[] }) => Promise<ActionResult>;
-  onUpdate: (reviewId: string, fieldId: string, input: { name: string; type: ExtractionFieldType; options?: string[] }) => Promise<ActionResult>;
-  onRemove: (reviewId: string, fieldId: string) => Promise<ActionResult>;
-  onReorder: (reviewId: string, fieldIds: string[]) => Promise<ActionResult>;
-}
-
-export function ExtractionFormBuilder({ reviewId, fields, onAdd, onUpdate, onRemove, onReorder }: Props) {
-  const router = useRouter();
+  values: ExtractionValueView[];
+  onRun: (reviewId: string, recordId: string) => Promise<{ ok: boolean; error?: string }>;
+  onRatify: (
+    reviewId: string,
+    valueId: string,
+    state: SuggestionState,
+    finalValue: unknown,
+  ) => Promise<{ ok: boolean; error?: string }>;
+}) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [type, setType] = useState<ExtractionFieldType>("text");
-  const [optionsText, setOptionsText] = useState("");
+  const byField = new Map(values.map((v) => [v.field_id, v]));
 
-  // onUpdate é exposto para edição inline numa iteração futura; mantido no contrato
-  // para a Fatia 4 (re-extração) sem alterar a assinatura do builder.
-  void onUpdate;
-
-  function run(action: () => Promise<ActionResult>) {
+  function run() {
     setError(null);
     startTransition(async () => {
-      const res = await action();
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      router.refresh();
+      const r = await onRun(reviewId, recordId);
+      if (!r.ok) setError(r.error ?? "Falha ao extrair.");
     });
   }
 
-  function handleAdd() {
-    const options =
-      type === "select"
-        ? optionsText.split(",").map((s) => s.trim()).filter(Boolean)
-        : undefined;
-    run(async () => {
-      const res = await onAdd(reviewId, { name, type, options });
-      if (res.ok) {
-        setName("");
-        setType("text");
-        setOptionsText("");
-      }
-      return res;
+  function ratify(valueId: string, state: SuggestionState, current: unknown) {
+    setError(null);
+    startTransition(async () => {
+      const finalValue =
+        state === "edited"
+          ? { value: window.prompt("Novo valor:", String(current ?? "")) ?? "" }
+          : { value: current };
+      const r = await onRatify(reviewId, valueId, state, finalValue);
+      if (!r.ok) setError(r.error ?? "Falha ao ratificar.");
     });
-  }
-
-  function move(index: number, delta: number) {
-    const target = index + delta;
-    if (target < 0 || target >= fields.length) return;
-    const ids = fields.map((f) => f.id);
-    [ids[index], ids[target]] = [ids[target], ids[index]];
-    run(() => onReorder(reviewId, ids));
   }
 
   return (
-    <section className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-          Formulário de extração
-        </h1>
-        <p className="text-sm text-zinc-500">
-          Monte os campos que a IA preencherá por estudo. Um formulário por revisão.
-        </p>
-      </header>
-
-      {error && (
-        <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </p>
-      )}
-
-      <ul className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-        {fields.length === 0 && (
-          <li className="px-4 py-6 text-sm text-zinc-500">Nenhum campo ainda.</li>
-        )}
-        {fields.map((f, i) => (
-          <li key={f.id} className="flex items-center gap-3 px-4 py-3">
-            <div className="flex flex-col">
-              <button
-                type="button"
-                aria-label="Mover para cima"
-                disabled={pending || i === 0}
-                onClick={() => move(i, -1)}
-                className="text-zinc-400 hover:text-zinc-700 disabled:opacity-30"
-              >
-                ↑
-              </button>
-              <button
-                type="button"
-                aria-label="Mover para baixo"
-                disabled={pending || i === fields.length - 1}
-                onClick={() => move(i, 1)}
-                className="text-zinc-400 hover:text-zinc-700 disabled:opacity-30"
-              >
-                ↓
-              </button>
-            </div>
-            <div className="flex-1">
-              <p className="font-medium text-zinc-900 dark:text-zinc-100">{f.name}</p>
-              <p className="text-xs text-zinc-500">
-                {FIELD_TYPE_LABELS[f.type]}
-                {f.type === "select" && f.options ? ` · ${f.options.join(", ")}` : ""}
-              </p>
-            </div>
-            <button
-              type="button"
-              disabled={pending}
-              onClick={() => run(() => onRemove(reviewId, f.id))}
-              className="text-sm text-red-600 hover:underline disabled:opacity-40"
-            >
-              Remover
-            </button>
-          </li>
-        ))}
-      </ul>
-
-      <div className="space-y-3 rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-        <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">Novo campo</h2>
-        <div className="flex flex-wrap gap-3">
-          <input
-            aria-label="Nome do campo"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Nome do campo"
-            className="flex-1 rounded-md border border-zinc-300 px-3 py-2 text-sm dark:bg-zinc-900"
-          />
-          <select
-            aria-label="Tipo do campo"
-            value={type}
-            onChange={(e) => setType(e.target.value as ExtractionFieldType)}
-            className="rounded-md border border-zinc-300 px-3 py-2 text-sm dark:bg-zinc-900"
-          >
-            {FIELD_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {FIELD_TYPE_LABELS[t]}
-              </option>
-            ))}
-          </select>
-        </div>
-        {type === "select" && (
-          <input
-            aria-label="Opções (separadas por vírgula)"
-            value={optionsText}
-            onChange={(e) => setOptionsText(e.target.value)}
-            placeholder="Opções separadas por vírgula (ex.: RCT, Coorte)"
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm dark:bg-zinc-900"
-          />
-        )}
+    <section className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold">Extração por IA</h3>
         <button
           type="button"
+          onClick={run}
           disabled={pending}
-          onClick={handleAdd}
-          className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900"
+          className="rounded border border-accent px-3 py-1 text-xs text-accent-deep focus-visible:ring disabled:opacity-50"
         >
-          Adicionar campo
+          {pending ? "Extraindo…" : "Extrair por IA"}
         </button>
       </div>
+      {error && <p className="text-xs text-warn">{error}</p>}
+      <ul className="divide-y divide-line">
+        {fields.map((f) => {
+          const v = byField.get(f.id);
+          const out = v?.output as { value: unknown; source_span: string | null; page: number | null } | null;
+          const isFinal = v?.state === "accepted" || v?.state === "edited";
+          return (
+            <li key={f.id} className="flex items-start justify-between gap-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{f.name}</p>
+                {!v && <p className="text-xs text-ink-faint">— ainda sem sugestão —</p>}
+                {v?.not_found && <NotFound what={f.name} />}
+                {v && !v.not_found && (
+                  <p className="truncate text-xs text-ink-soft">
+                    {isFinal
+                      ? String((v.final_value as { value?: unknown })?.value ?? "")
+                      : String(out?.value ?? "")}
+                    {out?.page != null && <span className="ml-1 text-ink-faint">· p.{out.page}</span>}
+                    {out?.source_span && <span className="ml-1 italic">“{out.source_span}”</span>}
+                  </p>
+                )}
+              </div>
+              {v && (
+                <div className="flex shrink-0 items-center gap-2">
+                  <SuggestionChip state={v.state} />
+                  {v.provenance && <ProvenancePopover provenance={v.provenance} />}
+                  {!isFinal && (
+                    <SuggestionActions
+                      disabled={pending}
+                      onAccept={() => ratify(v.id, "accepted", out?.value)}
+                      onEdit={() => ratify(v.id, "edited", out?.value)}
+                      onReject={() => ratify(v.id, "rejected", null)}
+                    />
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }
@@ -1370,23 +1355,43 @@ export function ExtractionFormBuilder({ reviewId, fields, onAdd, onUpdate, onRem
 
 - [ ] **Step 4: Rodar e ver passar**
 
-Run: `npx vitest run tests/unit/extraction/form-builder.test.tsx`
-Expected: ambos PASS.
+Run: `npx vitest run tests/unit/extraction/extraction-runner.test.tsx`
+Expected: PASS (2 testes).
 
-- [ ] **Step 5: Implementar a página (Server Component)**
+- [ ] **Step 5: Commit**
 
-Create `app/reviews/[reviewId]/extraction/page.tsx`:
+```bash
+git add src/components/extraction/ExtractionRunner.tsx tests/unit/extraction/extraction-runner.test.tsx
+git commit -m "feat(002-f4): ExtractionRunner reusing components/ai/* (US3/FR-020)"
+```
+
+---
+
+## Task 12: Página da Extração — lista de estudos + runner
+
+**Files:**
+- Modify: `app/reviews/[reviewId]/extraction/page.tsx`
+
+- [ ] **Step 1: Reescrever a página para incluir estudos + extração**
 
 ```tsx
+// app/reviews/[reviewId]/extraction/page.tsx
 import { createClient } from "@/lib/supabase/server";
-import { listExtractionFields } from "@/lib/extraction/queries";
+import {
+  listExtractionFields,
+  listStudies,
+  listExtractionValues,
+} from "@/lib/extraction/queries";
 import { ExtractionFormBuilder } from "@/components/extraction/ExtractionFormBuilder";
+import { ExtractionRunner } from "@/components/extraction/ExtractionRunner";
 import {
   ensureExtractionForm,
   addExtractionField,
   updateExtractionField,
   removeExtractionField,
   reorderExtractionFields,
+  runExtraction,
+  ratifyExtractionValue,
 } from "./actions";
 
 export default async function ExtractionPage({
@@ -1395,13 +1400,16 @@ export default async function ExtractionPage({
   params: Promise<{ reviewId: string }>;
 }) {
   const { reviewId } = await params;
-  // garante o form 1:1 antes de listar (idempotente, auditado só na criação)
   await ensureExtractionForm(reviewId);
   const supabase = await createClient();
   const fields = await listExtractionFields({ supabase }, reviewId);
+  const studies = await listStudies({ supabase }, reviewId);
+  const valuesByStudy = await Promise.all(
+    studies.map((s) => listExtractionValues({ supabase }, reviewId, s.id)),
+  );
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
+    <div className="mx-auto max-w-3xl space-y-10 px-4 py-8">
       <ExtractionFormBuilder
         reviewId={reviewId}
         fields={fields}
@@ -1410,119 +1418,272 @@ export default async function ExtractionPage({
         onRemove={removeExtractionField}
         onReorder={reorderExtractionFields}
       />
+
+      <section className="space-y-6">
+        <h2 className="text-lg font-semibold">Estudos para extração</h2>
+        {studies.length === 0 && (
+          <p className="text-sm text-ink-faint">
+            Nenhum estudo incluído no Texto completo ainda.
+          </p>
+        )}
+        {studies.map((s, i) => (
+          <div key={s.id} className="panel space-y-3 p-4">
+            <h3 className="text-sm font-semibold">{s.title}</h3>
+            <ExtractionRunner
+              reviewId={reviewId}
+              recordId={s.id}
+              fields={fields}
+              values={valuesByStudy[i]!}
+              onRun={runExtraction}
+              onRatify={ratifyExtractionValue}
+            />
+          </div>
+        ))}
+      </section>
     </div>
   );
 }
 ```
 
-- [ ] **Step 6: Type-check + lint + commit**
+- [ ] **Step 2: Type-check + lint**
 
-Run:
-```bash
-npx tsc --noEmit
-npm run lint
-```
-Expected: 0 erros, sem warnings.
+Run: `npx tsc --noEmit && npm run lint`
+Expected: 0 erros / sem warnings.
+
+- [ ] **Step 3: Commit**
 
 ```bash
-git add src/components/extraction/ExtractionFormBuilder.tsx "app/reviews/[reviewId]/extraction/page.tsx" tests/unit/extraction/form-builder.test.tsx
-git commit -m "feat(002-f3): ExtractionFormBuilder + página da Extração (US2/FR-009/010)"
+git add app/reviews/[reviewId]/extraction/page.tsx
+git commit -m "feat(002-f4): extraction page wires studies list + ExtractionRunner (US3)"
 ```
 
 ---
 
-## Task 10: Isolamento — RLS cross-review
+## Task 13: Fase "Extração" no trilho (`phases.ts`)
 
 **Files:**
-- Create: `tests/integration/rls.extraction.test.ts`
+- Modify: `src/lib/shell/phases.ts`
+- Test: `tests/unit/shell/phases-extraction.test.ts`
 
-- [ ] **Step 1: Escrever o teste**
-
-Create `tests/integration/rls.extraction.test.ts` (espelha `rls.documents.test.ts`):
+- [ ] **Step 1: Escrever o teste (falha)**
 
 ```ts
-import { describe, it, expect, beforeAll } from "vitest";
-import { signUpUser } from "./helpers/supabase";
+// tests/unit/shell/phases-extraction.test.ts
+import { describe, it, expect } from "vitest";
+import { computePhaseStates } from "@/lib/shell/phases";
 
-describe("RLS extraction_form/field — isolamento por Revisão (SC-011)", () => {
-  let owner: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let intruder: Awaited<ReturnType<typeof signUpUser>>["client"];
-  let reviewId: string;
+const base = {
+  hasQuestion: true, protocolStatus: "locked" as const, identified: 10, duplicates: 0,
+  screenedTs: 10, includedTs: 0, passedTs: 5, includedFt: 5, excludedFt: 0,
+};
 
-  beforeAll(async () => {
-    const s = Date.now();
-    owner = (await signUpUser(`xrls_owner_${s}@example.com`, "senha-teste-123")).client;
-    intruder = (await signUpUser(`xrls_intr_${s}@example.com`, "senha-teste-123")).client;
-    const { data: review } = await owner.rpc("create_review", { p_title: "Revisão privada" });
-    reviewId = review.id;
-    await owner.rpc("ensure_extraction_form", { p_review_id: reviewId });
-    await owner.rpc("add_extraction_field", {
-      p_review_id: reviewId, p_name: "Privado", p_type: "text", p_options: null,
-    });
+describe("fase Extração no trilho (§7-C)", () => {
+  it("aparece após Triagem TC e é 'current' quando a triagem fechou e não há valor ratificado", () => {
+    const phases = computePhaseStates("r1", { ...base, extractionRatified: false });
+    const ext = phases.find((p) => p.key === "extraction")!;
+    expect(ext).toBeTruthy();
+    expect(ext.href).toBe("/reviews/r1/extraction");
+    expect(ext.status).toBe("current");
   });
 
-  it("não-membro não enxerga o formulário nem os campos", async () => {
-    const form = await intruder.from("extraction_form").select("id").eq("review_id", reviewId);
-    expect(form.data).toEqual([]);
-    const fields = await intruder.from("extraction_field").select("id").eq("review_id", reviewId);
-    expect(fields.data).toEqual([]);
+  it("fica 'done' quando há ao menos um valor ratificado", () => {
+    const phases = computePhaseStates("r1", { ...base, extractionRatified: true });
+    expect(phases.find((p) => p.key === "extraction")!.status).toBe("done");
   });
 
-  it("RPC de não-membro levanta 'not a member'", async () => {
-    const { error } = await intruder.rpc("add_extraction_field", {
-      p_review_id: reviewId, p_name: "Intruso", p_type: "text", p_options: null,
-    });
-    expect(error).not.toBeNull();
-    expect(error!.message).toMatch(/not a member/i);
+  it("não quebra a derivação T/R (screening_ft segue 'done')", () => {
+    const phases = computePhaseStates("r1", { ...base, extractionRatified: false });
+    expect(phases.find((p) => p.key === "screening_ft")!.status).toBe("done");
+  });
+});
+```
+
+- [ ] **Step 2: Rodar e ver falhar**
+
+Run: `npx vitest run tests/unit/shell/phases-extraction.test.ts`
+Expected: FAIL — `extraction` não existe no `PhaseKey`/`PhaseInput`.
+
+- [ ] **Step 3: Editar phases.ts**
+
+Adicionar `"extraction"` ao `PhaseKey` (entre `screening_ft` e `risk_of_bias`):
+
+```ts
+export type PhaseKey =
+  | "question"
+  | "protocol"
+  | "import"
+  | "duplicates"
+  | "screening_ts"
+  | "screening_ft"
+  | "extraction"
+  | "risk_of_bias"
+  | "certainty";
+```
+
+Adicionar à `PhaseInput` (após `excludedFt`):
+
+```ts
+  /** Há ao menos um extraction_value ratificado (accepted/edited) na Revisão. */
+  extractionRatified: boolean;
+```
+
+Adicionar a def ao fim de `PIPELINE` (após `screening_ft`):
+
+```ts
+  {
+    key: "extraction",
+    label: "Extração",
+    href: (r) => `/reviews/${r}/extraction`,
+    // Fase pós-triagem (D19). Concluída quando há ≥1 valor ratificado pelo humano.
+    completed: (i) => i.extractionRatified,
+  },
+```
+
+Em `loadPhaseStates`, antes do `return computePhaseStates(...)`, contar valores ratificados:
+
+```ts
+  const { count: ratifiedCount } = await supabase
+    .from("extraction_value")
+    .select("id", { count: "exact", head: true })
+    .eq("review_id", reviewId)
+    .in("state", ["accepted", "edited"]);
+```
+
+e adicionar ao objeto passado a `computePhaseStates` (após `excludedFt`):
+
+```ts
+    extractionRatified: (ratifiedCount ?? 0) > 0,
+```
+
+- [ ] **Step 4: Rodar e ver passar**
+
+Run: `npx vitest run tests/unit/shell/phases-extraction.test.ts`
+Expected: PASS (3 testes).
+
+- [ ] **Step 5: Rodar a suíte de fases existente (não-regressão)**
+
+Run: `npx vitest run tests/unit/shell`
+Expected: PASS — nenhum teste de fases pré-existente quebrou.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/lib/shell/phases.ts tests/unit/shell/phases-extraction.test.ts
+git commit -m "feat(002-f4): add Extração phase to rail without breaking T/R derivation (US3/§7-C)"
+```
+
+---
+
+## Task 14: Isolamento cross-review (SC-011)
+
+**Files:**
+- Create: `tests/integration/rls.extraction-value.test.ts`
+
+- [ ] **Step 1: Escrever o teste de isolamento**
+
+```ts
+// tests/integration/rls.extraction-value.test.ts
+import { describe, it, expect } from "vitest";
+import { signUpUser, serviceClient } from "./helpers/supabase";
+
+describe("RLS — extraction_value escopado por Revisão (SC-011)", () => {
+  it("não-membro não lê extraction_value de outra Revisão e não ratifica", async () => {
+    const { client: a } = await signUpUser(
+      `rva_${Date.now()}@example.com`, "senha-teste-123");
+    const { data: review } = await a.rpc("create_review", { p_title: "Dona A" });
+    const reviewId = review!.id as string;
+    const svc = serviceClient();
+    const { data: rec } = await svc.from("record")
+      .insert({ review_id: reviewId, corpus_state: "included_ft", metadata: { title: "E" } })
+      .select("id").single();
+    await a.rpc("ensure_extraction_form", { p_review_id: reviewId });
+    const { data: field } = await a.rpc("add_extraction_field", {
+      p_review_id: reviewId, p_name: "Amostra", p_type: "number", p_options: null });
+    const { data: val } = await svc.from("extraction_value").insert({
+      review_id: reviewId, record_id: rec!.id, field_id: field!.id, state: "pending",
+    }).select("id").single();
+
+    const { client: b } = await signUpUser(
+      `rvb_${Date.now()}@example.com`, "senha-teste-123");
+    const { data: leaked } = await b.from("extraction_value").select("id").eq("review_id", reviewId);
+    expect(leaked!.length).toBe(0); // RLS bloqueia leitura
+
+    const { error: ratErr } = await b.rpc("ratify_extraction_value", {
+      p_value_id: val!.id, p_state: "accepted", p_final_value: { value: 1 } });
+    expect(ratErr).not.toBeNull(); // não-membro não ratifica
   });
 });
 ```
 
 - [ ] **Step 2: Rodar e ver passar**
 
-Run: `npx vitest run tests/integration/rls.extraction.test.ts`
-Expected: ambos PASS (RLS + membership já implementados nas Tasks 1-6).
+Run: `npx vitest run tests/integration/rls.extraction-value.test.ts`
+Expected: PASS (RLS já implementada na Task 1; este teste prova o isolamento).
 
-- [ ] **Step 3: Suíte completa + portões (CHECKPOINT 3)**
-
-Run:
-```bash
-npx vitest run
-npm run lint
-npx tsc --noEmit
-```
-Expected: toda a suíte verde (baseline da Fatia 2 era 62 arquivos / 263 testes; a Fatia 3 adiciona `extraction-form`, `rls.extraction`, `schema`, `form-builder`); 0 warnings de lint; 0 erros de tipo.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add tests/integration/rls.extraction.test.ts
-git commit -m "test(002-f3): RLS isolamento cross-review do formulário de extração (SC-011)"
+git add tests/integration/rls.extraction-value.test.ts
+git commit -m "test(002-f4): RLS isolamento cross-review de extraction_value (SC-011)"
 ```
 
 ---
 
-## Self-Review (cobertura da spec)
+## Task 15: Portões finais (CHECKPOINT 3)
 
-| Requisito | Onde |
-|---|---|
-| **FR-009** campos tipados (text/number/date/boolean/select), nome, ordenação | enum `extraction_field_type` + `add_extraction_field` + `reorder_extraction_fields` (Tasks 1,3,6); builder (Task 9) |
-| **FR-010** editar e remover campos, mudança registrada | `update_extraction_field` + `remove_extraction_field` (soft-delete) + `audit_entry` (Tasks 4,5) |
-| **FR-011** **um único** form por Revisão; engine genérica reaproveitável p/ viés/CERQual (não implementados) | `extraction_form.review_id unique` + `ensure_extraction_form` (Tasks 1,2); engine sem nada AI-específico |
-| **FR-029** "configurar formulário" na trilha append-only (ator/timestamp/antes-depois) | toda RPC grava `audit_entry` `human`+`auth.uid()`+before/after (Tasks 2-6) |
-| **Edge: remover/editar não apaga `extraction_value` validado** | soft-delete `is_active` (decisão 2); seam para a FK da Fatia 4 (Task 5) |
-| **`select` exige opções; `name` não-vazio** | CHECK no schema (Task 1) + `raise` nas RPCs (Tasks 3,4) + Zod (Task 8) |
-| **SC-011 isolamento por Revisão** | RLS `select` por membro + membership nas RPCs; teste cross-review (Task 10) |
-| **pt-BR na UI** | rótulos `FIELD_TYPE_LABELS` + textos do builder (Tasks 8,9) |
+**Files:** nenhum (verificação) + COMPLETION.
 
-**Não-regressão (Princípio V):** F3 só **adiciona** (migração 0014 aditiva; novo módulo `extraction/`; nova rota `extraction/`). **Não** toca workbench/triagem/`screening`/`import`, **não** altera `phases.ts` (o `PhaseKey` "Extração" é da Fatia 4), **não** importa IA/embeddings/job. Suíte do Marco 1 + Fatias 1-2 permanece verde.
+- [ ] **Step 1: Suíte completa**
 
-**Placeholder scan:** nenhum passo usa "TBD/TODO/etc." — todo SQL, TS e teste estão completos.
+Run: `npx vitest run`
+Expected: tudo verde (ressalva conhecida: `pdf-pipeline.test.ts` pode dar timeout flaky sob carga — passa em isolamento; pré-existente da Fatia 2). F4 adiciona ~6 arquivos de teste.
 
-**Type consistency:** `extraction_field_type`/`ExtractionFieldType`, `ExtractionFieldRow`, `ExtractionFieldInput`, e as assinaturas das RPCs (`add_extraction_field(uuid,text,extraction_field_type,jsonb)`, `reorder_extraction_fields(uuid,uuid[])`) são idênticas entre schema, queries, actions, componente e testes.
+- [ ] **Step 2: Lint**
+
+Run: `npm run lint`
+Expected: `✔ No ESLint warnings or errors`.
+
+- [ ] **Step 3: Type-check**
+
+Run: `npx tsc --noEmit`
+Expected: 0 erros.
+
+- [ ] **Step 4: Escrever o COMPLETION da fatia**
+
+Criar `specs/002-marco2-coracao-ai-first/.superpowers/COMPLETION-fatia-4.md` (espelhar o formato do `COMPLETION-fatia-3.md`): branch + tip, o que foi entregue, tabela de tarefas→commits, evidência dos portões, cobertura de FR (012–020, 030), não-regressão, decisões/desvios, pendências (lote+custo+consumo → F5; busca semântica → F6). Atualizar a linha da F4 em `slicing.md` para `✅ completa — aguardando merge (CHECKPOINT 3, tip <hash>)`.
+
+- [ ] **Step 5: Commit + PARAR (CHECKPOINT 3)**
+
+```bash
+git add specs/002-marco2-coracao-ai-first/.superpowers/COMPLETION-fatia-4.md specs/002-marco2-coracao-ai-first/.superpowers/slicing.md
+git commit -m "docs(002-f4): COMPLETION da Fatia 4 + tracking (CHECKPOINT 3)"
+```
+
+**PARAR.** Apresentar ao desenvolvedor: branch `build/002-marco2-coracao-ai-first/4-extracao-ia`, diff, e evidência (testes + lint + tsc). **Aguardar o merge manual.** Não iniciar a Fatia 5.
 
 ---
 
-## Regime / CHECKPOINT 3 (lembrete do contrato — CLAUDE.md §5)
+## Self-Review (cobertura do escopo da Fatia 4)
 
-Ao fim da Task 10, **PARAR**. Apresentar ao desenvolvedor: branch `build/002-marco2-coracao-ai-first/3-formulario-extracao`, o diff, e a evidência dos portões (`npx vitest run` + `npm run lint` + `npx tsc --noEmit`). **Aguardar o merge manual.** Não iniciar a Fatia 4 antes da confirmação. Nunca `merge`/`push` para a feature ou `main`.
+**Cobertura de FR (slicing linha 140):**
+- **FR-012** preencher campos a partir do texto, span+página → `extractFields` + `runExtractionForRecord` (grounding resolvido) · Tasks 6–8.
+- **FR-013** "não encontrado" 1ª classe → `value:null, reason:'not_found'`, `not_found=true`, `<NotFound/>` · Tasks 6, 8, 11.
+- **FR-014** inferido → `inferred=true` ⇒ `state='inferred'` ⇒ chip "Inferida" · Tasks 6, 8, 11.
+- **FR-015** pt-BR + span no idioma original → mock/anthropic preservam span; UI cita `source_span` · Tasks 6–7, 11.
+- **FR-016** proveniência obrigatória → `ExtractionResult.provenance` gravada em `ai_suggestion.provenance` (CHECK do schema) · Tasks 6–8.
+- **FR-017/017a** só via `LLMProvider`, texto direto, sem embeddings → `extractFields` lê `text_layer`; nenhum import de `embedding_chunk` · Tasks 6–8 (+ teste "sem rede/sem embeddings").
+- **FR-018** aceitar/editar/rejeitar + estados → `ratify_extraction_value` + `SuggestionActions` · Tasks 2, 10, 11.
+- **FR-019** IA nunca finaliza → AI só grava `pending`/`inferred`; `final_value` só pela RPC humana · Tasks 2, 8.
+- **FR-019a** re-extração sem sobrescrever → novas linhas pending; validadas intactas · Task 8 (teste dedicado).
+- **FR-020/030** reusar vocabulário visual de IA, distinção humano/IA → `SuggestionChip/ProvenancePopover/SuggestionActions/NotFound` · Task 11.
+- **Migration 0015 + RLS primeiro (Princípio IV)** → Tasks 1–3 precedem o código.
+- **Fase Extração no trilho (§7-C)** → Task 13 (sem quebrar T/R).
+- **SC-011 isolamento** → Task 14.
+
+**Dependências satisfeitas:** F2 (`text_layer`) ✅ + F3 (`extraction_form`/`extraction_field`) ✅ — ambas mergeadas.
+
+**Placeholders:** nenhum — cada step traz código/comando completo.
+
+**Consistência de tipos:** `ExtractionFieldDef/ExtractedField/ExtractionResult` (Task 4) usados igual em mock (6), anthropic (7), extract (8); `ExtractionValueView`/`ExtractionFieldRow` (queries) consumidos pelo componente (11) e página (12); `suggestion_state` reusado em `extraction_value.state` e na RPC (1–2).
+
+**Fora de escopo (não fazer aqui):** lote/job `ai_extraction_batch`, estimativa-antes-de-lote na UI, `ai_usage`/consumo (FR-021/022/023 → Fatia 5); busca semântica/embeddings (US5 → Fatia 6).
