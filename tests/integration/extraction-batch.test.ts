@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { signUpUser, serviceClient } from "./helpers/supabase";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { enqueueExtractionJob } from "@/lib/extraction/enqueue";
+import { processExtractionJob } from "@/lib/extraction/batch-worker";
+import { MockLLMProvider } from "@/lib/ai/llm/mock";
 
 /** Cria Revisão + estudo included_ft com PDF processado + text_layer + form (1 campo). */
 async function seedStudy(
@@ -115,5 +117,120 @@ describe("enqueueExtractionJob (US4/FR-021)", () => {
       .select("payload")
       .eq("job_id", res.job_id);
     expect((items ?? [])[0]!.payload).toMatchObject({ record_id: r1 });
+  });
+});
+
+describe("processExtractionJob (US4/FR-021/FR-023)", () => {
+  it("processa cada estudo, grava ai_usage(phase='extraction') e fecha o job", async () => {
+    const { client, reviewId, svc } = await setup();
+    await seedStudy(svc, reviewId, { title: "A" });
+    await seedStudy(svc, reviewId, { title: "B" });
+    const enq = await enqueueExtractionJob(
+      { supabase: client },
+      reviewId,
+      null,
+    );
+
+    const res = await processExtractionJob(
+      { supabase: svc, provider: new MockLLMProvider() },
+      enq.job_id,
+    );
+    expect(res.status).toBe("completed");
+    expect(res.done).toBe(2);
+    expect(res.failed).toBe(0);
+
+    const { data: items } = await svc
+      .from("job_item")
+      .select("status")
+      .eq("job_id", enq.job_id);
+    expect((items ?? []).every((i) => i.status === "done")).toBe(true);
+
+    const { data: job } = await svc
+      .from("job")
+      .select("status, progress")
+      .eq("id", enq.job_id)
+      .single();
+    expect(job!.status).toBe("completed");
+    expect(job!.progress).toBe(100);
+
+    const { data: usage } = await svc
+      .from("ai_usage")
+      .select("phase, job_id")
+      .eq("review_id", reviewId)
+      .eq("phase", "extraction");
+    expect((usage ?? []).length).toBe(2);
+    expect((usage ?? []).every((u) => u.job_id === enq.job_id)).toBe(true);
+
+    const { count } = await svc
+      .from("extraction_value")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId);
+    expect(count).toBeGreaterThanOrEqual(2);
+  });
+
+  it("falha de um item não derruba o lote (completed_with_errors)", async () => {
+    const { client, reviewId, svc } = await setup();
+    await seedStudy(svc, reviewId, { title: "A" });
+    const enq = await enqueueExtractionJob(
+      { supabase: client },
+      reviewId,
+      null,
+    );
+
+    await svc.from("job_item").insert({
+      job_id: enq.job_id,
+      review_id: reviewId,
+      status: "pending",
+      payload: { record_id: "00000000-0000-0000-0000-000000000000" },
+    });
+
+    const res = await processExtractionJob(
+      { supabase: svc, provider: new MockLLMProvider() },
+      enq.job_id,
+    );
+    expect(res.status).toBe("completed_with_errors");
+    expect(res.done).toBe(1);
+    expect(res.failed).toBe(1);
+
+    const { data: failed } = await svc
+      .from("job_item")
+      .select("status, error, attempts")
+      .eq("job_id", enq.job_id)
+      .eq("status", "failed");
+    expect((failed ?? []).length).toBe(1);
+    expect((failed ?? [])[0]!.error).toBeTruthy();
+    expect((failed ?? [])[0]!.attempts).toBe(1);
+  });
+
+  it("é retomável: re-rodar não reprocessa itens já 'done'", async () => {
+    const { client, reviewId, svc } = await setup();
+    await seedStudy(svc, reviewId, { title: "A" });
+    const enq = await enqueueExtractionJob(
+      { supabase: client },
+      reviewId,
+      null,
+    );
+
+    await processExtractionJob(
+      { supabase: svc, provider: new MockLLMProvider() },
+      enq.job_id,
+    );
+    const { count: after1 } = await svc
+      .from("extraction_value")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId);
+
+    const res2 = await processExtractionJob(
+      { supabase: svc, provider: new MockLLMProvider() },
+      enq.job_id,
+    );
+    expect(res2.done).toBe(0);
+    expect(res2.failed).toBe(0);
+
+    const { count: after2 } = await svc
+      .from("extraction_value")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId);
+    expect(after2).toBe(after1);
   });
 });
