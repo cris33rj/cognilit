@@ -5,6 +5,7 @@ import { enqueueExtractionJob } from "@/lib/extraction/enqueue";
 import { processExtractionJob } from "@/lib/extraction/batch-worker";
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { runExtractionBatchWorkerWith } from "@/lib/extraction/batch-run";
+import { listExtractionBatchCandidates } from "@/lib/extraction/queries";
 
 /** Cria Revisão + estudo included_ft com PDF processado + text_layer + form (1 campo). */
 async function seedStudy(
@@ -254,5 +255,30 @@ describe("runExtractionBatchWorkerWith (US4/A1)", () => {
       .eq("id", enq.job_id)
       .single();
     expect(job!.status).toBe("completed");
+  });
+});
+
+describe("listExtractionBatchCandidates (US4)", () => {
+  it("lista só estudos included_ft com PDF processado, deduplicados por estudo", async () => {
+    const { client, reviewId, svc } = await setup();
+    const r1 = await seedStudy(svc, reviewId, { title: "Com PDF" });
+    await seedStudy(svc, reviewId, { processed: false, title: "Sem PDF" });
+
+    // 2º PDF processado no mesmo estudo r1 → não pode duplicar r1 na lista.
+    await svc.from("document").insert({
+      review_id: reviewId,
+      record_id: r1,
+      storage_path: `review/${reviewId}/record/${r1}/d2.pdf`,
+      filename: "d2.pdf",
+      byte_size: 10,
+      processing_status: "text_ready",
+    });
+
+    const candidates = await listExtractionBatchCandidates(
+      { supabase: client },
+      reviewId,
+    );
+    expect(candidates.map((c) => c.id)).toEqual([r1]); // só r1, uma vez
+    expect(candidates[0]!.title).toBe("Com PDF");
   });
 });
