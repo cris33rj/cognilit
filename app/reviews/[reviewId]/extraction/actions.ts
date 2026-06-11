@@ -9,6 +9,12 @@ import { getLLMProvider } from "@/lib/ai/llm";
 import { MissingByokError } from "@/lib/ai/llm/types";
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { runExtractionForRecordWith } from "@/lib/extraction/run";
+import { enqueueExtractionJob } from "@/lib/extraction/enqueue";
+import { runExtractionBatchWorkerWith } from "@/lib/extraction/batch-run";
+import {
+  listExtractionBatchCandidates,
+  listExtractionFields,
+} from "@/lib/extraction/queries";
 import type { SuggestionState } from "@/lib/ai/llm/types";
 
 async function requireMember(reviewId: string) {
@@ -144,4 +150,88 @@ export async function ratifyExtractionValue(
   if (error) return { ok: false as const, error: error.message };
   revalidate(reviewId);
   return { ok: true as const };
+}
+
+// ---- Extração em lote (Fatia 5 / US4) ----
+
+/**
+ * Estimativa de custo/tokens ANTES do lote (FR-022). NÃO cria job. Conta os
+ * estudos elegíveis (interseção com os selecionados) × campos ativos e delega ao
+ * contrato provider.estimateCost. Sem 1ª chave ⇒ usa Mock para a estimativa e
+ * sinaliza byokMissing (não trava — slicing A1/§7-B).
+ */
+export async function estimateExtractionBatch(
+  reviewId: string,
+  recordIds: string[] | null,
+) {
+  const { supabase } = await requireMember(reviewId);
+
+  const candidates = await listExtractionBatchCandidates(
+    { supabase },
+    reviewId,
+  );
+  const candidateIds = new Set(candidates.map((c) => c.id));
+  const selected =
+    recordIds && recordIds.length > 0
+      ? recordIds.filter((id) => candidateIds.has(id))
+      : candidates.map((c) => c.id);
+  const itemCount = selected.length;
+
+  const fields = await listExtractionFields({ supabase }, reviewId);
+  const fieldCount = fields.length;
+
+  let byokMissing = false;
+  let provider;
+  try {
+    provider = await getLLMProvider(reviewId);
+  } catch (e) {
+    if (e instanceof MissingByokError) {
+      provider = new MockLLMProvider();
+      byokMissing = true;
+    } else throw e;
+  }
+
+  const estimate = await provider.estimateCost({
+    kind: "ai_extraction_batch",
+    itemCount,
+    fieldCount,
+  });
+
+  return { ok: true as const, itemCount, fieldCount, estimate, byokMissing };
+}
+
+/**
+ * Enfileira o lote (create_extraction_job) e roda o worker server-side Node (A1).
+ * Mesmo fallback de provider da extração single (Fatia 4): BYOK quando há chave,
+ * senão Mock determinístico — não trava sem chave. Resiliente por-item / retomável
+ * no worker (FR-021). Revalida para o JobsPanel refletir o consumo (FR-023).
+ */
+export async function runExtractionBatch(
+  reviewId: string,
+  recordIds: string[] | null,
+) {
+  await requireMember(reviewId);
+  const admin = createAdminClient();
+
+  let provider;
+  try {
+    provider = await getLLMProvider(reviewId);
+  } catch (e) {
+    if (e instanceof MissingByokError) provider = new MockLLMProvider();
+    else throw e;
+  }
+
+  const enq = await enqueueExtractionJob(
+    { supabase: admin },
+    reviewId,
+    recordIds,
+  );
+  if (enq.item_count === 0) {
+    revalidate(reviewId);
+    return { ok: true as const, jobId: enq.job_id, itemCount: 0 };
+  }
+
+  await runExtractionBatchWorkerWith(admin, provider, reviewId);
+  revalidate(reviewId);
+  return { ok: true as const, jobId: enq.job_id, itemCount: enq.item_count };
 }
