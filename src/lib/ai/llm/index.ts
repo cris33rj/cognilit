@@ -15,6 +15,7 @@ export async function getLLMProvider(reviewId: string): Promise<LLMProvider> {
   const admin = createAdminClient();
   const { data, error } = await admin.rpc("get_byok_secret", {
     p_review_id: reviewId,
+    p_purpose: "llm",
   });
   if (error) throw error;
   const row = data?.[0];
