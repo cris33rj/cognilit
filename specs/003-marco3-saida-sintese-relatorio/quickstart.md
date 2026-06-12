@@ -60,7 +60,8 @@
 ## Invariantes que NÃO podem regredir
 
 - Fluxograma = **espelho** das views PRISMA, número-a-número (§VI).
-- IA só via `LLMProvider`; Métodos/Resultados/declaração-IA/desvios **sem LLM** (R9).
+- IA só via `LLMProvider`; Métodos/declaração-IA/desvios **sem LLM**; **Resultados** embute
+  a narrativa de síntese de IA já ratificada (US1) sem novo passe (R9).
 - A IA **sugere**, o humano ratifica; nada finalizado pela IA (§I).
 - RLS em todas as tabelas novas + bucket `exports` (§IV).
 - Não tocar o workbench de triagem nem o código dos Marcos 1–2 (não-regressão).

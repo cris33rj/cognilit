@@ -14,9 +14,11 @@ resumo, com **grounding em nível de achado** (cada afirmação referencia o
 `extraction_value` de origem) e validação humana (aceitar/editar/rejeitar); (2)
 **fluxograma PRISMA 2020** auto-derivado — o **espelho** das views `prisma_counter` /
 `prisma_exclusion_breakdown` que já são a fonte única dos contadores (Princípio VI),
-renderizado read-only e exportável em SVG/PNG; (3) **relatório estruturado** — Métodos/
-Resultados **determinísticos e fiéis aos dados** (montados sem LLM a partir de dados já
-ratificados), Discussão/Conclusão **rascunhadas por IA como ponto de partida editável**,
+renderizado read-only e exportável em SVG/PNG; (3) **relatório estruturado** — **Métodos**
+factual e determinístico (sem LLM); **Resultados** montado sem novo passe de LLM mas
+**embutindo a narrativa de síntese de IA já ratificada (US1)** ao lado das contagens e da
+tabela de características; Discussão/Conclusão **rascunhadas por IA como ponto de partida
+editável**,
 mais **declaração de IA** e **desvios do protocolo** montados deterministicamente das
 tabelas existentes; (4) **checklist PRISMA** auto-preenchido + **tabela de
 características** (derivada de `extraction_value`); (5) **exportações** DOCX/PDF/MD +
@@ -75,8 +77,10 @@ documentos** são trabalho de worker.
 **Constraints**: RLS obrigatória em todas as tabelas novas e no bucket de export; **a
 Edge Function nunca renderiza documento pesado** (valida/persiste/enfileira → worker
 gera DOCX/PDF/PNG, §VIII); IA só via `LLMProvider` (sem SDK direto, sem raw write, §VII);
-**Métodos/Resultados são determinísticos** (montados de dados já ratificados, sem nova
-autonomia de IA — §I/§II); síntese e Discussão/Conclusão são **sugestões** com estado
+**Métodos são determinísticos** (factual, sem LLM) e **Resultados** é montado sem novo
+passe de LLM, embutindo a narrativa de síntese de IA **já ratificada** (US1) — nenhuma
+nova autonomia de IA no tempo de montagem (§I/§II); síntese e Discussão/Conclusão são
+**sugestões** com estado
 `pending/.../rejected` e grounding/proveniência obrigatórios; "dados insuficientes" é
 resposta de 1ª classe (§II/FR-007); a IA **nunca finaliza** uma seção/tema (§I); saída
 pt-BR com trecho-fonte no original (D24); **fluxograma = espelho** dos contadores
@@ -95,8 +99,9 @@ Deno), MD por montagem direta — tudo no `report_export` job, validar contra sa
 R4 APA 7 via `citeproc`+CSL, BibTeX/RIS por serializador próprio; R5 checklist PRISMA
 2020 (27 itens) seed + cobertura computada; R6 tabela de características = derivação de
 `extraction_value` (sem tabela nova); R7 regeneração preserva seções `human_edited`
-(Q1); R8 bucket `exports` com RLS por path; R9 Métodos/Resultados/declaração-IA/desvios
-**determinísticos** (sem LLM) — só síntese e Discussão/Conclusão consomem o
+(Q1); R8 bucket `exports` com RLS por path; R9 Métodos/declaração-IA/desvios **sem LLM** e
+**Resultados** sem novo passe de LLM (embute a síntese de IA ratificada, US1) — só a
+síntese (US1) e a Discussão/Conclusão consomem o
 `LLMProvider`, com `estimateCost`/`ai_usage` (phases `synthesis`/`report`).
 
 **Relação com Marcos 1–2 (não-regressão)**: o Marco 3 **estende** entidades/contratos
@@ -114,7 +119,7 @@ Certeza) **permanecem desligadas** — o relatório apenas **declara** sua ausê
 
 | # | Princípio | Como o plano cumpre | Status |
 |---|-----------|---------------------|--------|
-| I | Humano-no-laço + gradiente | Temas e seções IA (Discussão/Conclusão) **só sugerem** (`state` pending/…/rejected); a IA nunca finaliza (FR-003/FR-016). Métodos/Resultados são **montagem determinística de dados já ratificados** — não nova autonomia. | ✅ |
+| I | Humano-no-laço + gradiente | Temas e seções IA (Discussão/Conclusão) **só sugerem** (`state` pending/…/rejected); a IA nunca finaliza (FR-003/FR-016). Métodos/declaração-IA/desvios são montagem determinística (sem LLM); **Resultados** embute a síntese de IA **já ratificada** (US1) — sem nova autonomia de IA no relatório. | ✅ |
 | II | Grounding + proveniência | Narrativa de tema ancora em `extraction_value` específico (Q3/FR-002); seções IA carregam proveniência; "dados insuficientes" 1ª classe (FR-007); declaração de IA auto-gerada (FR-013). | ✅ |
 | III | Auditabilidade/reprodutibilidade | Gerar/editar síntese e relatório → `audit_entry` (insert-only); regeneração **preserva** seções `human_edited`, sem sobrescrita silenciosa (FR-016/Q1). | ✅ |
 | IV | Isolamento + RLS desde a origem | RLS em todas as tabelas novas; bucket `exports` com policy por `review_id` no path; toda query escopada por Revisão (FR-025). | ✅ |
@@ -203,8 +208,9 @@ BaaS — a mesma dos Marcos 1–2, **estendida**. Escolhas-chave: (1) Síntese e
 alcançadas pelo trilho de fases — **não tocam o workbench de triagem** (Princípio V
 preservado); (2) o fluxograma **consome as views PRISMA existentes** como fonte única,
 garantindo consistência número-a-número (Princípio VI) sem recontagem; (3) Métodos/
-Resultados/declaração-IA/desvios são **montagem determinística** de dados já ratificados
-(fidelidade factual, §II), e **só** síntese e Discussão/Conclusão passam pelo
+declaração-IA/desvios são **montagem determinística** sem LLM e **Resultados** embute a
+narrativa de síntese de IA **já ratificada** (US1) sem novo passe (fidelidade factual,
+§II), e **só** a síntese (US1) e a Discussão/Conclusão passam pelo
 `LLMProvider` (§VII); (4) todo documento pesado nos **jobs existentes** estendidos, com a
 Edge só enfileirando (§VIII). Server Components por padrão; `'use client'` nas
 superfícies interativas (editor de narrativa, editor de seção, painel de export).
@@ -231,8 +237,9 @@ A fatiação é decidida pelo `brainstorming` da Sessão B, mas respeita:
   fluxograma (US2) é independente da síntese (só depende das views PRISMA, podendo vir
   cedo); checklist/características (US4) dependem do relatório/extração; a exportação (US5)
   depende de todos os artefatos existirem → vem por último.
-- **Fronteira de IA**: Métodos/Resultados/declaração-IA/desvios são determinísticos (sem
-  LLM); só a síntese e a Discussão/Conclusão consomem o `LLMProvider` — fatiar de modo a
+- **Fronteira de IA**: Métodos/declaração-IA/desvios são determinísticos (sem LLM);
+  **Resultados** embute a síntese ratificada (US1) sem novo passe; só a síntese (US1) e a
+  Discussão/Conclusão consomem o `LLMProvider` diretamente — fatiar de modo a
   isolar o custo/risco de IA.
 - Cada fatia entregável e testável ponta-a-ponta (lint + tsc + testes verdes).
 - União das fatias cobre as 5 user stories; sem sobreposição.

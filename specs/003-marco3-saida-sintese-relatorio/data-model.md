@@ -100,8 +100,10 @@ RLS transversal: toda tabela nova com `review_id` é acessível só se existe
 - `kind` enum `methods | results | discussion | conclusion | ai_declaration | deviations`
 - `content` (text, markdown, **pt-BR**)
 - `edit_state` enum `deterministic | ai_generated | human_edited` (R7/Q1):
-  - `deterministic` — Métodos/Resultados/declaração-IA/desvios: montados de dados reais,
-    **sem LLM** (R9); regeneração sempre atualiza para refletir o estado atual.
+  - `deterministic` — Métodos/declaração-IA/desvios: montados de dados reais, **sem LLM**;
+    **Resultados**: montado sem **novo** passe de LLM, **embutindo a narrativa de síntese
+    de IA já ratificada (US1)** + contagens + tabela de características (R9). Regeneração
+    sempre atualiza para refletir o estado atual (inclusive a síntese ratificada corrente).
   - `ai_generated` — Discussão/Conclusão rascunhadas por IA; regeneração pode reescrever.
   - `human_edited` — editada pelo humano; **preservada** na regeneração (FR-016).
 - `ai_suggestion_id` (FK ai_suggestion, nullable) — presente para seções de origem IA
@@ -151,8 +153,10 @@ RLS transversal: toda tabela nova com `review_id` é acessível só se existe
   (`report_draft`), ou um **formato** (`report_export` — resiliência por-formato, FR-023).
 
 ### ai_usage  *(estendida)*
-- `phase`: passa a aceitar `synthesis` e `report` (FR-026/R9). Métodos/Resultados/
-  declaração-IA/desvios **não** geram `ai_usage` (são determinísticos, sem LLM).
+- `phase`: passa a aceitar `synthesis` e `report` (FR-026/R9). A **montagem** do relatório
+  (Métodos/Resultados/declaração-IA/desvios) **não** gera `ai_usage` — o custo de IA da
+  narrativa dos Resultados já foi contabilizado em `phase=synthesis`; `phase=report` cobre
+  só o rascunho de Discussão/Conclusão.
 
 ---
 

@@ -175,24 +175,33 @@ grandes e download. Bucket público — viola o isolamento por Revisão (§IV).
 
 ---
 
-## R9 — Fronteira de IA, custo e contabilidade (Métodos/Resultados determinísticos)
+## R9 — Fronteira de IA, custo e contabilidade (Métodos factual; Resultados embute a síntese ratificada)
 
-**Decisão**: **Só** a síntese (R1) e o rascunho de **Discussão/Conclusão** consomem o
-`LLMProvider`. **Métodos, Resultados, declaração de IA e desvios do protocolo são
-montagem determinística** (sem LLM): Métodos/Resultados a partir de pergunta/critérios/
-protocolo/contagens/síntese ratificada; declaração de IA a partir das `ai_suggestion`
+**Decisão**: O `LLMProvider` é consumido **diretamente** em apenas dois pontos: a
+**síntese** (R1/US1) e o rascunho de **Discussão/Conclusão** (US3). **Métodos, declaração
+de IA e desvios do protocolo são montagem determinística sem LLM**: Métodos a partir de
+pergunta/critérios/protocolo/fontes/fluxo; declaração de IA a partir das `ai_suggestion`
 usadas nas fases (screening/extraction/synthesis/report) com sua proveniência; desvios a
-partir das **emendas versionadas/datadas** do protocolo (Marco 1, `0002`). `estimateCost`
-roda **antes** do `synthesis_batch` e do `report_draft` (FR-006); o consumo é gravado em
-`ai_usage` nas phases `synthesis` e `report` (FR-026/§VII).
+partir das **emendas versionadas/datadas** do protocolo (Marco 1, `0002`). **Resultados**
+é montado **sem novo passe de LLM**, porém **embute a narrativa de síntese de IA já
+ratificada (US1)** junto às contagens (views PRISMA) e à tabela de características — ou
+seja, o **texto coerente dos resultados é de origem IA**, produzido e ratificado na fase
+de Síntese, e o relatório apenas o reusa (não há um segundo passe de IA no relatório,
+preservando o humano-no-laço, §I). `estimateCost` roda **antes** do `synthesis_batch` e do
+`report_draft` (FR-006); o consumo é gravado em `ai_usage` nas phases `synthesis` e
+`report` (FR-026/§VII). A montagem do relatório **não** gera `ai_usage` — o custo da
+narrativa já foi contado em `synthesis`.
 
-**Justificativa**: maximiza a **fidelidade factual** (§II/D29 — Métodos/Resultados fiéis
-aos dados, não "alucináveis") e minimiza custo/risco de IA. A declaração de IA precisa ser
-**factual e completa** (D13) — montá-la deterministicamente das tabelas é mais confiável
-que pedir a um LLM.
+**Justificativa**: maximiza a **fidelidade factual** (§II/D29) e o humano-no-laço — a
+prosa de IA é ratificada **uma vez** (na Síntese) antes de entrar num entregável, em vez
+de um passe não-revisado no relatório. A declaração de IA precisa ser **factual e
+completa** (D13) — montá-la deterministicamente das tabelas é mais confiável que pedir a
+um LLM.
 
-**Alternativas rejeitadas**: (a) rascunhar Métodos/Resultados via LLM — arrisca
-divergência dos dados reais (anti-§II) e gasto desnecessário. (b) pedir ao LLM para
+**Alternativas rejeitadas**: (a) rascunhar as partes factuais de Métodos/Resultados via
+LLM, ou refazer a narrativa num **segundo passe** no relatório — arrisca divergência dos
+dados/da síntese já ratificada (anti-§II), gasto desnecessário e texto de IA não revisado
+num entregável. (b) pedir ao LLM para
 listar onde a IA foi usada — a fonte de verdade são as `ai_suggestion`, não a memória do
 modelo.
 
