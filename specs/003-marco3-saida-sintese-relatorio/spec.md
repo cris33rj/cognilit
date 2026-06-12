@@ -31,6 +31,15 @@ edição humana. Métodos e Resultados são **fiéis aos dados** (auto-gerados a
 partir de fatos já ancorados no Marco 2); Discussão e Conclusão são **ponto de
 partida editável** (D29).
 
+## Clarifications
+
+### Session 2026-06-12
+
+- Q: Ao regenerar o relatório após edições humanas, o que acontece com as edições? → A: **Preservar por seção** — regenera apenas as seções não-editadas, preserva as editadas pelo humano e avisa quais foram mantidas (exige estado de edição por seção).
+- Q: Como a síntese de uma Revisão é persistida ao longo de re-gerações? → A: **Única síntese mutável por Revisão** — re-gerar atualiza a existente preservando edições humanas; o histórico vive na trilha de auditoria (D26), sem versionamento de execuções.
+- Q: A narrativa de cada tema da síntese ancora em quê? → A: **Em campos/valores extraídos específicos** (nível de achado), reusando os `{value, source_span, page}` produzidos no Marco 2 — grounding fino, não nível de estudo inteiro.
+- Q: Como tratar as caixas PRISMA 2020 de registros de fontes fora da busca em base (literatura cinzenta, citation searching, contato com autores)? → A: **Fluxograma 100% auto-derivado** das contagens do sistema (todos os registros entram por importação com fonte registrada, D5); as caixas de fontes externas ficam em zero/ocultas na v1; fluxograma read-only, sem campos manuais.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Síntese qualitativa assistida por IA (Priority: P1)
@@ -247,14 +256,19 @@ que as citações no corpo seguem APA 7.
   partir dos dados de extração validados dos estudos incluídos de uma Revisão,
   produzindo temas agrupados, narrativa por tema e tabelas-resumo.
 - **FR-002**: Cada elemento da síntese gerado por IA MUST carregar proveniência
-  (modelo, versão, timestamp, estudos/campos de origem) e estado
-  (pendente/aceita/editada/rejeitada).
+  (modelo, versão, timestamp, estado pendente/aceita/editada/rejeitada) e MUST
+  ancorar em **campos/valores de extração específicos** (nível de achado),
+  referenciando os `{value, source_span, page}` produzidos no Marco 2 — não
+  apenas o estudo inteiro.
 - **FR-003**: O pesquisador MUST poder renomear, fundir, dividir, reordenar,
   editar e rejeitar temas e narrativa, com as alterações persistidas.
 - **FR-004**: O sistema MUST registrar toda aceitação, edição e rejeição de
   sugestão de síntese na trilha de auditoria append-only.
 - **FR-005**: O sistema MUST executar a geração de síntese como job assíncrono
   retomável, resiliente a falha por-item, com progresso visível.
+- **FR-005a**: Cada Revisão MUST ter **uma única síntese mutável**; re-gerar
+  atualiza a síntese existente preservando as edições humanas, e o histórico de
+  alterações vive na trilha de auditoria (sem versionamento de execuções).
 - **FR-006**: O sistema MUST apresentar estimativa de custo (tokens) antes de
   executar a geração de síntese em lote.
 - **FR-007**: O sistema MUST recusar-se a gerar temas/narrativa sem dados de
@@ -272,6 +286,10 @@ que as citações no corpo seguem APA 7.
   quando os motivos de exclusão do texto completo estiverem registrados.
 - **FR-011**: O sistema MUST sinalizar quando os números do fluxograma são
   parciais (fases ainda não concluídas) em vez de apresentá-los como finais.
+- **FR-011a**: O fluxograma MUST ser **100% auto-derivado** das contagens do
+  sistema e read-only (sem campos manuais); as caixas PRISMA de registros de
+  fontes fora da busca em base (literatura cinzenta, citation searching, contato
+  com autores) ficam em zero/ocultas na v1.
 
 **Relatório estruturado (US3)**
 
@@ -287,8 +305,9 @@ que as citações no corpo seguem APA 7.
   conduzidas (Risco de Viés, Certeza) quando desligadas, adaptando-se ao
   pipeline configurável da Revisão.
 - **FR-016**: O pesquisador MUST poder editar as seções do relatório, com as
-  edições persistidas; uma regeneração MUST preservar ou avisar antes de
-  sobrescrever edições humanas.
+  edições persistidas em **estado por seção**; uma regeneração MUST regenerar
+  apenas as seções não-editadas, **preservar** as seções editadas pelo humano e
+  **avisar** quais foram mantidas.
 - **FR-017**: O sistema MUST registrar a geração e as edições do relatório na
   trilha de auditoria.
 
@@ -327,14 +346,19 @@ que as citações no corpo seguem APA 7.
 
 - **Síntese**: agregado da leitura temática de uma Revisão. Contém temas
   ordenados, cada um com narrativa, tabela-resumo associada, proveniência e
-  estado. Pertence a uma Revisão.
-- **Tema**: unidade de agrupamento da síntese. Nome, narrativa, estudos/achados
-  de origem, estado de proveniência, ordem.
+  estado. **Uma única síntese mutável por Revisão** (sem versionamento de
+  execuções); o histórico de alterações fica na trilha de auditoria.
+- **Tema**: unidade de agrupamento da síntese. Nome, narrativa, **campos/valores
+  de extração de origem** (grounding em nível de achado), estado de proveniência,
+  ordem.
 - **Relatório**: documento estruturado da Revisão. Seções (Métodos, Resultados,
-  Discussão, Conclusão), declaração de IA, desvios do protocolo, estado de
-  edição por seção. Um por Revisão (regenerável e versionável).
-- **Fluxograma PRISMA**: representação das contagens de fase da Revisão, derivada
-  da trilha de auditoria; exportável como imagem.
+  Discussão, Conclusão), declaração de IA, desvios do protocolo, **estado de
+  edição por seção** (regeneração preserva seções editadas pelo humano). Um por
+  Revisão, regenerável.
+- **Fluxograma PRISMA**: representação das contagens de fase da Revisão,
+  **auto-derivada e read-only** a partir da trilha de auditoria; exportável como
+  imagem. Caixas de fontes externas (fora da busca em base) em zero/ocultas na
+  v1.
 - **Checklist PRISMA**: conjunto de itens PRISMA 2020 com estado atendido/
   pendente e referência à seção do relatório.
 - **Tabela de características**: matriz estudo × campo de extração dos estudos
