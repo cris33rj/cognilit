@@ -1,9 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ThemeCard } from "@/components/synthesis/ThemeCard";
 import { InsufficientData } from "@/components/synthesis/InsufficientData";
 import { SummaryTable } from "@/components/synthesis/SummaryTable";
 import { SynthesisRunner } from "@/components/synthesis/SynthesisRunner";
+import { NarrativeEditor } from "@/components/synthesis/NarrativeEditor";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
@@ -175,17 +176,82 @@ describe("SynthesisRunner", () => {
       <SynthesisRunner
         reviewId="rev"
         candidateCount={5}
-        onEstimate={vi
-          .fn()
-          .mockResolvedValue({
-            ok: true,
-            itemCount: 5,
-            estimate: { tokensEstimated: 100, cost: {} },
-            byokMissing: false,
-          })}
+        onEstimate={vi.fn().mockResolvedValue({
+          ok: true,
+          itemCount: 5,
+          estimate: { tokensEstimated: 100, cost: {} },
+          byokMissing: false,
+        })}
         onRun={vi.fn().mockResolvedValue({ ok: true })}
       />,
     );
     expect(screen.getByText(/gerar síntese/i)).toBeInTheDocument();
+  });
+
+  it("fluxo duas fases: clica estimativa → mostra painel de custo e aviso byokMissing (FR-006)", async () => {
+    const onEstimate = vi.fn().mockResolvedValue({
+      ok: true,
+      itemCount: 3,
+      estimate: { tokensEstimated: 3600, cost: { usd: 0.009 } },
+      byokMissing: true,
+    });
+    const onRun = vi.fn().mockResolvedValue({ ok: true });
+
+    render(
+      <SynthesisRunner
+        reviewId="rev"
+        candidateCount={3}
+        onEstimate={onEstimate}
+        onRun={onRun}
+      />,
+    );
+
+    // Click "Gerar síntese" to trigger estimate
+    fireEvent.click(screen.getByText(/gerar síntese/i));
+    expect(onEstimate).toHaveBeenCalledWith("rev");
+
+    // Wait for estimate panel to appear
+    await waitFor(() => {
+      expect(screen.getByText(/estimativa para 3 estudo/i)).toBeInTheDocument();
+    });
+
+    // Cost panel shows token count
+    expect(screen.getByText(/3\.600/)).toBeInTheDocument();
+
+    // byokMissing warning (FR-006)
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText(/chave byok/i)).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// NarrativeEditor
+// ---------------------------------------------------------------------------
+
+describe("NarrativeEditor", () => {
+  it("chama onSave com nova narrativa e patch correto ao clicar salvar", async () => {
+    const onSave = vi.fn().mockResolvedValue({ ok: true });
+
+    render(
+      <NarrativeEditor
+        reviewId="rev"
+        themeId="t1"
+        initialNarrative="Narrativa original"
+        onSave={onSave}
+      />,
+    );
+
+    const textarea = screen.getByRole("textbox", {
+      name: /narrativa do tema/i,
+    });
+    fireEvent.change(textarea, { target: { value: "Narrativa editada" } });
+
+    fireEvent.click(screen.getByText(/salvar narrativa/i));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith("rev", "t1", {
+        narrative: "Narrativa editada",
+      });
+    });
   });
 });

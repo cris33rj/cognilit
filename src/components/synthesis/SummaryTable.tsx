@@ -43,7 +43,7 @@ export function SummaryTable({ table }: { table: ThemeSummaryTable }) {
               {table.columns.map((col) => (
                 <td key={col} className="border border-line px-2 py-1 text-ink">
                   {row.cells[col] == null ? (
-                    <NotFound what="não encontrado" />
+                    <NotFound />
                   ) : (
                     String(row.cells[col])
                   )}

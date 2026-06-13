@@ -82,9 +82,13 @@ export function ThemeCard({
       {!isResolved && (
         <SuggestionActions
           onAccept={() => onAccept(reviewId, theme.id)}
-          onEdit={() =>
-            onEdit(reviewId, theme.id, { narrative: theme.narrative })
-          }
+          onEdit={() => {
+            // Focus the inline NarrativeEditor textarea so the user can type
+            const el = document.querySelector<HTMLTextAreaElement>(
+              `[aria-label="Narrativa do tema"]`,
+            );
+            el?.focus();
+          }}
           onReject={() => onReject(reviewId, theme.id)}
         />
       )}

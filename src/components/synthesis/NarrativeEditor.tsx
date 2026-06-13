@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 interface NarrativeEditorProps {
   reviewId: string;
@@ -25,6 +26,7 @@ export function NarrativeEditor({
   onSave,
 }: NarrativeEditorProps) {
   const id = useId();
+  const router = useRouter();
   const [value, setValue] = useState(initialNarrative);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -42,6 +44,7 @@ export function NarrativeEditor({
       setError(result.error ?? "Falha ao salvar a narrativa.");
     } else {
       setSaved(true);
+      router.refresh();
     }
   }
 
