@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { createRequire } from "node:module";
+import { join } from "node:path";
 import { Resvg, initWasm } from "@resvg/resvg-wasm";
 
 let wasmReady: Promise<void> | null = null;
@@ -8,13 +8,20 @@ let wasmReady: Promise<void> | null = null;
 function ensureWasm(): Promise<void> {
   if (!wasmReady) {
     wasmReady = (async () => {
-      const require = createRequire(import.meta.url);
-      // Specifier montado em runtime: impede o webpack do Next de traçar e tentar
-      // bundlar o .wasm como módulo (erro "module is not flagged as WebAssembly").
-      // O pacote fica external (next.config serverComponentsExternalPackages) e o
-      // .wasm é lido do node_modules em runtime Node — A2.
-      const wasmSpecifier = ["@resvg", "resvg-wasm", "index_bg.wasm"].join("/");
-      const wasmPath = require.resolve(wasmSpecifier);
+      // Caminho do .wasm ancorado em process.cwd() (raiz do projeto). Evita
+      // require.resolve/createRequire — o webpack do Next rastreia o binding do
+      // createRequire e reescreve o `.resolve(...)` para um module id numérico,
+      // quebrando dirname() (ERR_INVALID_ARG_TYPE). O pacote é external
+      // (next.config serverComponentsExternalPackages) e roda em runtime Node — A2.
+      // Deploy serverless: incluir este .wasm no file tracing (follow-up das
+      // fatias de exportação).
+      const wasmPath = join(
+        process.cwd(),
+        "node_modules",
+        "@resvg",
+        "resvg-wasm",
+        "index_bg.wasm",
+      );
       const bytes = await readFile(wasmPath);
       await initWasm(bytes);
     })();

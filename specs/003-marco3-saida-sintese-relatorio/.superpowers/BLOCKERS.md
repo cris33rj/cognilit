@@ -47,14 +47,25 @@ instanciação do webpack).
 
 Correção em duas frentes (sem mexer em `package.json`):
 
-1. `src/lib/prisma/png.ts`: montar o specifier do `.wasm` em **runtime**
-   (`["@resvg","resvg-wasm","index_bg.wasm"].join("/")`) — o webpack não consegue analisar
-   estaticamente, então não traça/bundla o `.wasm`; ele é lido do `node_modules` em runtime Node.
+1. `src/lib/prisma/png.ts`: carregar o `.wasm` por um caminho ancorado em
+   `process.cwd()` — `join(process.cwd(), "node_modules", "@resvg", "resvg-wasm",
+   "index_bg.wasm")`. **Por que não `require.resolve`/`createRequire`:** o webpack do Next
+   rastreia o binding de `createRequire(import.meta.url)` e reescreve o `.resolve(...)` para
+   um **module id numérico** no bundle (vimos `dirname(5179)` → `ERR_INVALID_ARG_TYPE`); e
+   resolver o subpath `@resvg/resvg-wasm/index_bg.wasm` lança `MODULE_NOT_FOUND` no build de
+   produção (exports map estrito). `process.cwd()` + `join` o webpack não toca; lê do
+   `node_modules` em runtime Node.
 2. `next.config.mjs`: `experimental.serverComponentsExternalPackages: ["@resvg/resvg-wasm"]` —
    o pacote fica fora do bundle do servidor e é `require()`-ado do `node_modules` em runtime
    (route handler com `runtime = "nodejs"`, A2).
 
-`render().asPng()` continua retornando bytes PNG (assinatura preservada — teste unitário verde).
+`render().asPng()` continua retornando bytes PNG (assinatura preservada). **Verificado:** unit
++ integração + **e2e (SVG e PNG, build de produção) verdes**.
+
+> **Follow-up de deploy (não bloqueia a v1 local):** um caminho via `process.cwd()` não é
+> seguido pelo file tracing do Next; para deploy serverless (Vercel) incluir
+> `node_modules/@resvg/resvg-wasm/index_bg.wasm` no tracing (`outputFileTracingIncludes`).
+> Endereçar nas fatias de exportação (5/6), onde o empacotamento serverless é tratado.
 
 > Nota de incidente: o comando de troca de lib chegou a mutar `package.json` (resvg-wasm saiu)
 > antes de ser cancelado; recuperado com `git checkout 8588cb7 -- package.json package-lock.json`
