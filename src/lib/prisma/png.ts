@@ -1,0 +1,25 @@
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { Resvg, initWasm } from "@resvg/resvg-wasm";
+
+let wasmReady: Promise<void> | null = null;
+
+/** Inicializa o wasm uma única vez (lê o binário do pacote, runtime Node — A2). */
+function ensureWasm(): Promise<void> {
+  if (!wasmReady) {
+    wasmReady = (async () => {
+      const require = createRequire(import.meta.url);
+      const wasmPath = require.resolve("@resvg/resvg-wasm/index_bg.wasm");
+      const bytes = await readFile(wasmPath);
+      await initWasm(bytes);
+    })();
+  }
+  return wasmReady;
+}
+
+/** Rasteriza o SVG do fluxograma em PNG. Mesma fonte do SVG (sem recontar). */
+export async function renderPrismaPng(svg: string): Promise<Uint8Array> {
+  await ensureWasm();
+  const resvg = new Resvg(svg);
+  return resvg.render().asPng();
+}
