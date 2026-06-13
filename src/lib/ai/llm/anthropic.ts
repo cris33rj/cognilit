@@ -206,49 +206,85 @@ export class AnthropicProvider implements LLMProvider {
     language: "pt-BR";
   }): Promise<SynthesizeThemesResult> {
     if (input.findings.length === 0) return { insufficientData: true };
-    const inputIds = new Set(input.findings.map((f) => f.extractionValueId));
+
+    // Grounding refs are exchanged as stable 1-based indices: LLMs echo short
+    // integers far more reliably than 36-char UUIDs. We map them back server-side
+    // (a verbatim UUID is still accepted defensively). This preserves the §II
+    // guarantee — a theme with no resolvable ref is dropped — without depending on
+    // the model reproducing UUIDs exactly.
+    const byIndex = new Map<number, string>();
+    const byId = new Set<string>();
     const findingLines = input.findings
-      .map(
-        (f) =>
-          `- extractionValueId=${f.extractionValueId} | campo=${f.fieldName} | valor=${JSON.stringify(f.value)}`,
-      )
+      .map((f, i) => {
+        const n = i + 1;
+        byIndex.set(n, f.extractionValueId);
+        byId.add(f.extractionValueId);
+        return `[${n}] campo=${f.fieldName} | valor=${JSON.stringify(f.value)}`;
+      })
       .join("\n");
+
     const prompt =
       `Agrupe os achados abaixo em temas qualitativos para uma revisão sistemática.\n` +
       `REGRAS OBRIGATÓRIAS:\n` +
-      `1. Cada tema DEVE conter pelo menos um findingRef (extractionValueId dos achados fornecidos).\n` +
-      `2. findingRefs deve ser subconjunto dos IDs fornecidos — não invente IDs.\n` +
+      `1. Cada tema DEVE conter pelo menos um findingRef.\n` +
+      `2. findingRefs é a lista dos NÚMEROS [n] dos achados que sustentam o tema ` +
+      `(ex.: [2, 5]). Use somente os números fornecidos; não invente.\n` +
       `3. Narrativa em pt-BR.\n` +
       `4. Não crie temas sem ancoragem nos achados.\n\n` +
       `Achados:\n${findingLines}\n\n` +
-      `Retorne JSON {"themes":[{"name":"...","narrative":"...","findingRefs":["extractionValueId1",...]}]}.`;
-    const raw = await this.ask(
-      "Você sintetiza achados de revisões sistemáticas em temas qualitativos; nunca inventa dados.",
-      prompt,
-    );
-    const parsed = safeParse<{
-      themes: Array<{ name: string; narrative: string; findingRefs: string[] }>;
-    }>(raw, {
-      themes: [],
+      `Retorne SOMENTE JSON: {"themes":[{"name":"...","narrative":"...","findingRefs":[1,2]}]}.`;
+
+    const msg = await this.client.messages.create({
+      model: MODEL,
+      max_tokens: Math.min(8000, 1024 + input.findings.length * 200),
+      system: `${PT_BR}\nVocê sintetiza achados de revisões sistemáticas em temas qualitativos; nunca inventa dados.`,
+      messages: [{ role: "user", content: prompt }],
     });
+    const raw = textOf(msg);
+    const parsed = safeParse<{
+      themes: Array<{
+        name?: string;
+        narrative?: string;
+        findingRefs?: Array<number | string>;
+      }>;
+    }>(raw, { themes: [] });
+
     const prov = {
       model: MODEL,
       version: MODEL,
       prompt_or_span: prompt,
       timestamp: nowIso(),
     };
+
     const rawThemes = Array.isArray(parsed.themes) ? parsed.themes : [];
     const themes = rawThemes
-      .map((t) => ({
-        name: t.name ?? "",
-        narrative: t.narrative ?? "",
-        // Keep only findingRefs that are valid IDs from the input (§II/FR-007)
-        findingRefs: (t.findingRefs ?? []).filter((id) => inputIds.has(id)),
-        provenance: prov,
-      }))
-      // Drop any theme whose findingRefs is empty after filtering (§II)
+      .map((t) => {
+        const refs = (t.findingRefs ?? [])
+          .map((r) => {
+            if (typeof r === "number") return byIndex.get(r) ?? null;
+            const s = String(r).trim();
+            if (byId.has(s)) return s; // already a verbatim extractionValueId
+            const n = Number(s);
+            return Number.isInteger(n) ? (byIndex.get(n) ?? null) : null;
+          })
+          .filter((id): id is string => id !== null);
+        return {
+          name: t.name ?? "",
+          narrative: t.narrative ?? "",
+          findingRefs: [...new Set(refs)], // §II/FR-007: only resolvable anchors
+          provenance: prov,
+        };
+      })
+      // Drop any theme whose findingRefs is empty after mapping (§II)
       .filter((t) => t.findingRefs.length > 0);
-    if (themes.length === 0) return { insufficientData: true };
+
+    if (themes.length === 0) {
+      console.warn(
+        `[synthesis] synthesizeThemes produced no usable themes: ` +
+          `findings=${input.findings.length}, rawLen=${raw.length}, parsedThemes=${rawThemes.length}`,
+      );
+      return { insufficientData: true };
+    }
     return { themes };
   }
 

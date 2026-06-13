@@ -183,6 +183,12 @@ export async function processSynthesisJob(
   if (usageErr) throw new Error(usageErr.message);
 
   if ("insufficientData" in themeResult && themeResult.insufficientData) {
+    // pool.length > 0 here (the empty-pool case returned at step 5): the LLM was
+    // called but returned no usable themes — distinct from a genuinely empty pool.
+    console.warn(
+      `[synthesis] LLM returned no usable themes despite ${pool.length} finding(s) ` +
+        `(review ${reviewId}); synthesis → draft`,
+    );
     await supabase
       .from("synthesis")
       .update({ status: "draft" })

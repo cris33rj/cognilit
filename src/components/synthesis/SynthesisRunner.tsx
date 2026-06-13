@@ -53,12 +53,18 @@ export function SynthesisRunner({
   async function handleRun() {
     setPhase("running");
     setError(null);
-    const result = await onRun(reviewId);
-    if (!result.ok) {
-      setError(result.error ?? "Falha ao gerar síntese.");
+    try {
+      const result = await onRun(reviewId);
+      if (!result.ok) {
+        setError(result.error ?? "Falha ao gerar síntese.");
+        setPhase("error");
+      } else {
+        setPhase("done");
+      }
+    } catch (e) {
+      // Defensive: a thrown action must not leave the runner stuck in "running".
+      setError(e instanceof Error ? e.message : "Falha ao gerar síntese.");
       setPhase("error");
-    } else {
-      setPhase("done");
     }
   }
 

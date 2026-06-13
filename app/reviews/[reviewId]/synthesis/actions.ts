@@ -62,28 +62,37 @@ export async function estimateSynthesis(reviewId: string) {
  * Mesmo fallback de provider: BYOK quando há chave, senão Mock determinístico.
  */
 export async function runSynthesis(reviewId: string) {
-  await requireMember(reviewId);
-  const admin = createAdminClient();
-
-  let provider;
   try {
-    provider = await getLLMProvider(reviewId);
-  } catch (e) {
-    if (e instanceof MissingByokError) {
-      provider = new MockLLMProvider();
-    } else throw e;
-  }
+    await requireMember(reviewId);
+    const admin = createAdminClient();
 
-  const enq = await enqueueSynthesisJob({ supabase: admin }, reviewId);
+    let provider;
+    try {
+      provider = await getLLMProvider(reviewId);
+    } catch (e) {
+      if (e instanceof MissingByokError) {
+        provider = new MockLLMProvider();
+      } else throw e;
+    }
 
-  if (enq.item_count === 0) {
+    const enq = await enqueueSynthesisJob({ supabase: admin }, reviewId);
+
+    if (enq.item_count === 0) {
+      revalidate(reviewId);
+      return { ok: true as const, jobId: enq.job_id, itemCount: 0 };
+    }
+
+    await runSynthesisBatchWorkerWith(admin, provider, reviewId);
     revalidate(reviewId);
-    return { ok: true as const, jobId: enq.job_id, itemCount: 0 };
+    return { ok: true as const, jobId: enq.job_id, itemCount: enq.item_count };
+  } catch (e) {
+    // Surface the failure to the client (the runner renders result.error) instead
+    // of throwing — a thrown server action is swallowed by AsyncActionButton.
+    return {
+      ok: false as const,
+      error: e instanceof Error ? e.message : "Falha ao gerar síntese.",
+    };
   }
-
-  await runSynthesisBatchWorkerWith(admin, provider, reviewId);
-  revalidate(reviewId);
-  return { ok: true as const, jobId: enq.job_id, itemCount: enq.item_count };
 }
 
 // ---- Ratificação de temas (FR-004) ----

@@ -62,9 +62,14 @@ export default async function SynthesisPage({
         (t.ai_suggestion?.provenance as Provenance) ?? UNKNOWN_PROVENANCE,
     })) ?? [];
 
-  // hasThemes is false both when no synthesis exists yet AND when a synthesis
-  // exists but all themes were rejected (loadSynthesis filters out rejected ones).
-  const hasThemes = data !== null && mappedThemes.length > 0;
+  // Synthesis status drives the empty-state message so the user can tell apart
+  // "never ran" from "ran but produced no anchored themes" (draft) / "failed".
+  const status = data?.synthesis.status as
+    | "draft"
+    | "generating"
+    | "ready"
+    | "failed"
+    | undefined;
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-8">
@@ -78,13 +83,7 @@ export default async function SynthesisPage({
         />
       </header>
 
-      {!hasThemes ? (
-        candidateCount === 0 ? (
-          <InsufficientData />
-        ) : (
-          <p className="text-sm text-ink-soft">Gere a síntese para começar.</p>
-        )
-      ) : (
+      {data && mappedThemes.length > 0 ? (
         <ThemeList
           reviewId={reviewId}
           synthesisId={data.synthesis.id}
@@ -96,6 +95,23 @@ export default async function SynthesisPage({
           onMerge={mergeThemes}
           onSplit={splitTheme}
         />
+      ) : candidateCount === 0 ? (
+        <InsufficientData />
+      ) : status === "generating" ? (
+        <p className="text-sm text-ink-soft" role="status">
+          Gerando síntese…
+        </p>
+      ) : status === "failed" ? (
+        <p className="text-sm text-error" role="alert">
+          A geração da síntese falhou. Tente novamente.
+        </p>
+      ) : status === "draft" ? (
+        <p className="text-sm text-ink-soft">
+          A última geração não retornou temas ancorados nos achados. Revise os
+          dados de extração e gere novamente.
+        </p>
+      ) : (
+        <p className="text-sm text-ink-soft">Gere a síntese para começar.</p>
       )}
     </main>
   );
