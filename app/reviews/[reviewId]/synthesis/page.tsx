@@ -7,7 +7,7 @@ import { ThemeList } from "@/components/synthesis/ThemeList";
 import { SynthesisRunner } from "@/components/synthesis/SynthesisRunner";
 import { InsufficientData } from "@/components/synthesis/InsufficientData";
 import type { ThemeCardTheme } from "@/components/synthesis/ThemeCard";
-import type { SuggestionState } from "@/lib/ai/llm/types";
+import type { Provenance, SuggestionState } from "@/lib/ai/llm/types";
 import type { ThemeSummaryTable } from "@/lib/synthesis/summary-table";
 import {
   estimateSynthesis,
@@ -20,9 +20,10 @@ import {
   splitTheme,
 } from "./actions";
 
-// Sentinel provenance used when DB rows pre-date the provenance column or
-// the field is absent. ThemeCard renders provenance for grounding display only —
-// a missing provenance is not a blocking error.
+// Sentinel provenance used only for themes whose ai_suggestion_id is null
+// (manually created or pre-dates the provenance column). ThemeCard renders
+// provenance for grounding display only — a missing provenance is not a
+// blocking error.
 const UNKNOWN_PROVENANCE = {
   model: "unknown",
   version: "unknown",
@@ -46,7 +47,8 @@ export default async function SynthesisPage({
   // Map ThemeRow[] → ThemeCardTheme[]:
   // • state: cast string → SuggestionState (DB enforces the enum)
   // • summary_table: cast unknown → ThemeSummaryTable | null
-  // • provenance: provide sentinel (field not persisted in ThemeRow)
+  // • provenance: read from ai_suggestion embed (FR-002); fall back to sentinel
+  //   only for themes whose ai_suggestion_id is null.
   const mappedThemes: ThemeCardTheme[] =
     data?.themes.map((t) => ({
       id: t.id,
@@ -56,9 +58,12 @@ export default async function SynthesisPage({
       state: t.state as SuggestionState,
       summary_table: (t.summary_table as ThemeSummaryTable | null) ?? null,
       theme_finding: t.theme_finding,
-      provenance: UNKNOWN_PROVENANCE,
+      provenance:
+        (t.ai_suggestion?.provenance as Provenance) ?? UNKNOWN_PROVENANCE,
     })) ?? [];
 
+  // hasThemes is false both when no synthesis exists yet AND when a synthesis
+  // exists but all themes were rejected (loadSynthesis filters out rejected ones).
   const hasThemes = data !== null && mappedThemes.length > 0;
 
   return (

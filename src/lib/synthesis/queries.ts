@@ -32,6 +32,8 @@ interface ThemeRow {
   order: number;
   summary_table: unknown;
   ai_suggestion_id: string | null;
+  // PostgREST FK-parent embed (singular object, not array).
+  ai_suggestion: { provenance: unknown } | null;
   state: string;
   created_at: string;
   updated_at: string;
@@ -99,10 +101,14 @@ export async function loadSynthesis(
   if (!synthesis) return null;
   const { data: themes, error: themesError } = await deps.supabase
     .from("theme")
-    .select('*, theme_finding(extraction_value_id, "order")')
+    .select(
+      '*, theme_finding(extraction_value_id, "order"), ai_suggestion(provenance)',
+    )
     .eq("synthesis_id", synthesis.id)
     .neq("state", "rejected")
     .order("order");
   if (themesError) throw new Error(themesError.message);
-  return { synthesis, themes: (themes ?? []) as ThemeRow[] };
+  // supabase-js may infer the ai_suggestion embed as an array; cast to our
+  // typed shape that reflects PostgREST's singular-object FK-parent embed.
+  return { synthesis, themes: (themes ?? []) as unknown as ThemeRow[] };
 }

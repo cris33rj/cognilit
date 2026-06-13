@@ -30,7 +30,9 @@ interface ThemeListProps {
     themeIds: string[],
     name: string,
   ) => Promise<{ ok: boolean; error?: string }>;
-  onSplit: (
+  // Split action is wired but the minimal UI defers the split control;
+  // manual edit/merge cover the flow for now. Kept optional for forward-compat.
+  onSplit?: (
     reviewId: string,
     themeId: string,
     parts: { name: string; narrative?: string; findingRefs: string[] }[],
