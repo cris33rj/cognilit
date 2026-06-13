@@ -190,7 +190,7 @@ class FakeStore {
     this._updates.get(table)!.push({ data, affected });
   }
 
-  inserted(table: string): Row[] {
+  allRows(table: string): Row[] {
     return [...this.rows(table)];
   }
 
@@ -326,7 +326,7 @@ describe("processSynthesisJob", () => {
     expect(result.failed).toBe(0);
 
     // themes inserted (MockLLMProvider groups by fieldName: Intervenção and Desfecho)
-    const themes = store.inserted("theme");
+    const themes = store.allRows("theme");
     expect(themes.length).toBeGreaterThanOrEqual(1);
 
     // each theme has a synthesis_id and name
@@ -337,14 +337,14 @@ describe("processSynthesisJob", () => {
     }
 
     // theme_finding rows inserted (at least 3 total: 2 from A + 1 from B)
-    const tfs = store.inserted("theme_finding");
+    const tfs = store.allRows("theme_finding");
     expect(tfs.length).toBeGreaterThanOrEqual(1);
     const allEvIds = tfs.map((tf) => tf.extraction_value_id);
     expect(allEvIds).toContain(EV_A1);
     expect(allEvIds).toContain(EV_B1);
 
     // ai_suggestion inserted for each theme
-    const suggestions = store.inserted("ai_suggestion");
+    const suggestions = store.allRows("ai_suggestion");
     expect(suggestions.length).toBe(themes.length);
     for (const s of suggestions) {
       expect(s.target_kind).toBe("synthesis_theme");
@@ -352,13 +352,13 @@ describe("processSynthesisJob", () => {
     }
 
     // ai_usage inserted with phase = 'synthesis'
-    const usages = store.inserted("ai_usage");
+    const usages = store.allRows("ai_usage");
     expect(usages.length).toBe(1);
-    const usage = usages[0];
-    expect(usage).toBeDefined();
-    expect(usage!.phase).toBe("synthesis");
-    expect(usage!.review_id).toBe(REVIEW_ID);
-    expect(usage!.job_id).toBe(JOB_ID);
+    expect(usages[0]).toBeDefined();
+    const usage = usages[0]!;
+    expect(usage.phase).toBe("synthesis");
+    expect(usage.review_id).toBe(REVIEW_ID);
+    expect(usage.job_id).toBe(JOB_ID);
 
     // synthesis row updated to 'ready'
     const synthUpdates = store.updated("synthesis");
@@ -380,7 +380,7 @@ describe("processSynthesisJob", () => {
     expect(result.status).toBe("completed");
 
     // no themes
-    expect(store.inserted("theme").length).toBe(0);
+    expect(store.allRows("theme").length).toBe(0);
 
     // synthesis status = draft
     const synthUpdates = store.updated("synthesis");
@@ -422,7 +422,7 @@ describe("processSynthesisJob", () => {
     expect(result.status).toBe("completed");
 
     // No theme rows should have been inserted
-    expect(store.inserted("theme").length).toBe(0);
+    expect(store.allRows("theme").length).toBe(0);
 
     // synthesis updated to 'draft'
     const synthUpdates = store.updated("synthesis");
@@ -430,13 +430,13 @@ describe("processSynthesisJob", () => {
     expect(draftUpdate).toBeTruthy();
 
     // ai_usage IS recorded (because the LLM was called)
-    const usages = store.inserted("ai_usage");
+    const usages = store.allRows("ai_usage");
     expect(usages.length).toBe(1);
-    const usage = usages[0];
-    expect(usage).toBeDefined();
-    expect(usage!.phase).toBe("synthesis");
-    expect(usage!.review_id).toBe(REVIEW_ID);
-    expect(usage!.job_id).toBe(JOB_ID);
+    expect(usages[0]).toBeDefined();
+    const usage = usages[0]!;
+    expect(usage.phase).toBe("synthesis");
+    expect(usage.review_id).toBe(REVIEW_ID);
+    expect(usage.job_id).toBe(JOB_ID);
   });
 
   // ── Scenario 5: regeneration-preservation (FR-005a) ──────────────────────
@@ -483,7 +483,7 @@ describe("processSynthesisJob", () => {
     >[0]["supabase"];
     await processSynthesisJob({ supabase, provider }, JOB_ID);
 
-    const allThemes = store.inserted("theme");
+    const allThemes = store.allRows("theme");
 
     // The accepted theme must still exist
     const acceptedStillExists = allThemes.some(
@@ -543,7 +543,7 @@ describe("processSynthesisJob", () => {
     expect(failUpdate?.data.error).toContain("DB timeout");
 
     // themes were still produced from RECORD_B
-    const themes = store.inserted("theme");
+    const themes = store.allRows("theme");
     expect(themes.length).toBeGreaterThanOrEqual(1);
   });
 });
