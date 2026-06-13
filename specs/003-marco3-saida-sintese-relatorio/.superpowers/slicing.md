@@ -1,7 +1,8 @@
 # Slicing — Marco 3 (Saída) — Sessão B
 
 **Feature**: `003-marco3-saida-sintese-relatorio` | **Date**: 2026-06-12
-**Status**: Fatiação APROVADA pelo usuário (CHECKPOINT 1, 2026-06-12). Fatia 1 em planejamento.
+**Status**: Fatiação APROVADA pelo usuário (CHECKPOINT 1, 2026-06-12). Fatia 1 ✅ mergeada
+(`82e8990`, 2026-06-13); Fatia 2 (Síntese) em andamento.
 **Ancorado em**: [codebase-map.md](./codebase-map.md), [plan.md](../plan.md),
 [data-model.md](../data-model.md), contratos (synthesis/report/prisma-export),
 [HANDOFF.md](../HANDOFF.md). Produto sign-off (CONTEXT/constitution/spec) — não reaberto.
@@ -209,14 +210,17 @@ Numeração de migration é indicativa; o número real (próximo após `0017`) �
 
 ## Estado de execução (atualizado a cada merge)
 
-| # | Fatia | Branch | Status |
-|---|-------|--------|--------|
-| 1 | Fluxograma PRISMA (US2) | build/003-marco3-saida-sintese-relatorio/1-prisma-flowchart | 🟡 planejando (CHECKPOINT 2) |
-| 2 | Síntese (US1) | build/003-marco3-saida-sintese-relatorio/2-synthesis | ⏳ não iniciada |
-| 3 | Relatório (US3) | build/003-marco3-saida-sintese-relatorio/3-report | ⏳ não iniciada |
-| 4 | Checklist + características (US4) | build/003-marco3-saida-sintese-relatorio/4-checklist-characteristics | ⏳ não iniciada |
-| 5 | Export infra + MD/BibTeX/RIS (US5a) | build/003-marco3-saida-sintese-relatorio/5-export-light | ⏳ não iniciada |
-| 6 | Export DOCX/PDF + APA7 (US5b) | build/003-marco3-saida-sintese-relatorio/6-export-docs | ⏳ não iniciada |
+> Tracking vivo (atualizar ao fim de cada CHECKPOINT 3 / merge). Detalhe por fatia em
+> `COMPLETION-fatia-<n>.md`.
+
+| # | Fatia | Branch | Status | Merge |
+|---|-------|--------|--------|-------|
+| 1 | Fluxograma PRISMA (US2) | build/003-marco3-saida-sintese-relatorio/1-prisma-flowchart | ✅ mergeada | `82e8990` (2026-06-13) |
+| 2 | Síntese (US1) | build/003-marco3-saida-sintese-relatorio/2-synthesis | 🟡 em andamento | — |
+| 3 | Relatório (US3) | build/003-marco3-saida-sintese-relatorio/3-report | ⏳ não iniciada | — |
+| 4 | Checklist + características (US4) | build/003-marco3-saida-sintese-relatorio/4-checklist-characteristics | ⏳ não iniciada | — |
+| 5 | Export infra + MD/BibTeX/RIS (US5a) | build/003-marco3-saida-sintese-relatorio/5-export-light | ⏳ não iniciada | — |
+| 6 | Export DOCX/PDF + APA7 (US5b) | build/003-marco3-saida-sintese-relatorio/6-export-docs | ⏳ não iniciada | — |
 
 Após aprovação (CHECKPOINT 1): por fatia, `writing-plans` (CHECKPOINT 2) →
 `using-git-worktrees` → `subagent-driven-development` → **PARAR** (CHECKPOINT 3) →
