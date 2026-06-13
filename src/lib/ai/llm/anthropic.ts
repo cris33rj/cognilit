@@ -11,8 +11,14 @@ import type {
   ProtocolDraft,
   ProviderIdentity,
   ScreeningPreclassification,
+  SynthesisFinding,
+  SynthesizeThemesResult,
 } from "./types";
-import { estimateScreeningCost, estimateExtractionCost } from "./cost";
+import {
+  estimateScreeningCost,
+  estimateExtractionCost,
+  estimateSynthesisCost,
+} from "./cost";
 
 const MODEL = "claude-opus-4-8"; // default D14
 const PT_BR = "Responda SEMPRE em português brasileiro (pt-BR).";
@@ -183,12 +189,65 @@ export class AnthropicProvider implements LLMProvider {
   async estimateCost(
     input:
       | { itemCount: number; kind: "ai_screening_batch" }
-      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number }
+      | { itemCount: number; kind: "synthesis_batch" },
   ): Promise<CostEstimate> {
     if (input.kind === "ai_extraction_batch") {
       return estimateExtractionCost(input.itemCount, input.fieldCount);
     }
+    if (input.kind === "synthesis_batch") {
+      return estimateSynthesisCost(input.itemCount);
+    }
     return estimateScreeningCost(input.itemCount);
+  }
+
+  async synthesizeThemes(input: {
+    findings: SynthesisFinding[];
+    language: "pt-BR";
+  }): Promise<SynthesizeThemesResult> {
+    if (input.findings.length === 0) return { insufficientData: true };
+    const inputIds = new Set(input.findings.map((f) => f.extractionValueId));
+    const findingLines = input.findings
+      .map(
+        (f) =>
+          `- extractionValueId=${f.extractionValueId} | campo=${f.fieldName} | valor=${JSON.stringify(f.value)}`,
+      )
+      .join("\n");
+    const prompt =
+      `Agrupe os achados abaixo em temas qualitativos para uma revisão sistemática.\n` +
+      `REGRAS OBRIGATÓRIAS:\n` +
+      `1. Cada tema DEVE conter pelo menos um findingRef (extractionValueId dos achados fornecidos).\n` +
+      `2. findingRefs deve ser subconjunto dos IDs fornecidos — não invente IDs.\n` +
+      `3. Narrativa em pt-BR.\n` +
+      `4. Não crie temas sem ancoragem nos achados.\n\n` +
+      `Achados:\n${findingLines}\n\n` +
+      `Retorne JSON {"themes":[{"name":"...","narrative":"...","findingRefs":["extractionValueId1",...]}]}.`;
+    const raw = await this.ask(
+      "Você sintetiza achados de revisões sistemáticas em temas qualitativos; nunca inventa dados.",
+      prompt,
+    );
+    const parsed = safeParse<{
+      themes: Array<{ name: string; narrative: string; findingRefs: string[] }>;
+    }>(raw, {
+      themes: [],
+    });
+    const prov = {
+      model: MODEL,
+      version: MODEL,
+      prompt_or_span: prompt,
+      timestamp: nowIso(),
+    };
+    const themes = parsed.themes
+      .map((t) => ({
+        name: t.name ?? "",
+        narrative: t.narrative ?? "",
+        // Keep only findingRefs that are valid IDs from the input (§II/FR-007)
+        findingRefs: (t.findingRefs ?? []).filter((id) => inputIds.has(id)),
+        provenance: prov,
+      }))
+      // Drop any theme whose findingRefs is empty after filtering (§II)
+      .filter((t) => t.findingRefs.length > 0);
+    return { themes };
   }
 
   async extractFields(input: {
