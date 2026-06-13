@@ -129,6 +129,7 @@ language plpgsql security definer set search_path = public as $$
 declare v_review uuid;
 begin
   select review_id into v_review from public.synthesis where id = p_synthesis_id;
+  if v_review is null then raise exception 'synthesis not found'; end if;
   if not public.is_review_member(v_review) then raise exception 'not a member'; end if;
   update public.theme t set "order" = ord.idx - 1
   from (select unnest(p_theme_ids) as id, generate_subscripts(p_theme_ids, 1) as idx) ord
@@ -145,18 +146,23 @@ create or replace function public.merge_themes(
 language plpgsql security definer set search_path = public as $$
 declare v_review uuid; v_synth uuid; v_target public.theme;
 begin
+  if p_theme_ids is null or cardinality(p_theme_ids) < 2 then
+    raise exception 'merge_themes requires at least 2 theme ids';
+  end if;
+
   select review_id, synthesis_id into v_review, v_synth
   from public.theme where id = p_theme_ids[1];
   if not public.is_review_member(v_review) then raise exception 'not a member'; end if;
 
   insert into public.theme (review_id, synthesis_id, name, narrative, state, "order")
   select v_review, v_synth, p_name,
-         string_agg(narrative, E'\n\n' order by "order"), 'edited', min("order")
-  from public.theme where id = any(p_theme_ids)
+         string_agg(t.narrative, E'\n\n' order by t."order"), 'edited', min(t."order")
+  from public.theme t where t.id = any(p_theme_ids)
   returning * into v_target;
 
   update public.theme_finding set theme_id = v_target.id where theme_id = any(p_theme_ids);
-  update public.theme set state = 'rejected', updated_at = now() where id = any(p_theme_ids);
+  update public.theme set state = 'rejected', updated_at = now()
+  where id = any(p_theme_ids) and id <> v_target.id;
 
   insert into public.audit_entry (review_id, actor_type, actor_id, action, entity, entity_id, after)
   values (v_review, 'human', auth.uid(), 'merge_themes', 'theme', v_target.id,
@@ -171,6 +177,10 @@ create or replace function public.split_theme(
 language plpgsql security definer set search_path = public as $$
 declare v_review uuid; v_synth uuid; v_part jsonb; v_new public.theme;
 begin
+  if p_parts is null or jsonb_array_length(p_parts) = 0 then
+    raise exception 'split_theme requires at least one part';
+  end if;
+
   select review_id, synthesis_id into v_review, v_synth
   from public.theme where id = p_theme_id;
   if not public.is_review_member(v_review) then raise exception 'not a member'; end if;
@@ -182,8 +192,8 @@ begin
     returning * into v_new;
     update public.theme_finding set theme_id = v_new.id
     where theme_id = p_theme_id
-      and extraction_value_id::text in (
-        select jsonb_array_elements_text(v_part->'findingRefs'));
+      and extraction_value_id in (
+        select (jsonb_array_elements_text(v_part->'findingRefs'))::uuid);
     return next v_new;
   end loop;
 
