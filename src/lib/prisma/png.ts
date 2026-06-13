@@ -9,7 +9,12 @@ function ensureWasm(): Promise<void> {
   if (!wasmReady) {
     wasmReady = (async () => {
       const require = createRequire(import.meta.url);
-      const wasmPath = require.resolve("@resvg/resvg-wasm/index_bg.wasm");
+      // Specifier montado em runtime: impede o webpack do Next de traçar e tentar
+      // bundlar o .wasm como módulo (erro "module is not flagged as WebAssembly").
+      // O pacote fica external (next.config serverComponentsExternalPackages) e o
+      // .wasm é lido do node_modules em runtime Node — A2.
+      const wasmSpecifier = ["@resvg", "resvg-wasm", "index_bg.wasm"].join("/");
+      const wasmPath = require.resolve(wasmSpecifier);
       const bytes = await readFile(wasmPath);
       await initWasm(bytes);
     })();
