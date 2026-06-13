@@ -20,6 +20,14 @@ export default async function ReviewHomePage({
         Contexto da Revisão ativa. As fases (Pergunta, Protocolo, Workbench)
         entram nas próximas fatias.
       </p>
+      <p className="mt-4">
+        <a
+          className="text-accent-deep hover:underline"
+          href={`/reviews/${reviewId}/prisma`}
+        >
+          Ver fluxograma PRISMA 2020
+        </a>
+      </p>
     </section>
   );
 }
