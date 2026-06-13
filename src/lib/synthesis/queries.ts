@@ -10,8 +10,8 @@ interface ExtractionValueRow {
   id: string;
   record_id: string;
   final_value: unknown;
-  // Supabase embeds the FK-parent as an array when using the table name directly.
-  extraction_field: { name: string }[] | null;
+  // PostgREST returns a FK-parent embed as a singular object, not an array.
+  extraction_field: { name: string } | null;
 }
 
 interface RecordWithValueStateRow {
@@ -63,10 +63,10 @@ export async function collectRatifiedFindings(
     .eq("record_id", recordId)
     .in("state", ["accepted", "edited"]);
   if (error) throw new Error(error.message);
-  return (data ?? []).map((v: ExtractionValueRow) => ({
+  return ((data ?? []) as unknown as ExtractionValueRow[]).map((v) => ({
     extractionValueId: v.id,
     recordId: v.record_id,
-    fieldName: v.extraction_field?.[0]?.name ?? "",
+    fieldName: v.extraction_field?.name ?? "",
     value: v.final_value,
   }));
 }
@@ -97,11 +97,12 @@ export async function loadSynthesis(
     .eq("review_id", reviewId)
     .maybeSingle<SynthesisRow>();
   if (!synthesis) return null;
-  const { data: themes } = await deps.supabase
+  const { data: themes, error: themesError } = await deps.supabase
     .from("theme")
     .select('*, theme_finding(extraction_value_id, "order")')
     .eq("synthesis_id", synthesis.id)
     .neq("state", "rejected")
     .order("order");
+  if (themesError) throw new Error(themesError.message);
   return { synthesis, themes: (themes ?? []) as ThemeRow[] };
 }
