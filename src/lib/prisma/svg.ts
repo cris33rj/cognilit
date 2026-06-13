@@ -41,8 +41,8 @@ export function renderPrismaSvg(m: PrismaFlowModel): string {
   const positions: number[] = [];
   for (let i = 0; i < stack.length; i++) {
     positions.push(y);
-    if (i > 0) parts.push(arrow(positions[i - 1] + BOX_H, y));
-    parts.push(box(y, stack[i][0], stack[i][1]));
+    if (i > 0) parts.push(arrow(positions[i - 1]! + BOX_H, y));
+    parts.push(box(y, stack[i]![0], stack[i]![1]));
     y += BOX_H + gap;
   }
 
@@ -62,12 +62,12 @@ export function renderPrismaSvg(m: PrismaFlowModel): string {
   };
 
   parts.push(
-    side(positions[0] + BOX_H + 6, [
+    side(positions[0]! + BOX_H + 6, [
       `Duplicados removidos: n = ${m.duplicatesRemoved}`,
     ]),
   );
   parts.push(
-    side(positions[1] + BOX_H + 6, [
+    side(positions[1]! + BOX_H + 6, [
       `Excluídos (T/R): n = ${m.excludedScreening}`,
     ]),
   );
@@ -77,7 +77,7 @@ export function renderPrismaSvg(m: PrismaFlowModel): string {
         ...m.excludedFullText.map((e) => `• ${e.reason}: n = ${e.n}`),
       ]
     : ["Excluídos (TC): n = 0"];
-  parts.push(side(positions[2] + BOX_H + 6, ftLines));
+  parts.push(side(positions[2]! + BOX_H + 6, ftLines));
 
   const totalH = y + 20 + (m.partial ? 24 : 0);
   const banner = m.partial
