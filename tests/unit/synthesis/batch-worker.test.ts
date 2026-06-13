@@ -388,6 +388,125 @@ describe("processSynthesisJob", () => {
     expect(draftUpdate).toBeTruthy();
   });
 
+  // ── Scenario 4: insufficientData — LLM called but returned no themes ────────
+  it("sets synthesis to draft and records ai_usage when provider returns insufficientData", async () => {
+    seedStore(store, [{ id: "item-a", recordId: RECORD_A }]);
+
+    vi.mocked(collectRatifiedFindings).mockResolvedValueOnce([
+      {
+        extractionValueId: EV_A1,
+        recordId: RECORD_A,
+        fieldName: "Intervenção",
+        value: "CBT",
+      },
+    ]);
+
+    // Override synthesizeThemes to return insufficientData
+    const insufficientProvider = {
+      ...provider,
+      synthesizeThemes: vi.fn().mockResolvedValue({ insufficientData: true }),
+      identity: () => provider.identity(),
+    };
+
+    const supabase = makeSupabase(store) as unknown as Parameters<
+      typeof processSynthesisJob
+    >[0]["supabase"];
+    const result = await processSynthesisJob(
+      {
+        supabase,
+        provider: insufficientProvider as unknown as typeof provider,
+      },
+      JOB_ID,
+    );
+
+    expect(result.status).toBe("completed");
+
+    // No theme rows should have been inserted
+    expect(store.inserted("theme").length).toBe(0);
+
+    // synthesis updated to 'draft'
+    const synthUpdates = store.updated("synthesis");
+    const draftUpdate = synthUpdates.find((u) => u.data.status === "draft");
+    expect(draftUpdate).toBeTruthy();
+
+    // ai_usage IS recorded (because the LLM was called)
+    const usages = store.inserted("ai_usage");
+    expect(usages.length).toBe(1);
+    const usage = usages[0];
+    expect(usage).toBeDefined();
+    expect(usage!.phase).toBe("synthesis");
+    expect(usage!.review_id).toBe(REVIEW_ID);
+    expect(usage!.job_id).toBe(JOB_ID);
+  });
+
+  // ── Scenario 5: regeneration-preservation (FR-005a) ──────────────────────
+  it("deletes pending themes but preserves accepted themes on re-run", async () => {
+    seedStore(store, [{ id: "item-a", recordId: RECORD_A }]);
+
+    // Seed an existing synthesis row
+    const SYNTHESIS_ID = "synth-existing";
+    store.push("synthesis", {
+      id: SYNTHESIS_ID,
+      review_id: REVIEW_ID,
+      status: "ready",
+    });
+
+    // Seed pre-existing themes: one accepted, one pending
+    const ACCEPTED_THEME_ID = "theme-accepted";
+    const PENDING_THEME_ID = "theme-pending-old";
+    store.push("theme", {
+      id: ACCEPTED_THEME_ID,
+      review_id: REVIEW_ID,
+      synthesis_id: SYNTHESIS_ID,
+      name: "Accepted Theme",
+      state: "accepted",
+    });
+    store.push("theme", {
+      id: PENDING_THEME_ID,
+      review_id: REVIEW_ID,
+      synthesis_id: SYNTHESIS_ID,
+      name: "Old Pending Theme",
+      state: "pending",
+    });
+
+    vi.mocked(collectRatifiedFindings).mockResolvedValueOnce([
+      {
+        extractionValueId: EV_A1,
+        recordId: RECORD_A,
+        fieldName: "Intervenção",
+        value: "CBT",
+      },
+    ]);
+
+    const supabase = makeSupabase(store) as unknown as Parameters<
+      typeof processSynthesisJob
+    >[0]["supabase"];
+    await processSynthesisJob({ supabase, provider }, JOB_ID);
+
+    const allThemes = store.inserted("theme");
+
+    // The accepted theme must still exist
+    const acceptedStillExists = allThemes.some(
+      (t) => t.id === ACCEPTED_THEME_ID && t.state === "accepted",
+    );
+    expect(acceptedStillExists).toBe(true);
+
+    // The old pending theme must have been deleted
+    const oldPendingStillExists = allThemes.some(
+      (t) => t.id === PENDING_THEME_ID,
+    );
+    expect(oldPendingStillExists).toBe(false);
+
+    // Fresh themes were inserted with state 'pending'
+    const freshThemes = allThemes.filter(
+      (t) =>
+        t.id !== ACCEPTED_THEME_ID &&
+        t.id !== PENDING_THEME_ID &&
+        t.state === "pending",
+    );
+    expect(freshThemes.length).toBeGreaterThanOrEqual(1);
+  });
+
   // ── Scenario 3: per-item resilience ────────────────────────────────────────
   it("marks failing study as failed but continues batch, does not abort", async () => {
     seedStore(store, [

@@ -152,6 +152,7 @@ export async function processSynthesisJob(
 
   // ── 5. Empty pool — no fabrication (FR-007) ───────────────────────────────
   if (pool.length === 0) {
+    // pool vazio: a IA não foi chamada, nada a contabilizar
     await supabase
       .from("synthesis")
       .update({ status: "draft" })
@@ -163,6 +164,17 @@ export async function processSynthesisJob(
   const themeResult = await provider.synthesizeThemes({
     findings: pool,
     language: "pt-BR",
+  });
+
+  // ── 6-pre. Record ai_usage (FR-026) — the LLM was invoked, record it now
+  // regardless of whether the result has themes or insufficientData.
+  await supabase.from("ai_usage").insert({
+    review_id: reviewId,
+    phase: "synthesis",
+    tokens_in: 0,
+    tokens_out: 0,
+    cost: {},
+    job_id: jobId,
   });
 
   if ("insufficientData" in themeResult && themeResult.insufficientData) {
@@ -287,17 +299,7 @@ export async function processSynthesisJob(
     .update({ status: "ready" })
     .eq("id", synthesisId);
 
-  // ── 7. Insert ai_usage ────────────────────────────────────────────────────
-  await supabase.from("ai_usage").insert({
-    review_id: reviewId,
-    phase: "synthesis",
-    tokens_in: 0,
-    tokens_out: 0,
-    cost: {},
-    job_id: jobId,
-  });
-
-  // ── 8. Finalize job ───────────────────────────────────────────────────────
+  // ── 7. Finalize job ───────────────────────────────────────────────────────
   return await _finalizeJob(supabase, jobId, runDone, runFailed);
 }
 
