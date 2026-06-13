@@ -237,7 +237,8 @@ export class AnthropicProvider implements LLMProvider {
       prompt_or_span: prompt,
       timestamp: nowIso(),
     };
-    const themes = parsed.themes
+    const rawThemes = Array.isArray(parsed.themes) ? parsed.themes : [];
+    const themes = rawThemes
       .map((t) => ({
         name: t.name ?? "",
         narrative: t.narrative ?? "",
@@ -247,6 +248,7 @@ export class AnthropicProvider implements LLMProvider {
       }))
       // Drop any theme whose findingRefs is empty after filtering (§II)
       .filter((t) => t.findingRefs.length > 0);
+    if (themes.length === 0) return { insufficientData: true };
     return { themes };
   }
 

@@ -93,6 +93,7 @@ describe("synthesizeThemes (contrato)", () => {
       kind: "synthesis_batch",
       itemCount: 5,
     });
-    expect(est.tokensEstimated).toBeGreaterThan(0);
+    // 5 estudos × 1200 tokens/estudo (TOKENS_PER_STUDY_SYNTHESIS heuristic in cost.ts)
+    expect(est.tokensEstimated).toBe(5 * 1200);
   });
 });

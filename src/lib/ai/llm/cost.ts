@@ -28,6 +28,7 @@ export function estimateExtractionCost(
   };
 }
 
+// itemCount = número de ESTUDOS (registros candidatos) incluídos na síntese.
 const TOKENS_PER_STUDY_SYNTHESIS = 1200; // heurística (refinar com métricas reais)
 
 /** Estimativa de custo de síntese: ~1 passe agregando os achados de N estudos. */
