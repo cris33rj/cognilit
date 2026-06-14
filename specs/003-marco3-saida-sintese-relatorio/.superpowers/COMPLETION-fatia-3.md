@@ -63,7 +63,11 @@ Editáveis → `human_edited` e preservadas na regeneração: **Métodos, Discus
   reais à Anthropic de 10–20s). **Todos os 5 arquivos passam isoladamente** (synthesis 5/5;
   extraction-batch + rls.extraction-batch + rls.embedding-chunk 14/14). Nenhuma regressão —
   os arquivos que falharam não são tocados por esta fatia.
-- e2e (Playwright) e validação visual do UI: a cargo do desenvolvedor.
+- **e2e (Playwright)**: `tests/e2e/report.spec.ts` adicionado e **passou** (1 passed, ~1.2min)
+  — cobre o fluxo real "Gerar relatório" pela UI (signup→review→seed→gerar), assegura as 6
+  seções + fluxograma embutido, e **guarda a regressão do client de membership** (generateReport
+  enfileira com o client do membro, não admin — espelha o motivo do synthesis.spec.ts). Validação
+  visual fina do UI segue a cargo do desenvolvedor.
 
 ## Fora de escopo (fatias seguintes)
 - Tabela de características dos estudos + checklist PRISMA → **Fatia 4**.
