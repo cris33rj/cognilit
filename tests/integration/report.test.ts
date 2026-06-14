@@ -10,6 +10,7 @@ import {
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { enqueueReportDraftJob } from "@/lib/report/enqueue";
 import { runReportDraftWorkerWith } from "@/lib/report/batch-run";
+import { regenerateDeterministicSections } from "@/lib/report/regenerate";
 
 // Harness (mirrors tests/integration/synthesis.test.ts):
 //  - serviceClient() bypasses RLS -> seeds/reads freely; is ALSO the Node worker client.
@@ -211,5 +212,33 @@ describe("processReportDraftJob (worker)", () => {
     const disc1 = rep1!.sections.find((s) => s.kind === "discussion")!;
     expect(disc1.content).toBe("DISCUSSÃO EDITADA PELO HUMANO");
     expect(disc1.edit_state).toBe("human_edited");
+  });
+});
+
+describe("regenerateDeterministicSections (FR-016)", () => {
+  it("reescreve determinísticas e preserva Métodos human_edited", async () => {
+    const { svc, member, reviewId } = await seedReview("regen");
+    await enqueueReportDraftJob({ supabase: member }, reviewId);
+    await runReportDraftWorkerWith(svc, new MockLLMProvider(), reviewId);
+
+    const rep = await loadReport({ supabase: svc }, reviewId);
+    const methods = rep!.sections.find((s) => s.kind === "methods")!;
+    await member.rpc("set_report_section_content", {
+      p_section_id: methods.id,
+      p_content: "MÉTODOS EDITADO",
+    });
+
+    const res = await regenerateDeterministicSections(
+      { supabase: svc },
+      reviewId,
+    );
+    expect(res.preserved).toContain("methods");
+    expect(res.regenerated).toContain("results");
+    expect(res.regenerated).toContain("ai_declaration");
+
+    const rep2 = await loadReport({ supabase: svc }, reviewId);
+    expect(rep2!.sections.find((s) => s.kind === "methods")!.content).toBe(
+      "MÉTODOS EDITADO",
+    );
   });
 });
