@@ -2,7 +2,14 @@
 import { describe, it, expect } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { signUpUser, serviceClient } from "./helpers/supabase";
-import { loadReportInputs, resolveReport } from "@/lib/report/queries";
+import {
+  loadReportInputs,
+  resolveReport,
+  loadReport,
+} from "@/lib/report/queries";
+import { MockLLMProvider } from "@/lib/ai/llm/mock";
+import { enqueueReportDraftJob } from "@/lib/report/enqueue";
+import { runReportDraftWorkerWith } from "@/lib/report/batch-run";
 
 // Harness (mirrors tests/integration/synthesis.test.ts):
 //  - serviceClient() bypasses RLS -> seeds/reads freely; is ALSO the Node worker client.
@@ -150,5 +157,59 @@ describe("loadReportInputs / resolveReport (IO, deps-injection)", () => {
     const a = await resolveReport({ supabase: svc }, reviewId);
     const b = await resolveReport({ supabase: svc }, reviewId);
     expect(a).toBe(b);
+  });
+});
+
+describe("processReportDraftJob (worker)", () => {
+  it("monta 4 determinísticas + rascunha Discussão/Conclusão (ai_generated) + ai_usage report", async () => {
+    const { svc, member, reviewId } = await seedReview("worker");
+    await enqueueReportDraftJob({ supabase: member }, reviewId); // RPC gated -> member client
+    await runReportDraftWorkerWith(svc, new MockLLMProvider(), reviewId); // worker -> service client
+
+    const rep = await loadReport({ supabase: svc }, reviewId);
+    expect(rep).not.toBeNull();
+    expect(rep!.status).toBe("ready");
+    const kinds = rep!.sections.map((s) => s.kind).sort();
+    expect(kinds).toEqual(
+      [
+        "ai_declaration",
+        "conclusion",
+        "deviations",
+        "discussion",
+        "methods",
+        "results",
+      ].sort(),
+    );
+    const disc = rep!.sections.find((s) => s.kind === "discussion")!;
+    expect(disc.edit_state).toBe("ai_generated");
+    expect(disc.ai_suggestion_id).not.toBeNull();
+
+    const { count } = await svc
+      .from("ai_usage")
+      .select("id", { count: "exact", head: true })
+      .eq("review_id", reviewId)
+      .eq("phase", "report");
+    expect((count ?? 0) >= 1).toBe(true);
+  });
+
+  it("regeneração via worker PRESERVA Discussão human_edited", async () => {
+    const { svc, member, reviewId } = await seedReview("worker-preserve");
+    await enqueueReportDraftJob({ supabase: member }, reviewId);
+    await runReportDraftWorkerWith(svc, new MockLLMProvider(), reviewId);
+
+    const rep0 = await loadReport({ supabase: svc }, reviewId);
+    const disc = rep0!.sections.find((s) => s.kind === "discussion")!;
+    await member.rpc("set_report_section_content", {
+      p_section_id: disc.id,
+      p_content: "DISCUSSÃO EDITADA PELO HUMANO",
+    });
+
+    await enqueueReportDraftJob({ supabase: member }, reviewId);
+    await runReportDraftWorkerWith(svc, new MockLLMProvider(), reviewId);
+
+    const rep1 = await loadReport({ supabase: svc }, reviewId);
+    const disc1 = rep1!.sections.find((s) => s.kind === "discussion")!;
+    expect(disc1.content).toBe("DISCUSSÃO EDITADA PELO HUMANO");
+    expect(disc1.edit_state).toBe("human_edited");
   });
 });
