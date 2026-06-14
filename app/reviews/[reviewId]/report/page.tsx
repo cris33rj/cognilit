@@ -21,6 +21,12 @@ const SECTION_LABEL: Record<string, string> = {
   deviations: "Desvios do protocolo",
 };
 
+const EDIT_STATE_LABEL: Record<string, string> = {
+  deterministic: "automática",
+  ai_generated: "rascunho IA",
+  human_edited: "editada",
+};
+
 export default async function ReportPage({
   params,
 }: {
@@ -60,7 +66,9 @@ export default async function ReportPage({
             <h2 className="text-lg font-semibold">
               {SECTION_LABEL[s.kind] ?? s.kind}
             </h2>
-            <span className="text-xs text-ink-soft">[{s.edit_state}]</span>
+            <span className="text-xs text-ink-soft">
+              [{EDIT_STATE_LABEL[s.edit_state] ?? s.edit_state}]
+            </span>
           </div>
           <SectionEditor
             reviewId={reviewId}
