@@ -13,6 +13,7 @@ const base: PhaseInput = {
   excludedFt: 0,
   extractionRatified: false,
   synthesisReady: false,
+  reportReady: false,
 };
 const by = (phases: ReturnType<typeof computePhaseStates>) =>
   Object.fromEntries(phases.map((p) => [p.key, p.status]));
@@ -179,6 +180,43 @@ describe("computePhaseStates — trilho de fases (US7)", () => {
       const extractionIdx = phases.findIndex((p) => p.key === "extraction");
       const synthesisIdx = phases.findIndex((p) => p.key === "synthesis");
       expect(synthesisIdx).toBeGreaterThan(extractionIdx);
+    });
+  });
+
+  describe("fase report no trilho", () => {
+    it("aparece após Síntese e fica locked até a síntese concluir", () => {
+      const phases = computePhaseStates("rev1", {
+        ...base,
+        synthesisReady: false,
+      });
+      const report = phases.find((p) => p.key === "report")!;
+      expect(report).toBeDefined();
+      expect(report.status).toBe("locked");
+    });
+
+    it("conclui quando reportReady=true", () => {
+      const phases = computePhaseStates("rev1", {
+        ...base,
+        extractionRatified: true,
+        synthesisReady: true,
+        reportReady: true,
+      });
+      const report = phases.find((p) => p.key === "report")!;
+      expect(report.status).toBe("done");
+    });
+
+    it("report vem depois de synthesis no trilho", () => {
+      const phases = computePhaseStates("rev1", base);
+      const synthesisIdx = phases.findIndex((p) => p.key === "synthesis");
+      const reportIdx = phases.findIndex((p) => p.key === "report");
+      expect(reportIdx).toBeGreaterThan(synthesisIdx);
+    });
+
+    it("href de report aponta para /reviews/:id/report", () => {
+      const phases = computePhaseStates("rev-abc", base);
+      expect(phases.find((p) => p.key === "report")!.href).toBe(
+        "/reviews/rev-abc/report",
+      );
     });
   });
 });

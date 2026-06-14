@@ -12,6 +12,7 @@ const base = {
   includedFt: 5,
   excludedFt: 0,
   synthesisReady: false,
+  reportReady: false,
 };
 
 describe("fase Extração no trilho (§7-C)", () => {
