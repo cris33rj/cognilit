@@ -2,7 +2,8 @@
 
 **Feature**: `003-marco3-saida-sintese-relatorio` | **Date**: 2026-06-12
 **Status**: Fatiação APROVADA pelo usuário (CHECKPOINT 1, 2026-06-12). Fatia 1 ✅ mergeada
-(`82e8990`, 2026-06-13); Fatia 2 (Síntese) em andamento.
+(`82e8990`, 2026-06-13); Fatia 2 (Síntese) ✅ mergeada (`a44fcba`, 2026-06-14). Fatia 3
+(Relatório) é a próxima.
 **Ancorado em**: [codebase-map.md](./codebase-map.md), [plan.md](../plan.md),
 [data-model.md](../data-model.md), contratos (synthesis/report/prisma-export),
 [HANDOFF.md](../HANDOFF.md). Produto sign-off (CONTEXT/constitution/spec) — não reaberto.
@@ -216,7 +217,7 @@ Numeração de migration é indicativa; o número real (próximo após `0017`) �
 | # | Fatia | Branch | Status | Merge |
 |---|-------|--------|--------|-------|
 | 1 | Fluxograma PRISMA (US2) | build/003-marco3-saida-sintese-relatorio/1-prisma-flowchart | ✅ mergeada | `82e8990` (2026-06-13) |
-| 2 | Síntese (US1) | build/003-marco3-saida-sintese-relatorio/2-synthesis | 🟡 em andamento | — |
+| 2 | Síntese (US1) | build/003-marco3-saida-sintese-relatorio/2-synthesis | ✅ mergeada | `a44fcba` (2026-06-14) |
 | 3 | Relatório (US3) | build/003-marco3-saida-sintese-relatorio/3-report | ⏳ não iniciada | — |
 | 4 | Checklist + características (US4) | build/003-marco3-saida-sintese-relatorio/4-checklist-characteristics | ⏳ não iniciada | — |
 | 5 | Export infra + MD/BibTeX/RIS (US5a) | build/003-marco3-saida-sintese-relatorio/5-export-light | ⏳ não iniciada | — |
