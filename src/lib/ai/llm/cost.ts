@@ -40,3 +40,9 @@ export function estimateSynthesisCost(itemCount: number): CostEstimate {
     cost: { usd: (tokensEstimated / 1000) * USD_PER_1K_TOKENS },
   };
 }
+
+/** Estimativa p/ rascunho de seções de relatório (Discussão/Conclusão). */
+export function estimateReportDraftCost(sectionCount: number): CostEstimate {
+  const tokensEstimated = sectionCount * 1200; // ~1.2k tokens por seção
+  return { tokensEstimated, cost: { usd: (tokensEstimated / 1000) * 0.0025 } };
+}

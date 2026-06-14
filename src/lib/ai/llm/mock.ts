@@ -1,5 +1,6 @@
 import type {
   CostEstimate,
+  DraftedSection,
   EligibilityDerivation,
   ExtractedField,
   ExtractionFieldDef,
@@ -13,8 +14,9 @@ import type {
   SynthesisFinding,
   SynthesizedTheme,
   SynthesizeThemesResult,
+  ThemeSummary,
 } from "./types";
-import { estimateSynthesisCost } from "./cost";
+import { estimateReportDraftCost, estimateSynthesisCost } from "./cost";
 
 function provenance(prompt: string) {
   return {
@@ -108,7 +110,8 @@ export class MockLLMProvider implements LLMProvider {
     input:
       | { itemCount: number; kind: "ai_screening_batch" }
       | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number }
-      | { itemCount: number; kind: "synthesis_batch" },
+      | { itemCount: number; kind: "synthesis_batch" }
+      | { itemCount: number; kind: "report_draft" },
   ): Promise<CostEstimate> {
     if (input.kind === "ai_extraction_batch") {
       const tokensEstimated = input.itemCount * input.fieldCount * 250;
@@ -120,9 +123,30 @@ export class MockLLMProvider implements LLMProvider {
     if (input.kind === "synthesis_batch") {
       return estimateSynthesisCost(input.itemCount);
     }
+    if (input.kind === "report_draft") {
+      return estimateReportDraftCost(input.itemCount);
+    }
     return {
       tokensEstimated: input.itemCount * 800,
       cost: { usd: input.itemCount * 0.002 },
+    };
+  }
+
+  async draftReportSection(input: {
+    kind: "discussion" | "conclusion";
+    context: { methods: string; results: string; themes: ThemeSummary[] };
+    language: "pt-BR";
+  }): Promise<DraftedSection> {
+    const titulo = input.kind === "discussion" ? "Discussão" : "Conclusão";
+    const temas = input.context.themes.map((t) => `- ${t.name}`).join("\n");
+    const content =
+      `## ${titulo}\n\n` +
+      `Rascunho simulado de ${titulo.toLowerCase()} a partir dos temas ratificados:\n` +
+      (temas || "- (sem temas)") +
+      `\n`;
+    return {
+      content,
+      provenance: provenance(`draftReportSection:${input.kind}`),
     };
   }
 

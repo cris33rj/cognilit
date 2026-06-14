@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type {
   CostEstimate,
+  DraftedSection,
   EligibilityDerivation,
   ExtractedField,
   ExtractionFieldDef,
@@ -13,10 +14,12 @@ import type {
   ScreeningPreclassification,
   SynthesisFinding,
   SynthesizeThemesResult,
+  ThemeSummary,
 } from "./types";
 import {
   estimateScreeningCost,
   estimateExtractionCost,
+  estimateReportDraftCost,
   estimateSynthesisCost,
 } from "./cost";
 
@@ -190,7 +193,8 @@ export class AnthropicProvider implements LLMProvider {
     input:
       | { itemCount: number; kind: "ai_screening_batch" }
       | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number }
-      | { itemCount: number; kind: "synthesis_batch" },
+      | { itemCount: number; kind: "synthesis_batch" }
+      | { itemCount: number; kind: "report_draft" },
   ): Promise<CostEstimate> {
     if (input.kind === "ai_extraction_batch") {
       return estimateExtractionCost(input.itemCount, input.fieldCount);
@@ -198,7 +202,39 @@ export class AnthropicProvider implements LLMProvider {
     if (input.kind === "synthesis_batch") {
       return estimateSynthesisCost(input.itemCount);
     }
+    if (input.kind === "report_draft") {
+      return estimateReportDraftCost(input.itemCount);
+    }
     return estimateScreeningCost(input.itemCount);
+  }
+
+  async draftReportSection(input: {
+    kind: "discussion" | "conclusion";
+    context: { methods: string; results: string; themes: ThemeSummary[] };
+    language: "pt-BR";
+  }): Promise<DraftedSection> {
+    const titulo = input.kind === "discussion" ? "Discussão" : "Conclusão";
+    const temas = input.context.themes
+      .map((t) => `### ${t.name}\n${t.narrative}`)
+      .join("\n\n");
+    const system =
+      `Você redige a seção "${titulo}" de uma revisão sistemática qualitativa. ` +
+      `Baseie-se ESTRITAMENTE nos Métodos, Resultados e temas fornecidos; ` +
+      `não introduza achados novos. Texto corrido, acadêmico, pt-BR.`;
+    const user =
+      `# Métodos\n${input.context.methods}\n\n# Resultados\n${input.context.results}\n\n` +
+      `# Temas ratificados\n${temas || "(nenhum)"}\n\n` +
+      `Escreva a seção ${titulo} em markdown, iniciando por "## ${titulo}".`;
+    const text = await this.ask(system, user);
+    return {
+      content: text,
+      provenance: {
+        model: MODEL,
+        version: MODEL,
+        prompt_or_span: `draftReportSection:${input.kind}`,
+        timestamp: nowIso(),
+      },
+    };
   }
 
   async synthesizeThemes(input: {
