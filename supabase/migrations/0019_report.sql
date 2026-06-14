@@ -59,6 +59,15 @@ begin
     raise exception 'not a member';
   end if;
 
+  if exists (
+    select 1 from public.job
+    where review_id = p_review_id
+      and type = 'report_draft'
+      and status in ('queued','running')
+  ) then
+    raise exception 'report draft job already in progress';
+  end if;
+
   insert into public.job (review_id, type, status)
   values (p_review_id, 'report_draft', 'queued')
   returning * into v_job;
@@ -78,8 +87,10 @@ begin
 end; $$;
 grant execute on function public.create_report_draft_job(uuid) to authenticated;
 
--- set_report_section_content: edição humana auditada. Resultados/declaração-IA/desvios
--- são deterministic-only (A3 p/ Resultados; factuais p/ os outros) ⇒ rejeitados.
+-- set_report_section_content: edição humana auditada (FR-016).
+-- Editáveis → human_edited: 'methods', 'discussion', 'conclusion'.
+-- Deterministic-only (rejeitados): 'results' (A3 — fonte única é a Síntese),
+-- 'ai_declaration' e 'deviations' (factuais).
 create or replace function public.set_report_section_content(
   p_section_id uuid, p_content text
 ) returns public.report_section

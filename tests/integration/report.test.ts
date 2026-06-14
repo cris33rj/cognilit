@@ -42,6 +42,12 @@ describe("Fatia 3 — migration report (0019)", () => {
       .eq("id", jobId)
       .single();
     expect((jr as { type: string }).type).toBe("report_draft");
+    const { count: auditCount } = await svc
+      .from("audit_entry")
+      .select("id", { count: "exact", head: true })
+      .eq("entity", "job")
+      .eq("entity_id", jobId);
+    expect(auditCount).toBe(1);
   });
 
   it("set_report_section_content move Discussao para human_edited e audita", async () => {
@@ -85,7 +91,7 @@ describe("Fatia 3 — migration report (0019)", () => {
       .select("id", { count: "exact", head: true })
       .eq("entity", "report_section")
       .eq("entity_id", sectionId);
-    expect((auditCount ?? 0) >= 1).toBe(true);
+    expect(auditCount).toBe(1);
   });
 
   it("set_report_section_content rejeita edicao de Resultados (deterministic-only, A3)", async () => {
@@ -112,5 +118,18 @@ describe("Fatia 3 — migration report (0019)", () => {
       p_content: "x",
     });
     expect(error).not.toBeNull(); // A3: Resultados nao tem override por secao
+  });
+
+  it("nao-membro nao consegue create_report_draft_job (RLS/membership)", async () => {
+    const { reviewId } = await seedReview("nonmember");
+    const stamp = `${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const { client: outsider } = await signUpUser(
+      `outsider_${stamp}@example.com`,
+      "senha-teste-123",
+    );
+    const { error } = await outsider.rpc("create_report_draft_job", {
+      p_review_id: reviewId,
+    });
+    expect(error).not.toBeNull();
   });
 });
