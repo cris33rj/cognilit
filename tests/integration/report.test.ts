@@ -2,6 +2,7 @@
 import { describe, it, expect } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { signUpUser, serviceClient } from "./helpers/supabase";
+import { loadReportInputs, resolveReport } from "@/lib/report/queries";
 
 // Harness (mirrors tests/integration/synthesis.test.ts):
 //  - serviceClient() bypasses RLS -> seeds/reads freely; is ALSO the Node worker client.
@@ -131,5 +132,23 @@ describe("Fatia 3 — migration report (0019)", () => {
       p_review_id: reviewId,
     });
     expect(error).not.toBeNull();
+  });
+});
+
+describe("loadReportInputs / resolveReport (IO, deps-injection)", () => {
+  it("carrega contadores PRISMA, temas e fases opcionais OFF", async () => {
+    const { svc, reviewId } = await seedReview("io");
+    const inputs = await loadReportInputs({ supabase: svc }, reviewId);
+    expect(inputs.counters).toBeDefined();
+    expect(Array.isArray(inputs.themes)).toBe(true);
+    expect(Array.isArray(inputs.aiSuggestions)).toBe(true);
+    expect(inputs.optionalPhasesOff.length).toBe(2); // Viés + Certeza OFF (v1)
+  });
+
+  it("resolveReport cria a row report 1:1 idempotente", async () => {
+    const { svc, reviewId } = await seedReview("resolve");
+    const a = await resolveReport({ supabase: svc }, reviewId);
+    const b = await resolveReport({ supabase: svc }, reviewId);
+    expect(a).toBe(b);
   });
 });
