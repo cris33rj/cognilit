@@ -10,7 +10,11 @@ import type {
   ProtocolDraft,
   ProviderIdentity,
   ScreeningPreclassification,
+  SynthesisFinding,
+  SynthesizedTheme,
+  SynthesizeThemesResult,
 } from "./types";
+import { estimateSynthesisCost } from "./cost";
 
 function provenance(prompt: string) {
   return {
@@ -103,7 +107,8 @@ export class MockLLMProvider implements LLMProvider {
   async estimateCost(
     input:
       | { itemCount: number; kind: "ai_screening_batch" }
-      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number }
+      | { itemCount: number; kind: "synthesis_batch" },
   ): Promise<CostEstimate> {
     if (input.kind === "ai_extraction_batch") {
       const tokensEstimated = input.itemCount * input.fieldCount * 250;
@@ -112,10 +117,35 @@ export class MockLLMProvider implements LLMProvider {
         cost: { usd: (tokensEstimated / 1000) * 0.0025 },
       };
     }
+    if (input.kind === "synthesis_batch") {
+      return estimateSynthesisCost(input.itemCount);
+    }
     return {
       tokensEstimated: input.itemCount * 800,
       cost: { usd: input.itemCount * 0.002 },
     };
+  }
+
+  async synthesizeThemes(input: {
+    findings: SynthesisFinding[];
+    language: "pt-BR";
+  }): Promise<SynthesizeThemesResult> {
+    if (input.findings.length === 0) return { insufficientData: true };
+    const byField = new Map<string, SynthesisFinding[]>();
+    for (const f of input.findings) {
+      const arr = byField.get(f.fieldName) ?? [];
+      arr.push(f);
+      byField.set(f.fieldName, arr);
+    }
+    const themes: SynthesizedTheme[] = [...byField.entries()].map(
+      ([field, fs]) => ({
+        name: `Tema: ${field}`,
+        narrative: `Síntese simulada sobre ${field} em ${fs.length} estudo(s).`,
+        findingRefs: fs.map((f) => f.extractionValueId),
+        provenance: provenance(`synthesize:${field}`),
+      }),
+    );
+    return { themes };
   }
 
   async extractFields(input: {

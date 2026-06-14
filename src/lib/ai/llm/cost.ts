@@ -27,3 +27,16 @@ export function estimateExtractionCost(
     cost: { usd: (tokensEstimated / 1000) * USD_PER_1K_TOKENS },
   };
 }
+
+// itemCount = número de ESTUDOS (registros candidatos) incluídos na síntese.
+const TOKENS_PER_STUDY_SYNTHESIS = 1200; // heurística (refinar com métricas reais)
+
+/** Estimativa de custo de síntese: ~1 passe agregando os achados de N estudos. */
+export function estimateSynthesisCost(itemCount: number): CostEstimate {
+  const items = Math.max(0, Math.trunc(itemCount));
+  const tokensEstimated = items * TOKENS_PER_STUDY_SYNTHESIS;
+  return {
+    tokensEstimated,
+    cost: { usd: (tokensEstimated / 1000) * USD_PER_1K_TOKENS },
+  };
+}

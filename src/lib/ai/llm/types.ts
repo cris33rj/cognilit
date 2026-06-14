@@ -57,6 +57,24 @@ export interface OcrResult {
   text: string; // texto OCR da página, no idioma original (FR-015)
 }
 
+export interface SynthesisFinding {
+  extractionValueId: string; // âncora de grounding (Q3)
+  recordId: string;
+  fieldName: string;
+  value: unknown; // final_value ratificado
+}
+
+export interface SynthesizedTheme {
+  name: string;
+  narrative: string; // pt-BR
+  findingRefs: string[]; // extractionValueId[] — nunca vazio
+  provenance: Provenance;
+}
+
+export type SynthesizeThemesResult =
+  | { themes: SynthesizedTheme[] }
+  | { insufficientData: true };
+
 export interface LLMProvider {
   identity(): ProviderIdentity;
 
@@ -95,11 +113,19 @@ export interface LLMProvider {
     pageIndex?: { page: number; char_start: number; char_end: number }[];
   }): Promise<ExtractionResult>;
 
+  /** Agrupa achados ratificados em temas + narrativa pt-BR (US1/FR-001). Grounding
+   *  obrigatório: nenhum tema sem findingRefs. Sem achados ⇒ insufficientData (FR-007). */
+  synthesizeThemes(input: {
+    findings: SynthesisFinding[];
+    language: "pt-BR";
+  }): Promise<SynthesizeThemesResult>;
+
   /** Estimativa de custo ANTES de lote (FR-022, §VII/P5). */
   estimateCost(
     input:
       | { itemCount: number; kind: "ai_screening_batch" }
-      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number }
+      | { itemCount: number; kind: "synthesis_batch" },
   ): Promise<CostEstimate>;
 }
 
