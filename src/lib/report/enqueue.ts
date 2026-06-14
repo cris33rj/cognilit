@@ -19,9 +19,10 @@ export async function enqueueReportDraftJob(
   );
   if (error) throw new Error(error.message);
   const jobId = (job as { id: string }).id;
-  const { count } = await deps.supabase
+  const { count, error: cErr } = await deps.supabase
     .from("job_item")
     .select("id", { count: "exact", head: true })
     .eq("job_id", jobId);
+  if (cErr) throw new Error(cErr.message);
   return { job_id: jobId, status: "queued", item_count: count ?? 0 };
 }
