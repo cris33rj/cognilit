@@ -63,7 +63,12 @@ export async function estimateSynthesis(reviewId: string) {
  */
 export async function runSynthesis(reviewId: string) {
   try {
-    await requireMember(reviewId);
+    // The enqueue RPC (create_synthesis_job) is SECURITY DEFINER and gates on
+    // is_review_member(auth.uid()), so it MUST run under the member's session —
+    // the service-role admin client has no auth.uid() and would raise
+    // 'not a member'. Enqueue with the user client; the worker (heavy, no
+    // membership gate) keeps the admin client.
+    const { supabase } = await requireMember(reviewId);
     const admin = createAdminClient();
 
     let provider;
@@ -75,7 +80,7 @@ export async function runSynthesis(reviewId: string) {
       } else throw e;
     }
 
-    const enq = await enqueueSynthesisJob({ supabase: admin }, reviewId);
+    const enq = await enqueueSynthesisJob({ supabase }, reviewId);
 
     if (enq.item_count === 0) {
       revalidate(reviewId);
