@@ -164,6 +164,49 @@ describe("SummaryTable", () => {
     );
     expect(screen.getByText(/não encontrado/i)).toBeInTheDocument();
   });
+
+  it("célula objeto final_value {value,...} renderiza o .value, não [object Object]", () => {
+    render(
+      <SummaryTable
+        table={{
+          columns: ["Conceito"],
+          rows: [
+            {
+              recordId: "r1",
+              label: "Barbero 2020",
+              cells: {
+                Conceito: {
+                  value: "mediação cultural",
+                  source_span: null,
+                  page: 3,
+                },
+              },
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("mediação cultural")).toBeInTheDocument();
+    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
+  });
+
+  it("célula objeto não-encontrado (value null) renderiza 'não encontrado'", () => {
+    render(
+      <SummaryTable
+        table={{
+          columns: ["Conceito"],
+          rows: [
+            {
+              recordId: "r1",
+              label: "Barbero 2020",
+              cells: { Conceito: { value: null, reason: "not_found" } },
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText(/não encontrado/i)).toBeInTheDocument();
+  });
 });
 
 // ---------------------------------------------------------------------------

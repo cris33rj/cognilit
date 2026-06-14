@@ -2,8 +2,23 @@ import { NotFound } from "@/components/ai/NotFound";
 import type { ThemeSummaryTable } from "@/lib/synthesis/summary-table";
 
 /**
+ * Normaliza o valor de uma célula em texto exibível.
+ * A célula é o snapshot de `extraction_value.final_value` (A1), cujo contrato é
+ * `{value, source_span, page}` (ou `{value: null, reason}` p/ não-encontrado) —
+ * mas também pode já ser um escalar. Extrai `.value` quando objeto; `null`
+ * (ausente ou não-encontrado) ⇒ retorna null p/ o chamador exibir NotFound.
+ */
+function cellText(cell: unknown): string | null {
+  const value =
+    cell !== null && typeof cell === "object" && "value" in cell
+      ? (cell as { value: unknown }).value
+      : cell;
+  return value == null ? null : String(value);
+}
+
+/**
  * Renderiza a tabela estudos×campos de um tema (ThemeSummaryTable).
- * Célula null ⇒ exibe NotFound ("não encontrado").
+ * Célula null/não-encontrada ⇒ exibe NotFound ("não encontrado").
  * Acessível: usa <table> com <th scope>.
  */
 export function SummaryTable({ table }: { table: ThemeSummaryTable }) {
@@ -40,15 +55,17 @@ export function SummaryTable({ table }: { table: ThemeSummaryTable }) {
               >
                 {row.label}
               </th>
-              {table.columns.map((col) => (
-                <td key={col} className="border border-line px-2 py-1 text-ink">
-                  {row.cells[col] == null ? (
-                    <NotFound />
-                  ) : (
-                    String(row.cells[col])
-                  )}
-                </td>
-              ))}
+              {table.columns.map((col) => {
+                const text = cellText(row.cells[col]);
+                return (
+                  <td
+                    key={col}
+                    className="border border-line px-2 py-1 text-ink"
+                  >
+                    {text == null ? <NotFound /> : text}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
