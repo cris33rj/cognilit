@@ -51,6 +51,13 @@ describe("serializeRis", () => {
     expect(out).toContain("TI  - Sem metadados");
     expect(out).not.toContain("AU  -");
     expect(out).not.toContain("PY  -");
+    expect(out).not.toContain("JO  -");
+    expect(out).not.toContain("VL  -");
+    expect(out).not.toContain("IS  -");
+    expect(out).not.toContain("SP  -");
+    expect(out).not.toContain("EP  -");
+    expect(out).not.toContain("DO  -");
+    expect(out).not.toContain("AB  -");
   });
 
   it("cobre todos os registros (FR-021)", () => {
