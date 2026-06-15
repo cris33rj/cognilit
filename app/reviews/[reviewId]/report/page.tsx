@@ -1,10 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { loadReport } from "@/lib/report/queries";
 import { loadPrismaFlowModel } from "@/lib/prisma/flow-model";
+import { loadPrismaChecklist } from "@/lib/prisma/checklist";
+import { buildCharacteristicsTable } from "@/lib/prisma/characteristics";
 import { PrismaFlowchart } from "@/components/prisma/PrismaFlowchart";
 import { ReportRunner } from "@/components/report/ReportRunner";
 import { RegenerateButton } from "@/components/report/RegenerateButton";
 import { SectionEditor } from "@/components/report/SectionEditor";
+import { PrismaChecklistPanel } from "@/components/report/PrismaChecklistPanel";
+import { CharacteristicsTablePanel } from "@/components/report/CharacteristicsTablePanel";
 import {
   estimateReport,
   generateReport,
@@ -35,9 +39,11 @@ export default async function ReportPage({
   const { reviewId } = await params;
   const supabase = await createClient();
 
-  const [report, flowModel] = await Promise.all([
+  const [report, flowModel, checklist, characteristics] = await Promise.all([
     loadReport({ supabase }, reviewId),
     loadPrismaFlowModel(reviewId),
+    loadPrismaChecklist({ supabase }, reviewId),
+    buildCharacteristicsTable({ supabase }, reviewId),
   ]);
 
   return (
@@ -84,6 +90,13 @@ export default async function ReportPage({
           )}
         </section>
       ))}
+
+      {report && (
+        <>
+          <PrismaChecklistPanel items={checklist} />
+          <CharacteristicsTablePanel table={characteristics} />
+        </>
+      )}
     </main>
   );
 }
