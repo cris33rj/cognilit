@@ -133,3 +133,83 @@ test("exportação: membro gera MD/BibTeX/RIS e baixa os artefatos (US5)", async
   ]);
   expect(download.suggestedFilename()).toMatch(/\.md$/);
 });
+
+test("SC-005: membro exporta os 5 formatos numa única operação (US5)", async ({
+  page,
+}) => {
+  // DOCX/PDF include flowchart rasterization — generous timeout.
+  test.setTimeout(180_000);
+  const { email, reviewId } = await signUpAndCreateReview(page);
+  await seedCandidate(email, reviewId);
+
+  // Report must exist for the ExportPanel to render (gated by report existence).
+  await page.goto(`/reviews/${reviewId}/report`);
+  await page.getByRole("button", { name: "Gerar relatório" }).click();
+  await expect(page.getByText("Relatório gerado.")).toBeVisible({
+    timeout: 30_000,
+  });
+  await page.reload();
+
+  // ExportPanel is present.
+  await expect(page.getByRole("heading", { name: "Exportação" })).toBeVisible();
+
+  // Select all five formats. Labels set by Task 6:
+  //   "DOCX", "PDF", "Markdown (.md)", "BibTeX (.bib)", "RIS (.ris)"
+  // Markdown (.md) may already be checked by default; check() is idempotent.
+  await page.getByLabel("DOCX").check();
+  await page.getByLabel("PDF").check();
+  await page.getByLabel("Markdown (.md)").check();
+  await page.getByLabel("BibTeX (.bib)").check();
+  await page.getByLabel("RIS (.ris)").check();
+
+  // Single Exportar click triggers all five formats in one enqueue.
+  await page.getByRole("button", { name: "Exportar" }).click();
+  // DOCX/PDF generation + flowchart PNG rasterization is heavier than MD/BibTeX/RIS.
+  await expect(page.getByText("Exportação concluída.")).toBeVisible({
+    timeout: 120_000,
+  });
+  // No membership failure leaked through.
+  await expect(page.getByText("not a member")).toHaveCount(0);
+
+  // revalidatePath was called server-side; reload to re-render the artifact list.
+  await page.reload();
+
+  // One download link per format — five total.
+  await expect(page.getByRole("link", { name: "Baixar DOCX" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Baixar PDF" })).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Baixar Markdown" }),
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: "Baixar BibTeX" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Baixar RIS" })).toBeVisible();
+
+  // Verify DOCX binary signature (PK ZIP magic bytes — same download pattern as US5).
+  const [docxDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: "Baixar DOCX" }).first().click(),
+  ]);
+  expect(docxDownload.suggestedFilename()).toMatch(/\.docx$/);
+  const docxPath = await docxDownload.path();
+  if (docxPath) {
+    const { readFileSync } = await import("fs");
+    const docxBytes = readFileSync(docxPath);
+    // PK ZIP magic: 0x50 0x4B
+    expect(docxBytes[0]).toBe(0x50);
+    expect(docxBytes[1]).toBe(0x4b);
+  }
+
+  // Verify PDF binary signature (%PDF-).
+  const [pdfDownload] = await Promise.all([
+    page.waitForEvent("download"),
+    page.getByRole("link", { name: "Baixar PDF" }).first().click(),
+  ]);
+  expect(pdfDownload.suggestedFilename()).toMatch(/\.pdf$/);
+  const pdfPath = await pdfDownload.path();
+  if (pdfPath) {
+    const { readFileSync } = await import("fs");
+    const pdfBytes = readFileSync(pdfPath);
+    // %PDF- magic: 0x25 0x50 0x44 0x46 0x2D
+    const pdfMagic = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x2d]);
+    expect(pdfBytes.slice(0, 5)).toEqual(pdfMagic);
+  }
+});

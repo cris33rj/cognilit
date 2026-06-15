@@ -14,7 +14,19 @@ const nextConfig = {
     // (PNG do fluxograma PRISMA, A2). Mantê-lo fora do bundle evita o erro de
     // parse de WebAssembly do webpack; o pacote é require()-ado do node_modules
     // e o .wasm é lido por fs em src/lib/prisma/png.ts.
-    serverComponentsExternalPackages: ["@resvg/resvg-wasm"],
+    //
+    // Marco 3 / Fatia 6: o export PDF (pdfmake → @foliojs-fork/pdfkit →
+    // fontkit/linebreak) lê arquivos binários `.trie` por fs no module-eval. O
+    // bundle webpack do Next move o JS para .next/server/vendor-chunks mas NÃO
+    // copia os `.trie` → ENOENT (data.trie). Externalizar faz o Next require()-ar
+    // do node_modules, onde os `.trie` existem ao lado do módulo (A2).
+    serverComponentsExternalPackages: [
+      "@resvg/resvg-wasm",
+      "pdfmake",
+      "@foliojs-fork/pdfkit",
+      "@foliojs-fork/fontkit",
+      "@foliojs-fork/linebreak",
+    ],
   },
 };
 

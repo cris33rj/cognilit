@@ -2,7 +2,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { serializeMarkdown } from "./serialize-markdown";
 import { serializeBibtex } from "./serialize-bibtex";
 import { serializeRis } from "./serialize-ris";
+import { serializeDocx } from "./serialize-docx";
+import { serializePdf } from "./serialize-pdf";
+import { formatCitationsApa7 } from "./format-apa7";
 import { loadExportInputs, listIncludedFtRecordsDetail } from "./queries";
+import { toFlowModel } from "@/lib/prisma/flow-model";
+import { renderPrismaSvg } from "@/lib/prisma/svg";
+import { renderPrismaPng } from "@/lib/prisma/png";
+import type { PrismaCounters, ExclusionCount } from "@/lib/prisma/queries";
 
 interface JobItemRow {
   id: string;
@@ -21,11 +28,19 @@ export interface ExportBatchResult {
   failed: number;
 }
 
-const EXT: Record<string, string> = { md: "md", bibtex: "bib", ris: "ris" };
+const EXT: Record<string, string> = {
+  md: "md",
+  bibtex: "bib",
+  ris: "ris",
+  docx: "docx",
+  pdf: "pdf",
+};
 const MIME: Record<string, string> = {
   md: "text/markdown; charset=utf-8",
   bibtex: "application/x-bibtex; charset=utf-8",
   ris: "application/x-research-info-systems; charset=utf-8",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pdf: "application/pdf",
 };
 
 /**
@@ -124,7 +139,63 @@ export async function processReportExportJob(
   }
 }
 
-/** Serializa um formato suportado nesta fatia. Outros → erro isolado (Fatia 6). */
+/**
+ * Carrega os dados necessários para DOCX/PDF, usando o cliente supabase do worker
+ * (evita chamar loadPrismaFlowModel que usa o server client de request do Next.js).
+ */
+async function loadDocInputs(supabase: SupabaseClient, reviewId: string) {
+  const [input, records, countersRow, breakdownRows] = await Promise.all([
+    loadExportInputs({ supabase }, reviewId),
+    listIncludedFtRecordsDetail({ supabase }, reviewId),
+    supabase
+      .from("prisma_counter")
+      .select(
+        "identified, duplicates, screened, included_ts, excluded_ts, maybe_ts, included_ft, excluded_ft, passed_ts",
+      )
+      .eq("review_id", reviewId)
+      .maybeSingle(),
+    supabase
+      .from("prisma_exclusion_breakdown")
+      .select("reason_id, reason_label, n")
+      .eq("review_id", reviewId)
+      .order("n", { ascending: false }),
+  ]);
+
+  if (countersRow.error) throw new Error(countersRow.error.message);
+  if (breakdownRows.error) throw new Error(breakdownRows.error.message);
+
+  const counters: PrismaCounters = {
+    identified: countersRow.data?.identified ?? 0,
+    duplicates: countersRow.data?.duplicates ?? 0,
+    screened: countersRow.data?.screened ?? 0,
+    includedTs: countersRow.data?.included_ts ?? 0,
+    excludedTs: countersRow.data?.excluded_ts ?? 0,
+    maybeTs: countersRow.data?.maybe_ts ?? 0,
+    passedTs: countersRow.data?.passed_ts ?? 0,
+    includedFt: countersRow.data?.included_ft ?? 0,
+    excludedFt: countersRow.data?.excluded_ft ?? 0,
+  };
+
+  const breakdown: ExclusionCount[] = (breakdownRows.data ?? []).map((r) => ({
+    reasonId: (r as { reason_id: string | null }).reason_id ?? "",
+    reasonLabel: (r as { reason_label: string | null }).reason_label ?? "",
+    n: (r as { n: number | null }).n ?? 0,
+  }));
+
+  const flowModel = toFlowModel(counters, breakdown);
+  const references = formatCitationsApa7(records);
+
+  let prismaPng: Uint8Array | null = null;
+  try {
+    prismaPng = await renderPrismaPng(renderPrismaSvg(flowModel));
+  } catch {
+    prismaPng = null;
+  }
+
+  return { input, references, prismaPng };
+}
+
+/** Serializa um formato suportado. Outros → erro isolado (resilência por-formato). */
 async function serializeFormat(
   supabase: SupabaseClient,
   reviewId: string,
@@ -142,6 +213,20 @@ async function serializeFormat(
     case "ris": {
       const records = await listIncludedFtRecordsDetail({ supabase }, reviewId);
       return Buffer.from(serializeRis(records), "utf-8");
+    }
+    case "docx": {
+      const { input, references, prismaPng } = await loadDocInputs(
+        supabase,
+        reviewId,
+      );
+      return serializeDocx(input, references, prismaPng);
+    }
+    case "pdf": {
+      const { input, references, prismaPng } = await loadDocInputs(
+        supabase,
+        reviewId,
+      );
+      return serializePdf(input, references, prismaPng);
     }
     default:
       throw new Error(`formato '${format}' não suportado nesta versão`);
