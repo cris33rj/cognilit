@@ -5,6 +5,15 @@ import {
   type RawRecordRow,
   type RecordDetailData,
 } from "@/lib/record/queries";
+import { loadReport, type ReportSectionRow } from "@/lib/report/queries";
+import {
+  buildCharacteristicsTable,
+  type CharacteristicsTable,
+} from "@/lib/prisma/characteristics";
+import {
+  loadPrismaChecklist,
+  type ChecklistItem,
+} from "@/lib/prisma/checklist";
 
 export const EXPORT_FORMATS = [
   "docx",
@@ -34,4 +43,40 @@ export async function listIncludedFtRecordsDetail(
     .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
   return ((data ?? []) as RawRecordRow[]).map(toRecordDetail);
+}
+
+export interface MarkdownInput {
+  reviewTitle: string;
+  sections: Array<{ kind: string; content: string }>;
+  characteristics: CharacteristicsTable;
+  checklist: ChecklistItem[];
+}
+
+/** Carrega tudo o que o Markdown precisa (seções + características + checklist). */
+export async function loadExportInputs(
+  deps: Deps,
+  reviewId: string,
+): Promise<MarkdownInput> {
+  const [reportData, characteristics, checklist, reviewRow] = await Promise.all(
+    [
+      loadReport(deps, reviewId),
+      buildCharacteristicsTable(deps, reviewId),
+      loadPrismaChecklist(deps, reviewId),
+      deps.supabase
+        .from("review")
+        .select("title")
+        .eq("id", reviewId)
+        .maybeSingle(),
+    ],
+  );
+  const sections = (reportData?.sections ?? ([] as ReportSectionRow[])).map(
+    (s) => ({ kind: s.kind as string, content: s.content }),
+  );
+  return {
+    reviewTitle:
+      (reviewRow.data as { title?: string } | null)?.title ?? "Revisão",
+    sections,
+    characteristics,
+    checklist,
+  };
 }
