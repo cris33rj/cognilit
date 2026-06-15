@@ -188,4 +188,25 @@ describe("Fatia 5 — worker report_export", () => {
       "md",
     ]);
   });
+
+  it("retomável: re-rodar o worker não duplica export_artifact (upsert por job_id,format)", async () => {
+    const { svc, member, reviewId } = await seedReview("resume");
+    await enqueueReportExportJob({ supabase: member }, reviewId, [
+      "md",
+      "bibtex",
+    ]);
+
+    // 1ª passada conclui o job; 2ª passada não tem itens pending, mas mesmo que
+    // re-executasse, o upsert por (job_id, format) garante 1 linha por formato.
+    await runReportExportWorkerWith(svc, reviewId);
+    await runReportExportWorkerWith(svc, reviewId);
+
+    const { data: arts } = await svc
+      .from("export_artifact")
+      .select("format")
+      .eq("review_id", reviewId);
+    expect(
+      (arts ?? []).map((a) => (a as { format: string }).format).sort(),
+    ).toEqual(["bibtex", "md"]);
+  });
 });

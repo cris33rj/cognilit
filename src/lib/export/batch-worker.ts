@@ -53,11 +53,14 @@ export async function processReportExportJob(
     if (jobErr) throw new Error(jobErr.message);
     const reviewId = (jobData as { review_id: string }).review_id;
 
-    const { data: reportRow } = await supabase
+    // Relatório é opcional aqui (export de referências pode preceder o relatório):
+    // data=null sem erro é esperado; um erro real de DB deve emergir.
+    const { data: reportRow, error: reportErr } = await supabase
       .from("report")
       .select("id")
       .eq("review_id", reviewId)
       .maybeSingle();
+    if (reportErr) throw new Error(reportErr.message);
     const reportId = (reportRow as { id: string } | null)?.id ?? null;
 
     const { data: items, error: itemsErr } = await supabase
@@ -82,15 +85,18 @@ export async function processReportExportJob(
           .upload(path, bytes, { contentType: MIME[format], upsert: true });
         if (upErr) throw new Error(upErr.message);
 
-        const { error: artErr } = await supabase
-          .from("export_artifact")
-          .insert({
+        // upsert por (job_id, format): idempotente em re-execução, espelhando o
+        // upsert:true do upload no Storage (sem export_artifact duplicado).
+        const { error: artErr } = await supabase.from("export_artifact").upsert(
+          {
             review_id: reviewId,
             report_id: reportId,
             format,
             storage_path: path,
             job_id: jobId,
-          });
+          },
+          { onConflict: "job_id,format" },
+        );
         if (artErr) throw new Error(artErr.message);
 
         await supabase

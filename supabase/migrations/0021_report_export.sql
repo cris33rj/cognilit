@@ -19,7 +19,10 @@ create table public.export_artifact (
   format export_format not null,
   storage_path text not null,
   job_id uuid references public.job(id) on delete set null,
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- idempotência por (job, formato): re-rodar o worker faz upsert do artefato
+  -- (espelha o upsert:true do upload no Storage) — sem linhas duplicadas (retomável).
+  unique (job_id, format)
 );
 create index export_artifact_review_idx
   on public.export_artifact(review_id, created_at desc);
