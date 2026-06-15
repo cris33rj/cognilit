@@ -65,8 +65,13 @@ export function ExportPanel({
         disabled={pending || selected.length === 0}
         onClick={() =>
           start(async () => {
-            await onExport(reviewId, selected);
-            setInfo("Exportação concluída.");
+            setInfo(null);
+            try {
+              await onExport(reviewId, selected);
+              setInfo("Exportação concluída.");
+            } catch {
+              setInfo("Erro ao exportar. Tente novamente.");
+            }
           })
         }
       >
