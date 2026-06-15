@@ -29,7 +29,7 @@ describe("serializeRis", () => {
     expect(out).toContain("JO  - Revista Brasileira");
     expect(out).toContain("SP  - 45");
     expect(out).toContain("EP  - 60");
-    expect(out.trimEnd().endsWith("ER  - ")).toBe(true);
+    expect(out.trimEnd().endsWith("ER  -")).toBe(true);
   });
 
   it("OMITE tags de campos ausentes (não inventa — §II)", () => {
