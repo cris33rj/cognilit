@@ -3,7 +3,7 @@
 **Feature**: `003-marco3-saida-sintese-relatorio` (Marco 3 — Saída)
 **Branch**: `build/003-marco3-saida-sintese-relatorio/5-export-light` (a partir de `e56ce4c`, feature HEAD)
 **Data**: 2026-06-15
-**Status**: ✅ Build completo, **aguardando merge manual do desenvolvedor (CHECKPOINT 3)**. A sessão **não** fez merge/push.
+**Status**: ✅ **Mergeada** na feature via merge commit `06afab4` (parents `e56ce4c` + build tip `a899dba`, 2026-06-15). Build completo e CHECKPOINT 3 concluído.
 
 ---
 
