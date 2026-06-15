@@ -77,4 +77,18 @@ describe("Fatia 5 — migration report_export (0021)", () => {
       .eq("review_id", reviewId);
     expect(data ?? []).toHaveLength(0);
   });
+
+  it("create_report_export_job rejeita 2º job enquanto 1º está ativo", async () => {
+    const { member, reviewId } = await seedReview("dupjob");
+    await member.rpc("create_report_export_job", {
+      p_review_id: reviewId,
+      p_formats: ["md"],
+    });
+    const { error } = await member.rpc("create_report_export_job", {
+      p_review_id: reviewId,
+      p_formats: ["bibtex"],
+    });
+    expect(error).not.toBeNull();
+    expect(error!.message).toMatch(/already in progress/);
+  });
 });

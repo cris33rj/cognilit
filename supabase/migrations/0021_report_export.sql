@@ -31,8 +31,8 @@ create policy export_artifact_member on public.export_artifact
   with check (public.is_review_member(review_id));
 
 -- ---------- Storage: bucket privado + policies por path (espelha 0012) ----------
-insert into storage.buckets (id, name, public)
-values ('exports', 'exports', false)
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('exports', 'exports', false, 52428800)
 on conflict (id) do nothing;
 
 -- path: review/<review_id>/report/<report_id>/<format>/<artifact_id>.<ext>
