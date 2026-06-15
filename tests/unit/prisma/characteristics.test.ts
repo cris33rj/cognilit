@@ -44,4 +44,23 @@ describe("assembleCharacteristics", () => {
     expect(t.rows).toHaveLength(0);
     expect(t.columns).toEqual(["Estudo", "Ano", "Amostra"]);
   });
+
+  it("extrai .value do final_value estruturado {value, source_span, page} (A1)", () => {
+    const structured = [
+      {
+        recordId: "s1",
+        fieldId: "f2",
+        finalValue: { value: "120 pacientes", source_span: null, page: 1 },
+      },
+      // valor não-encontrado: {value: null} ⇒ célula null
+      {
+        recordId: "s2",
+        fieldId: "f2",
+        finalValue: { value: null, reason: "not_found" },
+      },
+    ];
+    const t = assembleCharacteristics(fields, studies, structured);
+    expect(t.rows[0]!.cells.Amostra).toBe("120 pacientes");
+    expect(t.rows[1]!.cells.Amostra).toBeNull();
+  });
 });

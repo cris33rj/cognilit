@@ -22,6 +22,21 @@ interface ValueLite {
 
 const STUDY_COLUMN = "Estudo";
 
+/**
+ * Normaliza `extraction_value.final_value` em um valor exibível na célula.
+ * Contrato (A1, espelha `SummaryTable.cellText`): `{value, source_span, page}` —
+ * extrai `.value` quando objeto; passa escalares adiante; nulo/ausente ⇒ null.
+ */
+function extractCellValue(finalValue: unknown): unknown {
+  const value =
+    finalValue !== null &&
+    typeof finalValue === "object" &&
+    "value" in finalValue
+      ? (finalValue as { value: unknown }).value
+      : finalValue;
+  return value ?? null;
+}
+
 /** Pura: monta colunas (Estudo + campos) e 1 linha por estudo, célula = valor ratificado. */
 export function assembleCharacteristics(
   fields: FieldLite[],
@@ -37,7 +52,7 @@ export function assembleCharacteristics(
     for (const v of values) {
       if (v.recordId !== s.id) continue;
       const name = fieldNameById.get(v.fieldId);
-      if (name) cells[name] = v.finalValue ?? null;
+      if (name) cells[name] = extractCellValue(v.finalValue);
     }
     return { recordId: s.id, cells };
   });
