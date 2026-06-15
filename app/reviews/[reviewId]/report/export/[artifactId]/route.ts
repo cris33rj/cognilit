@@ -18,6 +18,10 @@ const MIME: Record<string, string> = {
   md: "text/markdown; charset=utf-8",
   bibtex: "application/x-bibtex; charset=utf-8",
   ris: "application/x-research-info-systems; charset=utf-8",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pdf: "application/pdf",
+  prisma_svg: "image/svg+xml; charset=utf-8",
+  prisma_png: "image/png",
 };
 
 export async function GET(
