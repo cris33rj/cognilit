@@ -3,12 +3,16 @@
 import { useState, useTransition } from "react";
 
 const FORMAT_OPTIONS = [
+  { value: "docx", label: "DOCX" },
+  { value: "pdf", label: "PDF" },
   { value: "md", label: "Markdown (.md)" },
   { value: "bibtex", label: "BibTeX (.bib)" },
   { value: "ris", label: "RIS (.ris)" },
 ] as const;
 
 const FORMAT_LABEL: Record<string, string> = {
+  docx: "DOCX",
+  pdf: "PDF",
   md: "Markdown",
   bibtex: "BibTeX",
   ris: "RIS",
