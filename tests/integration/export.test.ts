@@ -209,4 +209,56 @@ describe("Fatia 5 — worker report_export", () => {
       (arts ?? []).map((a) => (a as { format: string }).format).sort(),
     ).toEqual(["bibtex", "md"]);
   });
+
+  it("worker gera artefatos docx e pdf no bucket (FR-020)", async () => {
+    const { svc, member, reviewId } = await seedReview("docxpdf");
+    await svc.from("record").insert({
+      review_id: reviewId,
+      source_format: "ris",
+      raw: {},
+      metadata: { title: "Estudo Docx", authors: ["Costa, B"], year: 2021 },
+      corpus_state: "included_ft",
+    });
+    const { data: rep } = await svc
+      .from("report")
+      .insert({ review_id: reviewId, status: "ready" })
+      .select("id")
+      .single();
+    await svc.from("report_section").insert({
+      review_id: reviewId,
+      report_id: (rep as { id: string }).id,
+      kind: "methods",
+      content: "Métodos do estudo.",
+      edit_state: "deterministic",
+    });
+
+    await enqueueReportExportJob({ supabase: member }, reviewId, [
+      "docx",
+      "pdf",
+    ]);
+    await runReportExportWorkerWith(svc, reviewId);
+
+    const { data: arts } = await svc
+      .from("export_artifact")
+      .select("format, storage_path")
+      .eq("review_id", reviewId);
+    const formats = (arts ?? [])
+      .map((a) => (a as { format: string }).format)
+      .sort();
+    expect(formats).toEqual(["docx", "pdf"]);
+
+    for (const a of (arts ?? []) as {
+      format: string;
+      storage_path: string;
+    }[]) {
+      const { data: blob } = await svc.storage
+        .from("exports")
+        .download(a.storage_path);
+      const buf = Buffer.from(await blob!.arrayBuffer());
+      if (a.format === "docx")
+        expect(buf.subarray(0, 2).toString("ascii")).toBe("PK");
+      if (a.format === "pdf")
+        expect(buf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    }
+  });
 });
