@@ -2,6 +2,8 @@
 import { describe, it, expect } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { signUpUser, serviceClient } from "./helpers/supabase";
+import { enqueueReportExportJob } from "@/lib/export/enqueue";
+import { runReportExportWorkerWith } from "@/lib/export/batch-run";
 
 async function seedReview(
   label: string,
@@ -90,5 +92,100 @@ describe("Fatia 5 — migration report_export (0021)", () => {
     });
     expect(error).not.toBeNull();
     expect(error!.message).toMatch(/already in progress/);
+  });
+});
+
+describe("Fatia 5 — worker report_export", () => {
+  it("gera md/bibtex/ris: 3 artefatos + objetos no bucket; job completed", async () => {
+    const { svc, member, reviewId } = await seedReview("worker");
+    await svc.from("record").insert({
+      review_id: reviewId,
+      source_format: "ris",
+      raw: {},
+      metadata: { title: "Estudo A", authors: ["Silva, A"], year: 2020 },
+      corpus_state: "included_ft",
+    });
+    const { data: rep } = await svc
+      .from("report")
+      .insert({ review_id: reviewId, status: "ready" })
+      .select("id")
+      .single();
+    await svc.from("report_section").insert({
+      review_id: reviewId,
+      report_id: (rep as { id: string }).id,
+      kind: "methods",
+      content: "Métodos.",
+      edit_state: "deterministic",
+    });
+
+    await enqueueReportExportJob({ supabase: member }, reviewId, [
+      "md",
+      "bibtex",
+      "ris",
+    ]);
+    await runReportExportWorkerWith(svc, reviewId);
+
+    const { data: arts } = await svc
+      .from("export_artifact")
+      .select("format, storage_path")
+      .eq("review_id", reviewId);
+    expect(
+      (arts ?? []).map((a) => (a as { format: string }).format).sort(),
+    ).toEqual(["bibtex", "md", "ris"]);
+
+    for (const a of (arts ?? []) as { storage_path: string }[]) {
+      const slash = a.storage_path.lastIndexOf("/");
+      const { data: listed } = await svc.storage
+        .from("exports")
+        .list(a.storage_path.slice(0, slash));
+      expect((listed ?? []).length).toBeGreaterThan(0);
+    }
+
+    const { data: job } = await svc
+      .from("job")
+      .select("status, progress")
+      .eq("review_id", reviewId)
+      .eq("type", "report_export")
+      .single();
+    expect((job as { status: string }).status).toBe("completed");
+    expect((job as { progress: number }).progress).toBe(100);
+  });
+
+  it("resiliência por-formato: formato não suportado falha isolado (FR-023)", async () => {
+    const { svc, member, reviewId } = await seedReview("resil");
+    await enqueueReportExportJob({ supabase: member }, reviewId, [
+      "md",
+      "docx",
+    ]);
+    await runReportExportWorkerWith(svc, reviewId);
+
+    const { data: job } = await svc
+      .from("job")
+      .select("id, status")
+      .eq("review_id", reviewId)
+      .eq("type", "report_export")
+      .single();
+    expect((job as { status: string }).status).toBe("completed_with_errors");
+
+    const { data: items } = await svc
+      .from("job_item")
+      .select("payload, status")
+      .eq("job_id", (job as { id: string }).id);
+    const byFmt = Object.fromEntries(
+      (items ?? []).map((i) => [
+        (i as { payload: { format: string } }).payload.format,
+        (i as { status: string }).status,
+      ]),
+    );
+    expect(byFmt.md).toBe("done");
+    expect(byFmt.docx).toBe("failed");
+
+    const { data: arts } = await svc
+      .from("export_artifact")
+      .select("format")
+      .eq("review_id", reviewId);
+    expect((arts ?? []).map((a) => (a as { format: string }).format)).toEqual([
+      "md",
+    ]);
   });
 });
