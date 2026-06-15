@@ -50,7 +50,7 @@ export function serializeMarkdown(input: MarkdownInput): string {
     const body = input.checklist
       .map(
         (i) =>
-          `| ${i.itemCode} | ${cell(i.label)} | ${cell(i.sectionRef ?? "")} | ${STATUS_LABEL[i.status]} |`,
+          `| ${cell(i.itemCode)} | ${cell(i.label)} | ${cell(i.sectionRef ?? "")} | ${STATUS_LABEL[i.status]} |`,
       )
       .join("\n");
     parts.push(`## Checklist PRISMA 2020\n\n${header}\n${sep}\n${body}`);
