@@ -65,7 +65,11 @@ Fatia 6 (mesmo job `report_export`).
     bucket + job `completed`; resiliência por-formato (`completed_with_errors`, docx falha
     isolada); retomável (re-rodar não duplica artefato).
 - **`npm run typecheck`**: limpo. **`npm run lint`**: limpo.
-- **e2e/Playwright**: NÃO executado pela sessão (o desenvolvedor verifica o app rodando).
+- **e2e/Playwright**: `tests/e2e/export.spec.ts` (adicionado a pedido) — **1 passed** contra build
+  de produção: signup → cria Revisão → seed `included_ft`+valor ratificado → gera relatório →
+  ExportPanel (seleciona MD/BibTeX/RIS) → Exportar → "Exportação concluída." → 3 links de
+  download → baixa o `.md`. Exercita o split de cliente real (membro enfileira, admin roda o
+  worker) que os testes de integração não cobrem.
 
 > Nota operacional: durante a 1ª rodada paralela da suíte completa, o container de auth
 > (GoTrue) do Supabase local degradou sob carga de signups concorrentes
