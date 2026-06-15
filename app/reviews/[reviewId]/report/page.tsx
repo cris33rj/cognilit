@@ -3,17 +3,20 @@ import { loadReport } from "@/lib/report/queries";
 import { loadPrismaFlowModel } from "@/lib/prisma/flow-model";
 import { loadPrismaChecklist } from "@/lib/prisma/checklist";
 import { buildCharacteristicsTable } from "@/lib/prisma/characteristics";
+import { loadExportArtifacts } from "@/lib/export/queries";
 import { PrismaFlowchart } from "@/components/prisma/PrismaFlowchart";
 import { ReportRunner } from "@/components/report/ReportRunner";
 import { RegenerateButton } from "@/components/report/RegenerateButton";
 import { SectionEditor } from "@/components/report/SectionEditor";
 import { PrismaChecklistPanel } from "@/components/report/PrismaChecklistPanel";
 import { CharacteristicsTablePanel } from "@/components/report/CharacteristicsTablePanel";
+import { ExportPanel } from "@/components/report/ExportPanel";
 import {
   estimateReport,
   generateReport,
   regenerateReport,
   editReportSection,
+  enqueueExport,
 } from "./actions";
 
 const SECTION_LABEL: Record<string, string> = {
@@ -39,12 +42,14 @@ export default async function ReportPage({
   const { reviewId } = await params;
   const supabase = await createClient();
 
-  const [report, flowModel, checklist, characteristics] = await Promise.all([
-    loadReport({ supabase }, reviewId),
-    loadPrismaFlowModel(reviewId),
-    loadPrismaChecklist({ supabase }, reviewId),
-    buildCharacteristicsTable({ supabase }, reviewId),
-  ]);
+  const [report, flowModel, checklist, characteristics, artifacts] =
+    await Promise.all([
+      loadReport({ supabase }, reviewId),
+      loadPrismaFlowModel(reviewId),
+      loadPrismaChecklist({ supabase }, reviewId),
+      buildCharacteristicsTable({ supabase }, reviewId),
+      loadExportArtifacts({ supabase }, reviewId),
+    ]);
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-8">
@@ -95,6 +100,11 @@ export default async function ReportPage({
         <>
           <PrismaChecklistPanel items={checklist} />
           <CharacteristicsTablePanel table={characteristics} />
+          <ExportPanel
+            reviewId={reviewId}
+            artifacts={artifacts}
+            onExport={enqueueExport}
+          />
         </>
       )}
     </main>
