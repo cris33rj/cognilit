@@ -80,3 +80,24 @@ export async function loadExportInputs(
     checklist,
   };
 }
+
+export interface ExportArtifactRow {
+  id: string;
+  format: ExportFormat;
+  storage_path: string;
+  created_at: string;
+}
+
+/** Artefatos exportados da Revisão (mais recentes primeiro) — para a UI. */
+export async function loadExportArtifacts(
+  deps: Deps,
+  reviewId: string,
+): Promise<ExportArtifactRow[]> {
+  const { data, error } = await deps.supabase
+    .from("export_artifact")
+    .select("id, format, storage_path, created_at")
+    .eq("review_id", reviewId)
+    .order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data ?? []) as ExportArtifactRow[];
+}
