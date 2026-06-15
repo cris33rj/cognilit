@@ -62,6 +62,15 @@ em `PRISMA_2020_ITEMS` e é trivial de reajustar item a item; a engine é agnós
   com estados corretos; (b) regeneração re-grava idempotente (continua 27); (c) RLS bloqueia
   não-membro. Não-regressão: `tests/integration/report.test.ts` (9) ✅ → **12/12** no conjunto.
 - `npx next build`: ✅ compila (19 rotas; rota `report` ok).
+- **e2e (Playwright)**: `tests/e2e/checklist-characteristics.spec.ts` ✅ (1 passed) — caminho
+  real de UI: signup→review→seed `included_ft`+valor ratificado→gerar relatório→**painel
+  Checklist PRISMA 2020** (item atendido + badge "Não aplicável"/"Atendido") + **tabela de
+  características** com o valor ratificado (`120 pacientes`) e **sem `[object Object]`**.
+- **Correção encontrada pelo e2e (FR-019)**: a célula da tabela recebia o jsonb cru
+  `extraction_value.final_value = {value, source_span, page}` → renderizava `[object Object]`.
+  Corrigido em `characteristics.ts` (helper `extractCellValue`, espelha `SummaryTable.cellText`:
+  extrai `.value` quando objeto, passa escalares, nulo→null). Unit estendido p/ o shape
+  estruturado. Os testes unitários antigos usavam escalares e não pegavam isso.
 - Revisão por subagente: cada task passou spec-compliance + code-quality; revisão holística
   final = **Ready to merge** (sem issues Critical/Important).
 
@@ -84,7 +93,8 @@ em `PRISMA_2020_ITEMS` e é trivial de reajustar item a item; a engine é agnós
 
 ## Commits (build/003-.../4-checklist-characteristics, sobre `1290f65`)
 plano+tracking `337ca20` · migration `f35f6f2` · seed `2b6d61b` · engine checklist `9c3c477` ·
-characteristics `0b99b96` · hooks snapshot `07fc8e7` · UI `7a2274b` · integração `89fccd6`.
+characteristics `0b99b96` · hooks snapshot `07fc8e7` · UI `7a2274b` · integração `89fccd6` ·
+COMPLETION `52971e0` · **fix final_value + e2e `6f2b15e`**.
 
 ## Pós-merge (a fazer pelo dev / próxima sessão)
 Atualizar a tabela "Estado de execução" em [slicing.md](./slicing.md) (linha Fatia 4 →
