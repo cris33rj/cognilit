@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { LLMProvider, ThemeSummary } from "@/lib/ai/llm/types";
 import { buildDeterministicSections } from "./sections";
 import { loadReportInputs, resolveReport } from "./queries";
+import { snapshotPrismaChecklist } from "@/lib/prisma/checklist";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -214,6 +215,8 @@ export async function processReportDraftJob(
     }
 
     // ── 5. Marcar report pronto ─────────────────────────────────────────────
+    // US4: grava o snapshot do checklist PRISMA com a cobertura do relatório recém-montado.
+    await snapshotPrismaChecklist({ supabase }, reviewId);
     await supabase
       .from("report")
       .update({ status: "ready", updated_at: new Date().toISOString() })
