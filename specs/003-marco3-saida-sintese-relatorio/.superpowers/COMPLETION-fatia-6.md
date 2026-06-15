@@ -77,6 +77,13 @@ Marco 3 fecha.
   > **Pendente de revisão humana no merge**: abrir o DOCX no Word e conferir o PDF num leitor
   > (fidelidade visual fina) — encerra o item A2 conforme o plan. A geração e o embed já estão
   > provados por teste; falta apenas o olho humano sobre o layout.
+- **A2 (bundling Next) — corrigido**: ao abrir `/reviews/[id]/report` no dev, o `pdfmake` →
+  `@foliojs-fork/pdfkit` → `fontkit`/`linebreak` lê `.trie` por `fs` no module-eval; o webpack
+  do Next bundlava o JS sem copiar os `.trie` → `ENOENT data.trie`. Corrigido adicionando os
+  4 pacotes a `experimental.serverComponentsExternalPackages` em `next.config.mjs` (mesmo
+  precedente do `@resvg/resvg-wasm` da Fatia 1). Verificado por **`next build` limpo** (rota
+  `report` compila + "Collecting build traces" sem ENOENT). Requer `.next` fresco + restart do
+  dev server.
 - **e2e SC-005 (`tests/e2e/export.spec.ts`)**: novo teste escrito (seleciona os 5 formatos,
   1 operação, 5 links, baixa .docx/.pdf e confere PK/`%PDF-`). **NÃO executado nesta sessão**
   (Playwright roda o desenvolvedor no merge): `npx playwright test tests/e2e/export.spec.ts`.
