@@ -161,6 +161,9 @@ async function loadDocInputs(supabase: SupabaseClient, reviewId: string) {
       .order("n", { ascending: false }),
   ]);
 
+  if (countersRow.error) throw new Error(countersRow.error.message);
+  if (breakdownRows.error) throw new Error(breakdownRows.error.message);
+
   const counters: PrismaCounters = {
     identified: countersRow.data?.identified ?? 0,
     duplicates: countersRow.data?.duplicates ?? 0,
