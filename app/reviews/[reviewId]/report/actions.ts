@@ -8,6 +8,8 @@ import { MissingByokError, type LLMProvider } from "@/lib/ai/llm/types";
 import { MockLLMProvider } from "@/lib/ai/llm/mock";
 import { enqueueReportDraftJob } from "@/lib/report/enqueue";
 import { runReportDraftWorkerWith } from "@/lib/report/batch-run";
+import { enqueueReportExportJob } from "@/lib/export/enqueue";
+import { runReportExportWorkerWith } from "@/lib/export/batch-run";
 import { regenerateDeterministicSections } from "@/lib/report/regenerate";
 
 async function requireMember(reviewId: string) {
@@ -73,6 +75,16 @@ export async function regenerateReport(reviewId: string) {
   const res = await regenerateDeterministicSections({ supabase }, reviewId);
   revalidate(reviewId);
   return { ok: true as const, ...res };
+}
+
+/** Enfileira a exportação (client membro) e roda o worker (admin). Sem IA, sem custo. */
+export async function enqueueExport(reviewId: string, formats: string[]) {
+  const { supabase } = await requireMember(reviewId);
+  const admin = createAdminClient();
+  await enqueueReportExportJob({ supabase }, reviewId, formats);
+  await runReportExportWorkerWith(admin, reviewId);
+  revalidate(reviewId);
+  return { ok: true as const };
 }
 
 /** Edita uma seção → human_edited (RPC auditada). Resultados/decl-IA/desvios são rejeitados pela RPC. */
