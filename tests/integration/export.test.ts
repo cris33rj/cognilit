@@ -153,9 +153,12 @@ describe("Fatia 5 — worker report_export", () => {
 
   it("resiliência por-formato: formato não suportado falha isolado (FR-023)", async () => {
     const { svc, member, reviewId } = await seedReview("resil");
+    // prisma_svg está no enum export_format (a RPC aceita) mas não tem case no
+    // worker (serializeFormat → default: throw). Fatia 6 passou a suportar docx,
+    // então usamos prisma_svg como o formato deliberadamente não suportado.
     await enqueueReportExportJob({ supabase: member }, reviewId, [
       "md",
-      "docx",
+      "prisma_svg",
     ]);
     await runReportExportWorkerWith(svc, reviewId);
 
@@ -178,7 +181,7 @@ describe("Fatia 5 — worker report_export", () => {
       ]),
     );
     expect(byFmt.md).toBe("done");
-    expect(byFmt.docx).toBe("failed");
+    expect(byFmt.prisma_svg).toBe("failed");
 
     const { data: arts } = await svc
       .from("export_artifact")
