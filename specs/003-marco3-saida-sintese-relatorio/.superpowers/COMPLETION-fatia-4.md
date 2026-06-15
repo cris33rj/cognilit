@@ -3,7 +3,7 @@
 **Feature**: `003-marco3-saida-sintese-relatorio` (Marco 3 — Saída)
 **Branch**: `build/003-marco3-saida-sintese-relatorio/4-checklist-characteristics` (a partir de `1290f65`, feature HEAD)
 **Data**: 2026-06-15
-**Status**: ✅ Build completo, **aguardando merge manual do desenvolvedor (CHECKPOINT 3)**. A sessão **não** fez merge/push.
+**Status**: ✅ **Mergeada** na branch da feature via merge commit `229fea8` (parents `1290f65` + build tip `69704a4`, 2026-06-15). Build completo e CHECKPOINT 3 concluído.
 
 ---
 
