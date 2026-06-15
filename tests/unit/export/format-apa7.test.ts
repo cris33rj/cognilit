@@ -39,6 +39,11 @@ describe("recordToCslJson", () => {
     const csl = recordToCslJson(rec({ year: null }));
     expect(csl.issued).toBeUndefined();
   });
+
+  it("preserva nome após múltiplas vírgulas (sufixo), sem perder dados", () => {
+    const csl = recordToCslJson(rec({ authors: ["Smith, Jr., John"] }));
+    expect(csl.author).toEqual([{ family: "Smith", given: "Jr., John" }]);
+  });
 });
 
 describe("formatCitationsApa7", () => {

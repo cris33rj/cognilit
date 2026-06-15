@@ -18,7 +18,10 @@ export interface CslItem {
 }
 
 function splitAuthor(a: string): { family: string; given?: string } {
-  const [family, given] = a.split(",").map((p) => p.trim());
+  const idx = a.indexOf(",");
+  if (idx === -1) return { family: a.trim() };
+  const family = a.slice(0, idx).trim();
+  const given = a.slice(idx + 1).trim();
   return given ? { family, given } : { family };
 }
 
@@ -73,6 +76,7 @@ export function formatCitationsApa7(records: RecordDetailData[]): string {
   const engine = new CSL.Engine(sys, styleXml as string, "pt-BR");
   engine.updateItems(Object.keys(items));
   const bib = engine.makeBibliography();
+  if (!bib || !Array.isArray(bib[1])) return "";
   const entries = (bib[1] as string[]).map((e) =>
     e
       .replace(/<[^>]+>/g, "")
