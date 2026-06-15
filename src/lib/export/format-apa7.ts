@@ -74,14 +74,14 @@ export function formatCitationsApa7(records: RecordDetailData[]): string {
   };
 
   const engine = new CSL.Engine(sys, styleXml as string, "pt-BR");
+  // Saída em texto puro: evita tags e entidades HTML (ex.: "&#38;" em vez de "&")
+  // no separador de autores, garantindo fidelidade da lista de referências (FR-022).
+  engine.setOutputFormat("text");
   engine.updateItems(Object.keys(items));
   const bib = engine.makeBibliography();
   if (!bib || !Array.isArray(bib[1])) return "";
   const entries = (bib[1] as string[]).map((e) =>
-    e
-      .replace(/<[^>]+>/g, "")
-      .replace(/\s+/g, " ")
-      .trim(),
+    e.replace(/\s+/g, " ").trim(),
   );
   return entries.join("\n");
 }

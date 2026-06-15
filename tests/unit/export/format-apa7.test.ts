@@ -76,4 +76,13 @@ describe("formatCitationsApa7", () => {
     const out = formatCitationsApa7([rec({ authors: [] })]);
     expect(out).toContain("[autor não informado]");
   });
+
+  it("saída em texto puro: separador de autores é '&', sem tags/entidades HTML", () => {
+    const out = formatCitationsApa7([
+      rec({ authors: ["Silva, Ana", "Costa, João"], year: 2021 }),
+    ]);
+    expect(out).toContain("&");
+    expect(out).not.toMatch(/&#?\w+;/); // sem &#38; / &amp; etc.
+    expect(out).not.toMatch(/<[^>]+>/); // sem tags HTML
+  });
 });
