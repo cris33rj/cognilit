@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { SectionKind } from "./types";
 import { buildDeterministicSections } from "./sections";
 import { loadReportInputs, resolveReport } from "./queries";
+import { snapshotPrismaChecklist } from "@/lib/prisma/checklist";
 
 export interface RegenerateResult {
   regenerated: SectionKind[];
@@ -59,6 +60,9 @@ export async function regenerateDeterministicSections(
 
     regenerated.push(sec.kind);
   }
+
+  // US4: o checklist é snapshot do relatório → re-gravar ao regenerar (FR-018).
+  await snapshotPrismaChecklist({ supabase }, reviewId);
 
   return { regenerated, preserved };
 }
