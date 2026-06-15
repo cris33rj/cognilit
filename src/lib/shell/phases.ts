@@ -17,6 +17,7 @@ export type PhaseKey =
   | "screening_ft"
   | "extraction"
   | "synthesis"
+  | "report"
   | "risk_of_bias"
   | "certainty";
 
@@ -42,6 +43,8 @@ export interface PhaseInput {
   extractionRatified: boolean;
   /** Síntese qualitativa concluída (synthesis.status === 'ready'). */
   synthesisReady: boolean;
+  /** Relatório estruturado concluído (report.status === 'ready'). */
+  reportReady: boolean;
 }
 
 interface PhaseDef {
@@ -111,6 +114,14 @@ const PIPELINE: PhaseDef[] = [
     // Bloqueada até que a extração esteja ratificada.
     isLocked: (i) => !i.extractionRatified,
     completed: (i) => i.synthesisReady,
+  },
+  {
+    key: "report",
+    label: "Relatório",
+    href: (r) => `/reviews/${r}/report`,
+    // Bloqueada até a síntese concluir (Resultados embute a síntese ratificada).
+    isLocked: (i) => !i.synthesisReady,
+    completed: (i) => i.reportReady,
   },
 ];
 
@@ -185,6 +196,13 @@ export async function loadPhaseStates(reviewId: string): Promise<Phase[]> {
     .eq("review_id", reviewId)
     .maybeSingle();
 
+  const { data: reportRow } = await supabase
+    .from("report")
+    .select("status")
+    .eq("review_id", reviewId)
+    .maybeSingle();
+  const reportReady = reportRow?.status === "ready";
+
   return computePhaseStates(reviewId, {
     hasQuestion: (questionCount ?? 0) > 0,
     protocolStatus,
@@ -197,5 +215,6 @@ export async function loadPhaseStates(reviewId: string): Promise<Phase[]> {
     excludedFt: counters.excludedFt,
     extractionRatified: (ratifiedCount ?? 0) > 0,
     synthesisReady: synthesis?.status === "ready",
+    reportReady,
   });
 }

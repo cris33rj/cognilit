@@ -64,6 +64,16 @@ export interface SynthesisFinding {
   value: unknown; // final_value ratificado
 }
 
+export interface ThemeSummary {
+  name: string;
+  narrative: string; // pt-BR
+}
+
+export interface DraftedSection {
+  content: string; // markdown, pt-BR
+  provenance: Provenance;
+}
+
 export interface SynthesizedTheme {
   name: string;
   narrative: string; // pt-BR
@@ -120,12 +130,21 @@ export interface LLMProvider {
     language: "pt-BR";
   }): Promise<SynthesizeThemesResult>;
 
+  /** Rascunha Discussão/Conclusão como ponto de partida editável (D29). pt-BR.
+   *  Texto livre (não é sugestão factual com source_span): provenance OBRIGATÓRIA. */
+  draftReportSection(input: {
+    kind: "discussion" | "conclusion";
+    context: { methods: string; results: string; themes: ThemeSummary[] };
+    language: "pt-BR";
+  }): Promise<DraftedSection>;
+
   /** Estimativa de custo ANTES de lote (FR-022, §VII/P5). */
   estimateCost(
     input:
       | { itemCount: number; kind: "ai_screening_batch" }
       | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number }
-      | { itemCount: number; kind: "synthesis_batch" },
+      | { itemCount: number; kind: "synthesis_batch" }
+      | { itemCount: number; kind: "report_draft" },
   ): Promise<CostEstimate>;
 }
 

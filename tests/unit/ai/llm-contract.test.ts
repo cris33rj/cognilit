@@ -102,6 +102,36 @@ describe("synthesizeThemes (contrato)", () => {
   });
 });
 
+describe("draftReportSection (contrato §VII)", () => {
+  const provider = new MockLLMProvider();
+
+  it("rascunha Discussão com provenance completa e pt-BR", async () => {
+    const r = await provider.draftReportSection({
+      kind: "discussion",
+      context: {
+        methods: "## Métodos\n...",
+        results: "## Resultados\n...",
+        themes: [{ name: "Tema A", narrative: "Narrativa do tema A" }],
+      },
+      language: "pt-BR",
+    });
+    expect(r.content.length).toBeGreaterThan(0);
+    expect(r.provenance.model).toBeTruthy();
+    expect(r.provenance.version).toBeTruthy();
+    expect(r.provenance.prompt_or_span).toBeTruthy();
+    expect(r.provenance.timestamp).toMatch(/\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("estimateCost aceita report_draft", async () => {
+    const e = await provider.estimateCost({
+      kind: "report_draft",
+      itemCount: 2,
+    });
+    expect(e.tokensEstimated).toBeGreaterThan(0);
+    expect(typeof e.cost).toBe("object");
+  });
+});
+
 describe("AnthropicProvider.synthesizeThemes — mapeamento de findingRefs", () => {
   const findings = [
     {
