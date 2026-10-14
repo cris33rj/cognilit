@@ -32,6 +32,9 @@ export default defineConfig(({ mode }) => {
       environment: "jsdom",
       globals: true,
       setupFiles: ["./vitest.setup.ts"],
+      // Integration tests make many round trips to a real local Supabase; the
+      // 5s default is too tight when suites run in parallel.
+      testTimeout: 30_000,
       include: [
         "tests/unit/**/*.test.ts?(x)",
         "tests/integration/**/*.test.ts?(x)",
