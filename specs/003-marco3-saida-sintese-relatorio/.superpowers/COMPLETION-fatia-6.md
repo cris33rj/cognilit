@@ -3,7 +3,8 @@
 **Feature**: `003-marco3-saida-sintese-relatorio` (Marco 3 — Saída)
 **Branch**: `build/003-marco3-saida-sintese-relatorio/6-export-docs` (a partir de `3fedbae`, feature HEAD)
 **Data**: 2026-06-15
-**Status**: 🔨 **Build completo — aguardando merge manual** (CHECKPOINT 3). A sessão NÃO faz merge/push.
+**Status**: ✅ **Mergeada na feature** — merge commit `15ed40e` (parents `3fedbae` + build tip `6b6bbea`,
+2026-06-15). **Última fatia do Marco 3.** Feature mergeada em `main` via `1fade01` (2026-10-14).
 
 ---
 

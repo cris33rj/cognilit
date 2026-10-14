@@ -8,7 +8,9 @@
 `229fea8` (parents `1290f65` + build tip `69704a4`, 2026-06-15). Fatia 5 (Exportação:
 infra + MD/BibTeX/RIS) ✅ mergeada na feature via merge commit `06afab4` (parents `e56ce4c` +
 build tip `a899dba`, 2026-06-15). Verde no merge: unit + integração (459/459) + `tsc` + `lint`
-+ e2e `export.spec.ts`. Fatia 6 (Export DOCX/PDF + APA7 — terminal) é a próxima.
++ e2e `export.spec.ts`. Fatia 6 (Export DOCX/PDF + APA7 — terminal) ✅ mergeada na feature via
+merge commit `15ed40e` (parents `3fedbae` + build tip `6b6bbea`, 2026-06-15). **Marco 3
+completo** — feature mergeada em `main` via `1fade01` (2026-10-14).
 **Ancorado em**: [codebase-map.md](./codebase-map.md), [plan.md](../plan.md),
 [data-model.md](../data-model.md), contratos (synthesis/report/prisma-export),
 [HANDOFF.md](../HANDOFF.md). Produto sign-off (CONTEXT/constitution/spec) — não reaberto.
@@ -226,7 +228,7 @@ Numeração de migration é indicativa; o número real (próximo após `0017`) �
 | 3 | Relatório (US3) | build/003-marco3-saida-sintese-relatorio/3-report | ✅ mergeada | `104648f` ff em feature (HEAD `1290f65`, 2026-06-15) |
 | 4 | Checklist + características (US4) | build/003-marco3-saida-sintese-relatorio/4-checklist-characteristics | ✅ mergeada | `229fea8` (merge commit, 2026-06-15) |
 | 5 | Export infra + MD/BibTeX/RIS (US5a) | build/003-marco3-saida-sintese-relatorio/5-export-light | ✅ mergeada | `06afab4` (merge commit, 2026-06-15) |
-| 6 | Export DOCX/PDF + APA7 (US5b) | build/003-marco3-saida-sintese-relatorio/6-export-docs | 🔨 build completo (aguardando merge) | — (tip `6f4cf61`, base `3fedbae`) |
+| 6 | Export DOCX/PDF + APA7 (US5b) | build/003-marco3-saida-sintese-relatorio/6-export-docs | ✅ mergeada | `15ed40e` (merge commit, build tip `6b6bbea`, 2026-06-15) |
 
 Após aprovação (CHECKPOINT 1): por fatia, `writing-plans` (CHECKPOINT 2) →
 `using-git-worktrees` → `subagent-driven-development` → **PARAR** (CHECKPOINT 3) →
