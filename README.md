@@ -115,7 +115,7 @@ Each slice leaves a written record (`specs/*/.superpowers/COMPLETION-*.md`) with
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22+ (supabase-js needs native WebSocket support)
 - Docker (required by the local Supabase stack)
 
 ### Run locally

@@ -9,7 +9,7 @@
     "url": "git+https://github.com/cris33rj/cognilit.git"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "next dev",
