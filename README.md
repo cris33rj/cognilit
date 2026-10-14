@@ -125,6 +125,8 @@ npm test                  # both; integration is skipped with a notice if Supaba
 npm run test:e2e          # Playwright (requires the local Supabase stack)
 ```
 
+Two integration tests (`protocol-draft`, `question-derivation`) call the real Anthropic API and intentionally fail unless `ANTHROPIC_API_KEY` is set in `.env.local`; every other AI path uses deterministic mock providers.
+
 CI runs lint, type-check, unit tests and a production build on every push and pull request, plus the integration suite against a disposable Supabase stack and a gitleaks secret scan ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ## Status and roadmap
