@@ -25,6 +25,22 @@ The guiding rule is that **AI proposes, humans decide**. AI does the repetitive 
 - **Resilient async jobs.** Heavy work (PDF parsing, batch extraction, embeddings, synthesis, report export) runs as persisted, resumable jobs with per-item failure isolation, never inside a request.
 - **Multi-format export.** DOCX, PDF and Markdown reports; references in BibTeX and RIS; citations formatted in APA 7 via citeproc.
 
+## Screenshots
+
+The UI is in Brazilian Portuguese. Captured from a local run with sample references.
+
+**Deduplication:** exact duplicates are removed automatically (and can be undone); likely duplicates wait for human confirmation.
+
+![Deduplication queue in the workbench](docs/screenshots/deduplication.png)
+
+**Title/abstract screening:** virtualized record list with filters, keyboard shortcuts and a detail panel.
+
+![Title and abstract screening](docs/screenshots/screening.png)
+
+**PRISMA 2020 flow diagram:** computed from the database, flagged as partial while screening is in progress, downloadable as SVG or PNG.
+
+![PRISMA 2020 flow diagram](docs/screenshots/prisma-flowchart.png)
+
 ## Tech stack
 
 | Area | Choice |
