@@ -1,5 +1,9 @@
 # Cognilit
 
+[![CI](https://github.com/cris33rj/cognilit/actions/workflows/ci.yml/badge.svg)](https://github.com/cris33rj/cognilit/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![TypeScript strict](https://img.shields.io/badge/TypeScript-strict-3178c6.svg)
+
 **An AI-first, human-in-the-loop web app for conducting systematic literature reviews end to end, following PRISMA 2020.**
 
 Cognilit takes a researcher from the review question to an exportable report: protocol, reference import and deduplication, two-stage screening, PDF ingestion, AI-assisted data extraction, semantic search over the corpus, qualitative synthesis, a live PRISMA flow diagram and a structured report draft exported to DOCX, PDF and Markdown.
@@ -115,10 +119,13 @@ AI features need your own API keys (Anthropic for the LLM, Voyage AI for embeddi
 ```bash
 npm run lint
 npm run typecheck
-npx vitest run tests/unit   # unit tests, no services needed
-npm test                    # unit + integration (requires `npx supabase start` and .env.local)
-npm run test:e2e            # Playwright (requires the local Supabase stack)
+npm run test:unit         # no services needed
+npm run test:integration  # requires `npx supabase start` and .env.local
+npm test                  # both; integration is skipped with a notice if Supabase is not configured
+npm run test:e2e          # Playwright (requires the local Supabase stack)
 ```
+
+CI runs lint, type-check, unit tests and a production build on every push and pull request, plus the integration suite against a disposable Supabase stack and a gitleaks secret scan ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
 ## Status and roadmap
 
@@ -130,3 +137,7 @@ Planned next:
 - Active multi-reviewer collaboration (invitations, agreement statistics, conflict resolution)
 - Bibliographic database APIs (OpenAlex, Crossref, ERIC)
 - Local in-process embeddings as an alternative to the hosted provider
+
+## License
+
+[MIT](LICENSE). Bundled citation style files keep their own CC BY-SA 3.0 license; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
