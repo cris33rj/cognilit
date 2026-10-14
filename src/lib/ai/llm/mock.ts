@@ -1,5 +1,6 @@
 import type {
   CostEstimate,
+  DraftedSection,
   EligibilityDerivation,
   ExtractedField,
   ExtractionFieldDef,
@@ -10,7 +11,12 @@ import type {
   ProtocolDraft,
   ProviderIdentity,
   ScreeningPreclassification,
+  SynthesisFinding,
+  SynthesizedTheme,
+  SynthesizeThemesResult,
+  ThemeSummary,
 } from "./types";
+import { estimateReportDraftCost, estimateSynthesisCost } from "./cost";
 
 function provenance(prompt: string) {
   return {
@@ -103,7 +109,9 @@ export class MockLLMProvider implements LLMProvider {
   async estimateCost(
     input:
       | { itemCount: number; kind: "ai_screening_batch" }
-      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number }
+      | { itemCount: number; kind: "synthesis_batch" }
+      | { itemCount: number; kind: "report_draft" },
   ): Promise<CostEstimate> {
     if (input.kind === "ai_extraction_batch") {
       const tokensEstimated = input.itemCount * input.fieldCount * 250;
@@ -112,10 +120,56 @@ export class MockLLMProvider implements LLMProvider {
         cost: { usd: (tokensEstimated / 1000) * 0.0025 },
       };
     }
+    if (input.kind === "synthesis_batch") {
+      return estimateSynthesisCost(input.itemCount);
+    }
+    if (input.kind === "report_draft") {
+      return estimateReportDraftCost(input.itemCount);
+    }
     return {
       tokensEstimated: input.itemCount * 800,
       cost: { usd: input.itemCount * 0.002 },
     };
+  }
+
+  async draftReportSection(input: {
+    kind: "discussion" | "conclusion";
+    context: { methods: string; results: string; themes: ThemeSummary[] };
+    language: "pt-BR";
+  }): Promise<DraftedSection> {
+    const titulo = input.kind === "discussion" ? "Discussão" : "Conclusão";
+    const temas = input.context.themes.map((t) => `- ${t.name}`).join("\n");
+    const content =
+      `## ${titulo}\n\n` +
+      `Rascunho simulado de ${titulo.toLowerCase()} a partir dos temas ratificados:\n` +
+      (temas || "- (sem temas)") +
+      `\n`;
+    return {
+      content,
+      provenance: provenance(`draftReportSection:${input.kind}`),
+    };
+  }
+
+  async synthesizeThemes(input: {
+    findings: SynthesisFinding[];
+    language: "pt-BR";
+  }): Promise<SynthesizeThemesResult> {
+    if (input.findings.length === 0) return { insufficientData: true };
+    const byField = new Map<string, SynthesisFinding[]>();
+    for (const f of input.findings) {
+      const arr = byField.get(f.fieldName) ?? [];
+      arr.push(f);
+      byField.set(f.fieldName, arr);
+    }
+    const themes: SynthesizedTheme[] = [...byField.entries()].map(
+      ([field, fs]) => ({
+        name: `Tema: ${field}`,
+        narrative: `Síntese simulada sobre ${field} em ${fs.length} estudo(s).`,
+        findingRefs: fs.map((f) => f.extractionValueId),
+        provenance: provenance(`synthesize:${field}`),
+      }),
+    );
+    return { themes };
   }
 
   async extractFields(input: {

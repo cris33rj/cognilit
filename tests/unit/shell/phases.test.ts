@@ -12,6 +12,8 @@ const base: PhaseInput = {
   includedFt: 0,
   excludedFt: 0,
   extractionRatified: false,
+  synthesisReady: false,
+  reportReady: false,
 };
 const by = (phases: ReturnType<typeof computePhaseStates>) =>
   Object.fromEntries(phases.map((p) => [p.key, p.status]));
@@ -107,5 +109,114 @@ describe("computePhaseStates — trilho de fases (US7)", () => {
     expect(phases.find((p) => p.key === "screening_ts")!.href).toBe(
       "/reviews/rev-xyz/workbench?mode=title_abstract",
     );
+  });
+
+  describe("Síntese — fase pós-extração (US1)", () => {
+    it("fase 'synthesis' existe no trilho", () => {
+      const phases = computePhaseStates("rev1", base);
+      expect(phases.find((p) => p.key === "synthesis")).toBeDefined();
+    });
+
+    it("href de synthesis aponta para /reviews/:id/synthesis", () => {
+      const phases = computePhaseStates("rev-abc", base);
+      expect(phases.find((p) => p.key === "synthesis")!.href).toBe(
+        "/reviews/rev-abc/synthesis",
+      );
+    });
+
+    it("synthesis fica 'locked' enquanto extração não está ratificada", () => {
+      const s = by(
+        computePhaseStates("rev1", {
+          ...base,
+          extractionRatified: false,
+          synthesisReady: false,
+        }),
+      );
+      expect(s.synthesis).toBe("locked");
+    });
+
+    it("synthesis fica disponível (não-locked) quando extractionRatified=true e síntese pendente", () => {
+      const s = by(
+        computePhaseStates("rev1", {
+          ...base,
+          hasQuestion: true,
+          protocolStatus: "locked",
+          identified: 20,
+          duplicates: 2,
+          screenedTs: 18,
+          passedTs: 15,
+          includedTs: 0,
+          includedFt: 13,
+          excludedFt: 2,
+          extractionRatified: true,
+          synthesisReady: false,
+        }),
+      );
+      expect(s.synthesis).not.toBe("locked");
+    });
+
+    it("synthesis fica 'done' quando synthesisReady=true", () => {
+      const s = by(
+        computePhaseStates("rev1", {
+          ...base,
+          hasQuestion: true,
+          protocolStatus: "locked",
+          identified: 20,
+          duplicates: 2,
+          screenedTs: 18,
+          passedTs: 15,
+          includedTs: 0,
+          includedFt: 13,
+          excludedFt: 2,
+          extractionRatified: true,
+          synthesisReady: true,
+        }),
+      );
+      expect(s.synthesis).toBe("done");
+    });
+
+    it("synthesis vem depois de extraction no trilho", () => {
+      const phases = computePhaseStates("rev1", base);
+      const extractionIdx = phases.findIndex((p) => p.key === "extraction");
+      const synthesisIdx = phases.findIndex((p) => p.key === "synthesis");
+      expect(synthesisIdx).toBeGreaterThan(extractionIdx);
+    });
+  });
+
+  describe("fase report no trilho", () => {
+    it("aparece após Síntese e fica locked até a síntese concluir", () => {
+      const phases = computePhaseStates("rev1", {
+        ...base,
+        synthesisReady: false,
+      });
+      const report = phases.find((p) => p.key === "report")!;
+      expect(report).toBeDefined();
+      expect(report.status).toBe("locked");
+    });
+
+    it("conclui quando reportReady=true", () => {
+      const phases = computePhaseStates("rev1", {
+        ...base,
+        extractionRatified: true,
+        synthesisReady: true,
+        reportReady: true,
+      });
+      const report = phases.find((p) => p.key === "report")!;
+      expect(report.status).toBe("done");
+    });
+
+    it("report vem depois de synthesis no trilho", () => {
+      const phases = computePhaseStates("rev1", base);
+      const synthesisIdx = phases.findIndex((p) => p.key === "synthesis");
+      const reportIdx = phases.findIndex((p) => p.key === "report");
+      expect(reportIdx).toBeGreaterThan(synthesisIdx);
+    });
+
+    it("href de report aponta para /reviews/:id/report", () => {
+      const phases = computePhaseStates("rev-abc", base);
+      expect(phases.find((p) => p.key === "report")!.href).toBe(
+        "/reviews/rev-abc/report",
+      );
+    });
   });
 });

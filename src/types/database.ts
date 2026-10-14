@@ -554,6 +554,65 @@ export type Database = {
           },
         ]
       }
+      export_artifact: {
+        Row: {
+          created_at: string
+          format: Database["public"]["Enums"]["export_format"]
+          id: string
+          job_id: string | null
+          report_id: string | null
+          review_id: string
+          storage_path: string
+        }
+        Insert: {
+          created_at?: string
+          format: Database["public"]["Enums"]["export_format"]
+          id?: string
+          job_id?: string | null
+          report_id?: string | null
+          review_id: string
+          storage_path: string
+        }
+        Update: {
+          created_at?: string
+          format?: Database["public"]["Enums"]["export_format"]
+          id?: string
+          job_id?: string | null
+          report_id?: string | null
+          review_id?: string
+          storage_path?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "export_artifact_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "job"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "export_artifact_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "report"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "export_artifact_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "export_artifact_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       extraction_field: {
         Row: {
           created_at: string
@@ -888,6 +947,51 @@ export type Database = {
           },
         ]
       }
+      prisma_checklist_item: {
+        Row: {
+          computed_at: string
+          id: string
+          item_code: string
+          label: string
+          review_id: string
+          section_ref: string | null
+          status: Database["public"]["Enums"]["prisma_checklist_status"]
+        }
+        Insert: {
+          computed_at?: string
+          id?: string
+          item_code: string
+          label: string
+          review_id: string
+          section_ref?: string | null
+          status: Database["public"]["Enums"]["prisma_checklist_status"]
+        }
+        Update: {
+          computed_at?: string
+          id?: string
+          item_code?: string
+          label?: string
+          review_id?: string
+          section_ref?: string | null
+          status?: Database["public"]["Enums"]["prisma_checklist_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prisma_checklist_item_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "prisma_checklist_item_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profile: {
         Row: {
           created_at: string
@@ -1158,6 +1262,113 @@ export type Database = {
           },
         ]
       }
+      report: {
+        Row: {
+          created_at: string
+          id: string
+          review_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          review_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          review_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "report_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      report_section: {
+        Row: {
+          ai_suggestion_id: string | null
+          content: string
+          created_at: string
+          edit_state: Database["public"]["Enums"]["report_section_edit_state"]
+          id: string
+          kind: Database["public"]["Enums"]["report_section_kind"]
+          order: number
+          report_id: string
+          review_id: string
+          updated_at: string
+        }
+        Insert: {
+          ai_suggestion_id?: string | null
+          content?: string
+          created_at?: string
+          edit_state?: Database["public"]["Enums"]["report_section_edit_state"]
+          id?: string
+          kind: Database["public"]["Enums"]["report_section_kind"]
+          order?: number
+          report_id: string
+          review_id: string
+          updated_at?: string
+        }
+        Update: {
+          ai_suggestion_id?: string | null
+          content?: string
+          created_at?: string
+          edit_state?: Database["public"]["Enums"]["report_section_edit_state"]
+          id?: string
+          kind?: Database["public"]["Enums"]["report_section_kind"]
+          order?: number
+          report_id?: string
+          review_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "report_section_ai_suggestion_id_fkey"
+            columns: ["ai_suggestion_id"]
+            isOneToOne: false
+            referencedRelation: "ai_suggestion"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_section_report_id_fkey"
+            columns: ["report_id"]
+            isOneToOne: false
+            referencedRelation: "report"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "report_section_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "report_section_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       review: {
         Row: {
           active_screening_started_at: string | null
@@ -1323,6 +1534,45 @@ export type Database = {
           },
         ]
       }
+      synthesis: {
+        Row: {
+          created_at: string
+          id: string
+          review_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          review_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          review_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "synthesis_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "synthesis_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: true
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       text_layer: {
         Row: {
           char_end: number
@@ -1377,6 +1627,133 @@ export type Database = {
             columns: ["review_id"]
             isOneToOne: false
             referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      theme: {
+        Row: {
+          ai_suggestion_id: string | null
+          created_at: string
+          id: string
+          name: string
+          narrative: string
+          order: number
+          review_id: string
+          state: string
+          summary_table: Json | null
+          synthesis_id: string
+          updated_at: string
+        }
+        Insert: {
+          ai_suggestion_id?: string | null
+          created_at?: string
+          id?: string
+          name: string
+          narrative?: string
+          order?: number
+          review_id: string
+          state?: string
+          summary_table?: Json | null
+          synthesis_id: string
+          updated_at?: string
+        }
+        Update: {
+          ai_suggestion_id?: string | null
+          created_at?: string
+          id?: string
+          name?: string
+          narrative?: string
+          order?: number
+          review_id?: string
+          state?: string
+          summary_table?: Json | null
+          synthesis_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "theme_ai_suggestion_id_fkey"
+            columns: ["ai_suggestion_id"]
+            isOneToOne: false
+            referencedRelation: "ai_suggestion"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "theme_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "theme_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "theme_synthesis_id_fkey"
+            columns: ["synthesis_id"]
+            isOneToOne: false
+            referencedRelation: "synthesis"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      theme_finding: {
+        Row: {
+          created_at: string
+          extraction_value_id: string
+          id: string
+          order: number
+          review_id: string
+          theme_id: string
+        }
+        Insert: {
+          created_at?: string
+          extraction_value_id: string
+          id?: string
+          order?: number
+          review_id: string
+          theme_id: string
+        }
+        Update: {
+          created_at?: string
+          extraction_value_id?: string
+          id?: string
+          order?: number
+          review_id?: string
+          theme_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "theme_finding_extraction_value_id_fkey"
+            columns: ["extraction_value_id"]
+            isOneToOne: false
+            referencedRelation: "extraction_value"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "theme_finding_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "prisma_counter"
+            referencedColumns: ["review_id"]
+          },
+          {
+            foreignKeyName: "theme_finding_review_id_fkey"
+            columns: ["review_id"]
+            isOneToOne: false
+            referencedRelation: "review"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "theme_finding_theme_id_fkey"
+            columns: ["theme_id"]
+            isOneToOne: false
+            referencedRelation: "theme"
             referencedColumns: ["id"]
           },
         ]
@@ -1551,6 +1928,48 @@ export type Database = {
         }
         Returns: Json
       }
+      create_report_draft_job: {
+        Args: { p_review_id: string }
+        Returns: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_report_export_job: {
+        Args: { p_formats: string[]; p_review_id: string }
+        Returns: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       create_review: {
         Args: { p_title: string }
         Returns: {
@@ -1570,6 +1989,27 @@ export type Database = {
       }
       create_screening_job: {
         Args: { p_record_ids?: Json; p_review_id: string }
+        Returns: {
+          actual_cost: Json | null
+          created_at: string
+          estimated_cost: Json | null
+          finished_at: string | null
+          id: string
+          progress: number
+          review_id: string
+          started_at: string | null
+          status: Database["public"]["Enums"]["job_status"]
+          type: Database["public"]["Enums"]["job_type"]
+        }
+        SetofOptions: {
+          from: "*"
+          to: "job"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_synthesis_job: {
+        Args: { p_review_id: string }
         Returns: {
           actual_cost: Json | null
           created_at: string
@@ -1727,6 +2167,28 @@ export type Database = {
           source_span: string
         }[]
       }
+      merge_themes: {
+        Args: { p_name: string; p_theme_ids: string[] }
+        Returns: {
+          ai_suggestion_id: string | null
+          created_at: string
+          id: string
+          name: string
+          narrative: string
+          order: number
+          review_id: string
+          state: string
+          summary_table: Json | null
+          synthesis_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "theme"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       normalize_reason_label: { Args: { "": string }; Returns: string }
       ratify_extraction_value: {
         Args: {
@@ -1788,6 +2250,10 @@ export type Database = {
         Args: { p_field_ids: string[]; p_review_id: string }
         Returns: undefined
       }
+      reorder_themes: {
+        Args: { p_synthesis_id: string; p_theme_ids: string[] }
+        Returns: undefined
+      }
       reverse_dedup: { Args: { p_decision_id: string }; Returns: undefined }
       reverse_screening: { Args: { p_decision_id: string }; Returns: undefined }
       seed_default_exclusion_reasons: {
@@ -1820,8 +2286,78 @@ export type Database = {
         Args: { p_active: boolean; p_reason_id: string }
         Returns: undefined
       }
+      set_report_section_content: {
+        Args: { p_content: string; p_section_id: string }
+        Returns: {
+          ai_suggestion_id: string | null
+          content: string
+          created_at: string
+          edit_state: Database["public"]["Enums"]["report_section_edit_state"]
+          id: string
+          kind: Database["public"]["Enums"]["report_section_kind"]
+          order: number
+          report_id: string
+          review_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "report_section"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      set_theme_state: {
+        Args: {
+          p_name?: string
+          p_narrative?: string
+          p_state: string
+          p_theme_id: string
+        }
+        Returns: {
+          ai_suggestion_id: string | null
+          created_at: string
+          id: string
+          name: string
+          narrative: string
+          order: number
+          review_id: string
+          state: string
+          summary_table: Json | null
+          synthesis_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "theme"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      split_theme: {
+        Args: { p_parts: Json; p_theme_id: string }
+        Returns: {
+          ai_suggestion_id: string | null
+          created_at: string
+          id: string
+          name: string
+          narrative: string
+          order: number
+          review_id: string
+          state: string
+          summary_table: Json | null
+          synthesis_id: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "theme"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       sync_exclusion_reasons_from_criteria: {
         Args: { p_review_id: string }
         Returns: undefined
@@ -1859,6 +2395,8 @@ export type Database = {
         | "protocol_draft"
         | "screening"
         | "extraction"
+        | "synthesis_theme"
+        | "report_section"
       audit_actor_type: "human" | "ai" | "system"
       byok_purpose: "llm" | "embedding"
       corpus_state:
@@ -1882,6 +2420,14 @@ export type Database = {
         | "text_ready"
         | "partial"
         | "failed"
+      export_format:
+        | "docx"
+        | "pdf"
+        | "md"
+        | "bibtex"
+        | "ris"
+        | "prisma_svg"
+        | "prisma_png"
       extraction_field_type: "text" | "number" | "date" | "boolean" | "select"
       ft_decision_state: "included" | "excluded"
       job_item_status: "pending" | "done" | "failed"
@@ -1897,12 +2443,27 @@ export type Database = {
         | "pdf_text_pipeline"
         | "ai_extraction_batch"
         | "embedding_batch"
+        | "synthesis_batch"
+        | "report_draft"
+        | "report_export"
       llm_provider: "anthropic" | "voyage"
       member_role: "owner" | "reviewer" | "viewer"
+      prisma_checklist_status: "met" | "pending" | "not_applicable"
       protocol_origin: "ai_draft" | "human"
       protocol_state: "draft" | "locked"
       question_framework: "spider" | "pico" | "peo" | "pcc" | "free"
       ratification_state: "pending" | "accepted" | "edited" | "rejected"
+      report_section_edit_state:
+        | "deterministic"
+        | "ai_generated"
+        | "human_edited"
+      report_section_kind:
+        | "methods"
+        | "results"
+        | "discussion"
+        | "conclusion"
+        | "ai_declaration"
+        | "deviations"
       screening_choice: "include" | "exclude" | "maybe"
       screening_stage: "title_abstract" | "full_text"
       source_format: "ris" | "bibtex" | "csv"
@@ -2049,6 +2610,8 @@ export const Constants = {
         "protocol_draft",
         "screening",
         "extraction",
+        "synthesis_theme",
+        "report_section",
       ],
       audit_actor_type: ["human", "ai", "system"],
       byok_purpose: ["llm", "embedding"],
@@ -2075,6 +2638,15 @@ export const Constants = {
         "partial",
         "failed",
       ],
+      export_format: [
+        "docx",
+        "pdf",
+        "md",
+        "bibtex",
+        "ris",
+        "prisma_svg",
+        "prisma_png",
+      ],
       extraction_field_type: ["text", "number", "date", "boolean", "select"],
       ft_decision_state: ["included", "excluded"],
       job_item_status: ["pending", "done", "failed"],
@@ -2091,13 +2663,30 @@ export const Constants = {
         "pdf_text_pipeline",
         "ai_extraction_batch",
         "embedding_batch",
+        "synthesis_batch",
+        "report_draft",
+        "report_export",
       ],
       llm_provider: ["anthropic", "voyage"],
       member_role: ["owner", "reviewer", "viewer"],
+      prisma_checklist_status: ["met", "pending", "not_applicable"],
       protocol_origin: ["ai_draft", "human"],
       protocol_state: ["draft", "locked"],
       question_framework: ["spider", "pico", "peo", "pcc", "free"],
       ratification_state: ["pending", "accepted", "edited", "rejected"],
+      report_section_edit_state: [
+        "deterministic",
+        "ai_generated",
+        "human_edited",
+      ],
+      report_section_kind: [
+        "methods",
+        "results",
+        "discussion",
+        "conclusion",
+        "ai_declaration",
+        "deviations",
+      ],
       screening_choice: ["include", "exclude", "maybe"],
       screening_stage: ["title_abstract", "full_text"],
       source_format: ["ris", "bibtex", "csv"],

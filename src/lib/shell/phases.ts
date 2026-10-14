@@ -16,6 +16,8 @@ export type PhaseKey =
   | "screening_ts"
   | "screening_ft"
   | "extraction"
+  | "synthesis"
+  | "report"
   | "risk_of_bias"
   | "certainty";
 
@@ -39,6 +41,10 @@ export interface PhaseInput {
   excludedFt: number;
   /** Há ao menos um extraction_value ratificado (accepted/edited) na Revisão. */
   extractionRatified: boolean;
+  /** Síntese qualitativa concluída (synthesis.status === 'ready'). */
+  synthesisReady: boolean;
+  /** Relatório estruturado concluído (report.status === 'ready'). */
+  reportReady: boolean;
 }
 
 interface PhaseDef {
@@ -46,6 +52,8 @@ interface PhaseDef {
   label: string;
   href: (reviewId: string) => string | null;
   completed: (i: PhaseInput) => boolean;
+  /** Quando retorna true, a fase é exibida como 'locked' independentemente do frontier. */
+  isLocked?: (i: PhaseInput) => boolean;
 }
 
 const PIPELINE: PhaseDef[] = [
@@ -99,6 +107,22 @@ const PIPELINE: PhaseDef[] = [
     // Fase pós-triagem (D19). Concluída quando há ≥1 valor ratificado pelo humano.
     completed: (i) => i.extractionRatified,
   },
+  {
+    key: "synthesis",
+    label: "Síntese",
+    href: (r) => `/reviews/${r}/synthesis`,
+    // Bloqueada até que a extração esteja ratificada.
+    isLocked: (i) => !i.extractionRatified,
+    completed: (i) => i.synthesisReady,
+  },
+  {
+    key: "report",
+    label: "Relatório",
+    href: (r) => `/reviews/${r}/report`,
+    // Bloqueada até a síntese concluir (Resultados embute a síntese ratificada).
+    isLocked: (i) => !i.synthesisReady,
+    completed: (i) => i.reportReady,
+  },
 ];
 
 const OPTIONAL: { key: PhaseKey; label: string }[] = [
@@ -116,6 +140,8 @@ export function computePhaseStates(
     const done = def.completed(input);
     let status: PhaseStatus;
     if (def.key === "protocol" && input.protocolStatus === "locked") {
+      status = "locked";
+    } else if (def.isLocked?.(input)) {
       status = "locked";
     } else if (done) {
       status = "done";
@@ -164,6 +190,19 @@ export async function loadPhaseStates(reviewId: string): Promise<Phase[]> {
     .eq("review_id", reviewId)
     .in("state", ["accepted", "edited"]);
 
+  const { data: synthesis } = await supabase
+    .from("synthesis")
+    .select("status")
+    .eq("review_id", reviewId)
+    .maybeSingle();
+
+  const { data: reportRow } = await supabase
+    .from("report")
+    .select("status")
+    .eq("review_id", reviewId)
+    .maybeSingle();
+  const reportReady = reportRow?.status === "ready";
+
   return computePhaseStates(reviewId, {
     hasQuestion: (questionCount ?? 0) > 0,
     protocolStatus,
@@ -175,5 +214,7 @@ export async function loadPhaseStates(reviewId: string): Promise<Phase[]> {
     includedFt: counters.includedFt,
     excludedFt: counters.excludedFt,
     extractionRatified: (ratifiedCount ?? 0) > 0,
+    synthesisReady: synthesis?.status === "ready",
+    reportReady,
   });
 }

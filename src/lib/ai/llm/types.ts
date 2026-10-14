@@ -57,6 +57,34 @@ export interface OcrResult {
   text: string; // texto OCR da página, no idioma original (FR-015)
 }
 
+export interface SynthesisFinding {
+  extractionValueId: string; // âncora de grounding (Q3)
+  recordId: string;
+  fieldName: string;
+  value: unknown; // final_value ratificado
+}
+
+export interface ThemeSummary {
+  name: string;
+  narrative: string; // pt-BR
+}
+
+export interface DraftedSection {
+  content: string; // markdown, pt-BR
+  provenance: Provenance;
+}
+
+export interface SynthesizedTheme {
+  name: string;
+  narrative: string; // pt-BR
+  findingRefs: string[]; // extractionValueId[] — nunca vazio
+  provenance: Provenance;
+}
+
+export type SynthesizeThemesResult =
+  | { themes: SynthesizedTheme[] }
+  | { insufficientData: true };
+
 export interface LLMProvider {
   identity(): ProviderIdentity;
 
@@ -95,11 +123,28 @@ export interface LLMProvider {
     pageIndex?: { page: number; char_start: number; char_end: number }[];
   }): Promise<ExtractionResult>;
 
+  /** Agrupa achados ratificados em temas + narrativa pt-BR (US1/FR-001). Grounding
+   *  obrigatório: nenhum tema sem findingRefs. Sem achados ⇒ insufficientData (FR-007). */
+  synthesizeThemes(input: {
+    findings: SynthesisFinding[];
+    language: "pt-BR";
+  }): Promise<SynthesizeThemesResult>;
+
+  /** Rascunha Discussão/Conclusão como ponto de partida editável (D29). pt-BR.
+   *  Texto livre (não é sugestão factual com source_span): provenance OBRIGATÓRIA. */
+  draftReportSection(input: {
+    kind: "discussion" | "conclusion";
+    context: { methods: string; results: string; themes: ThemeSummary[] };
+    language: "pt-BR";
+  }): Promise<DraftedSection>;
+
   /** Estimativa de custo ANTES de lote (FR-022, §VII/P5). */
   estimateCost(
     input:
       | { itemCount: number; kind: "ai_screening_batch" }
-      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number },
+      | { itemCount: number; kind: "ai_extraction_batch"; fieldCount: number }
+      | { itemCount: number; kind: "synthesis_batch" }
+      | { itemCount: number; kind: "report_draft" },
   ): Promise<CostEstimate>;
 }
 
