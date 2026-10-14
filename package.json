@@ -2,6 +2,15 @@
   "name": "cognilit",
   "version": "0.1.0",
   "private": true,
+  "description": "AI-first, human-in-the-loop web app for systematic literature reviews following PRISMA 2020.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cris33rj/cognilit.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -10,6 +19,8 @@
     "typecheck": "tsc --noEmit",
     "gen:types": "supabase gen types typescript --local > src/types/database.ts",
     "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "prepare": "husky"

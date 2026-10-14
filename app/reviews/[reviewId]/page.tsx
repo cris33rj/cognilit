@@ -17,8 +17,8 @@ export default async function ReviewHomePage({
     <section>
       <h1 className="title-serif">{review.title}</h1>
       <p className="mt-2 text-ink-soft">
-        Contexto da Revisão ativa. As fases (Pergunta, Protocolo, Workbench)
-        entram nas próximas fatias.
+        Use o trilho de fases para avançar pela Revisão: da pergunta ao
+        relatório final.
       </p>
       <p className="mt-4">
         <a

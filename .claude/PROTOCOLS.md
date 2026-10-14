@@ -152,9 +152,9 @@ Troca de perfil **sempre** via:
 
 seguido obrigatoriamente de `/exit` da sessão atual e nova invocação do `claude`.
 
-> **Migração:** o perfil `session-c-superpowers` foi renomeado para
-> `session-b-build` e o antigo `session-b-gsd` foi removido. Atualizar
-> `./.claude/scripts/activate-profile.sh` de acordo.
+> **Migração (aplicada):** o perfil `session-c-superpowers` foi renomeado
+> para `session-b-build` e o antigo `session-b-gsd` foi removido;
+> `./.claude/scripts/activate-profile.sh` já reflete isso.
 
 ---
 
