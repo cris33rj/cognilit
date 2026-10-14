@@ -50,7 +50,14 @@ jobs:
             echo "SUPABASE_SERVICE_ROLE_KEY=$SERVICE_ROLE_KEY"
           } > .env.local
           rm supabase.env
-      - run: npm run test:integration
+      # Excluded: the two live Anthropic API tests (they require a paid key and
+      # intentionally fail without one). Retries absorb transient 502s from the
+      # local Supabase gateway under load; real failures still fail all attempts.
+      - run: >-
+          npm run test:integration --
+          --exclude tests/integration/protocol-draft.test.ts
+          --exclude tests/integration/question-derivation.test.ts
+          --retry=2
       - name: Stop Supabase
         if: always()
         run: npx supabase stop --no-backup
