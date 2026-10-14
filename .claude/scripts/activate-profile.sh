@@ -3,7 +3,7 @@
 # Troca o perfil de plugins ativo. Use antes de abrir cada sessão.
 #
 # Uso: ./.claude/scripts/activate-profile.sh <profile-name>
-# Ex:  ./.claude/scripts/activate-profile.sh session-b-gsd
+# Ex:  ./.claude/scripts/activate-profile.sh session-b-build
 
 set -euo pipefail
 
@@ -12,9 +12,8 @@ PROFILE=${1:-}
 if [ -z "$PROFILE" ]; then
   echo "Usage: $0 <profile-name>"
   echo "Available profiles:"
-  echo "  - session-a-discovery  (grill-me + spec-kit)"
-  echo "  - session-b-gsd        (GSD planning)"
-  echo "  - session-c-superpowers (Superpowers TDD execution)"
+  echo "  - session-a-discovery  (grill-me + spec-kit; Superpowers off)"
+  echo "  - session-b-build      (Superpowers: slicing, planning, TDD execution)"
   exit 1
 fi
 
