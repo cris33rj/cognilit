@@ -26,6 +26,9 @@ const nextConfig = {
       "@foliojs-fork/pdfkit",
       "@foliojs-fork/fontkit",
       "@foliojs-fork/linebreak",
+      // citeproc breaks when bundled/minified by webpack (CSL.Engine throws in
+      // addMissingNameNodes), failing the DOCX/PDF exports in production builds.
+      "citeproc",
     ],
   },
 };
